@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NSE EOD Dashboard</title>
-<link rel="stylesheet" href="css/styles.css?v=6">
+<link rel="stylesheet" href="css/styles.css?v=9">
 </head>
 <body>
 
@@ -501,11 +501,24 @@
     <div class="ic-tabbar" id="icTabbar">
       <button id="icTabStocks" class="ic-tab active" onclick="icSwitchTab('stocks')">Stock Charts</button>
       <button id="icTabIndustry" class="ic-tab" onclick="icSwitchTab('industry')">Industry Chart</button>
+      <button id="icTabMoneyFlow" class="ic-tab" onclick="icSwitchTab('moneyflow')">Industry Money Flow Chart</button>
     </div>
     <div class="modal-body ic-modal-body">
       <div id="icGrid" class="ic-grid"></div>
       <div id="icIndustryChartWrap" class="ic-industry-chart-wrap" style="display:none;">
         <div id="icIndustryChartContainer" class="ic-industry-chart-container"></div>
+      </div>
+      <div id="icMoneyFlowWrap" class="ic-industry-chart-wrap" style="display:none;">
+        <div class="ic-mf-toolbar">
+          <span class="ic-mf-toolbar-label" title="Total turnover of the industry's stocks over the last N trading days, compared with the N trading days before that">Money flow vs previous period:</span>
+          <div class="ic-layout-toggle" id="icMfPeriodToggle">
+            <button class="btn btn-secondary ic-layout-btn" data-period="1w" onclick="icSetMfPeriod('1w')">1W</button>
+            <button class="btn btn-secondary ic-layout-btn active" data-period="1m" onclick="icSetMfPeriod('1m')">1M</button>
+            <button class="btn btn-secondary ic-layout-btn" data-period="3m" onclick="icSetMfPeriod('3m')">3M</button>
+            <button class="btn btn-secondary ic-layout-btn" data-period="6m" onclick="icSetMfPeriod('6m')">6M</button>
+          </div>
+        </div>
+        <div id="icMoneyFlowChartContainer" class="ic-industry-chart-container"></div>
       </div>
     </div>
   </div>
@@ -766,7 +779,7 @@
 <script src="js/industry.js?v=9"></script>
 <script src="js/lib/lightweight-charts.standalone.production.js"></script>
 <script src="js/ew-index.js?v=1"></script>
-<script src="js/industry-charts.js?v=11"></script>
+<script src="js/industry-charts.js?v=17"></script>
 <script src="js/data-quality.js?v=3"></script>
 <script src="js/presets.js?v=8"></script>
 <script src="js/ui.js?v=7"></script>
