@@ -193,6 +193,7 @@ function populateMultiPresetList() {
   wrap.innerHTML = names.map(name =>
     `<label class="scr-multi-preset-item"><input type="checkbox" value="${escapeHtml(name)}" ${checkedBefore.has(name) ? 'checked' : ''}> ${escapeHtml(name)}</label>`
   ).join('');
+  updateApplyBtn();
 }
 
 // Runs runScreener() once per selected preset (temporarily applying that
@@ -236,6 +237,17 @@ function runMultiPresetScan() {
 
   applyPresetState(savedState);
 
+  // Filters enabled on the Technicals / Sector & Industry tabs apply on top of the
+  // combined presets: a stock must pass both. Run last, so the dynamic columns shown
+  // in the table reflect the filters currently on screen.
+  let singlePassed = null;
+  const singleFailReasons = new Map();
+  if (anySingleFilterOn()) {
+    runScreener();
+    singlePassed = new Set(screenerPassed.map(s => s.isin));
+    screenerFailed.forEach(s => singleFailReasons.set(s.isin, s._failReasons || []));
+  }
+
   // Combined results still honor whatever's currently typed in the search box,
   // same as a plain runScreener() scan — otherwise typing a symbol after running
   // a combined scan has no visible effect on the (search-blind) combined set.
@@ -246,10 +258,13 @@ function runMultiPresetScan() {
   for (const key in Store.latestBySymbol) {
     const s = Store.latestBySymbol[key];
     if (search && !s.symbol.toUpperCase().includes(search)) continue;
-    if (combined.has(key)) {
+    const failReasons = [];
+    if (!combined.has(key)) failReasons.push(reason);
+    if (singlePassed && !singlePassed.has(key)) failReasons.push(...(singleFailReasons.get(key) || ['Did not pass the enabled filters']));
+    if (failReasons.length === 0) {
       finalPassed.push(s);
     } else {
-      s._failReasons = [reason];
+      s._failReasons = failReasons;
       finalFailed.push(s);
     }
   }
@@ -278,21 +293,12 @@ function runMultiPresetScan() {
 
   if (statusEl) {
     const joiner = mode === 'AND' ? ' AND ' : ' OR ';
-    statusEl.innerHTML = `<span style="color:var(--green)">Active: ${escapeHtml(selected.join(joiner))}</span>`;
+    const extra = singlePassed ? ` + ${singleFilterCount()} filter${singleFilterCount() === 1 ? '' : 's'}` : '';
+    statusEl.innerHTML = `<span style="color:var(--green)">Active: ${escapeHtml(selected.join(joiner))}${extra}</span>`;
   }
 
   updateToggleButton();
   renderScreenerTable();
-  closeScreenerFilters();
-}
-
-function clearMultiPresetScan() {
-  _multiPresetActive = null;
-  const statusEl = document.getElementById('scrMultiStatus');
-  if (statusEl) statusEl.innerHTML = '';
-  const wrap = document.getElementById('scrMultiPresetList');
-  if (wrap) wrap.querySelectorAll('input[type=checkbox]').forEach(cb => { cb.checked = false; });
-  runScreener(); // back to whatever the single-filter tabs currently show
 }
 
 // ── Persist presets (API first, IDB fallback) ──

@@ -78,6 +78,8 @@ function updateSelectedUI() {
     const el = document.getElementById(id);
     if (el) el.textContent = label;
   });
+  // Copy / Clear have nothing to act on until something is selected
+  document.querySelectorAll('.sel-action-btn').forEach(btn => { btn.disabled = n === 0; });
 }
 
 function copySelectedStocksWatchlist() {
