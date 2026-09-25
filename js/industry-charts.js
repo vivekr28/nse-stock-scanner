@@ -9,7 +9,9 @@ let icIndustry = null;
 let icStocks = [];       // stocks in the clicked industry, sorted by market cap desc
 let icPage = 0;
 let icMode = 'industry'; // 'industry' (tabs + grid + pagination) | 'single' (one stock, no tabs/pagination)
-let icActiveTab = 'stocks'; // 'stocks' | 'industry' — only meaningful in 'industry' mode
+let icActiveTab = 'stocks'; // 'stocks' | 'industry' | 'moneyflow' — only meaningful in 'industry' mode
+let icMfChartInst = null;   // Industry Money Flow Chart tab: {chart, series, sizeWatcher}
+let icMfPeriod = '1m';      // '1w' | '1m' | '3m' | '6m'
 let icChartInstances = []; // stock-tab chart instances: [{chart, candleSeries, volumeSeries, smaSeries, closes, candleData}]
 let icIndustryChartInst = null; // single big-chart instance (industry index OR single-stock mode)
 let icSingleList = [];   // the Stock Scanner results the single-stock view was opened from
@@ -26,6 +28,9 @@ const IC_CHART_BG = '#000000';
 const IC_MF_DOT_COLOR = '#9c27b0';
 const IC_MF_DOT_MIN_CR = 40;   // money flow (turnover) threshold, in crores
 const IC_MF_DOT_MIN_CHG = 5;   // day change %, threshold
+const IC_MF_UP_COLOR = '#05df72';   // money flow % above 0
+const IC_MF_DOWN_COLOR = '#ff1616'; // money flow % at or below 0
+const IC_MF_PERIOD_DAYS = { '1w': 5, '1m': 21, '3m': 63, '6m': 126 }; // same window lengths as computeIndustryMoneyFlow
 const IC_VOLUME_SMA_COLOR = '#08c9c2';
 const IC_VOLUME_SMA_HIGH_COLOR = '#00ffda';
 const IC_VOLUME_SMA_HIGH_LOOKBACK = 65; // trading days
@@ -204,6 +209,7 @@ function closeIndustryCharts() {
   document.getElementById('industryChartsModal').classList.remove('active');
   icDisposeCharts();
   icDisposeIndustryChart();
+  icDisposeMoneyFlowChart();
 }
 
 // ── Header control visibility (tabs / grid / pagination / single-stock nav) ──
@@ -217,11 +223,18 @@ function icUpdateControlVisibility() {
   const singleStats = document.getElementById('icSingleStats');
   const singleOhlc = document.getElementById('icSingleOhlc');
   const layoutToggle = document.getElementById('icLayoutToggle');
+  const mfWrap = document.getElementById('icMoneyFlowWrap');
+  const modalBox = document.querySelector('#industryChartsModal .ic-modal-box');
+
+  // The money flow tab has none of the candlestick controls (SMAs, dots, layout,
+  // pagination...), so its header controls are hidden wholesale via this class.
+  if (modalBox) modalBox.classList.toggle('ic-mf-active', icMode !== 'single' && icActiveTab === 'moneyflow');
 
   if (icMode === 'single') {
     tabbar.style.display = 'none';
     grid.style.display = 'none';
     gridPagination.style.display = 'none';
+    if (mfWrap) mfWrap.style.display = 'none';
     bigChartWrap.style.display = '';
     singlePagination.style.display = '';
     if (singleSelect) singleSelect.style.display = '';
@@ -237,7 +250,8 @@ function icUpdateControlVisibility() {
     const showGrid = icActiveTab === 'stocks';
     grid.style.display = showGrid ? '' : 'none';
     gridPagination.style.display = showGrid ? '' : 'none';
-    bigChartWrap.style.display = showGrid ? 'none' : '';
+    bigChartWrap.style.display = icActiveTab === 'industry' ? '' : 'none';
+    if (mfWrap) mfWrap.style.display = icActiveTab === 'moneyflow' ? '' : 'none';
     if (layoutToggle) layoutToggle.style.display = showGrid ? '' : 'none';
   }
 }
@@ -247,14 +261,21 @@ function icSwitchTab(tab) {
   icActiveTab = tab;
   document.getElementById('icTabStocks').classList.toggle('active', tab === 'stocks');
   document.getElementById('icTabIndustry').classList.toggle('active', tab === 'industry');
+  document.getElementById('icTabMoneyFlow').classList.toggle('active', tab === 'moneyflow');
   icUpdateControlVisibility();
 
   if (tab === 'stocks') {
     icDisposeIndustryChart();
+    icDisposeMoneyFlowChart();
     icRenderPage();
+  } else if (tab === 'industry') {
+    icDisposeCharts();
+    icDisposeMoneyFlowChart();
+    icBuildIndustryChart();
   } else {
     icDisposeCharts();
-    icBuildIndustryChart();
+    icDisposeIndustryChart();
+    icBuildMoneyFlowChart();
   }
 }
 
@@ -704,6 +725,129 @@ function icDisposeIndustryChart() {
     try { icIndustryChartInst.chart.remove(); } catch (e) {}
   }
   icIndustryChartInst = null;
+}
+
+// ── Industry Money Flow Chart tab ─────────────────────────────────────────────
+// One point per trading day: the industry's total turnover over the last N
+// trading days vs the N days before that, as a % change - the same definition
+// as the Industry Analysis money flow table (see computeIndustryMoneyFlow /
+// mfPctChange), just evaluated on every day instead of only today. The first
+// point is the first day with a full previous window, so no partial windows
+// distort the start of the line.
+function icComputeIndustryMoneyFlowSeries(stocks, numDays) {
+  const perDate = new Map(); // date -> industry turnover that day
+  stocks.forEach(s => {
+    (Store.dailyBySymbol[s.isin] || []).forEach(d => {
+      perDate.set(d.date, (perDate.get(d.date) || 0) + (d.turnover || 0));
+    });
+  });
+
+  const dates = Store.dates;
+  const prefix = [0]; // prefix[i] = turnover of dates[0..i-1]
+  dates.forEach((dt, i) => { prefix.push(prefix[i] + (perDate.get(dt) || 0)); });
+
+  const data = [], dateByTime = new Map();
+  for (let i = 2 * numDays - 1; i < dates.length; i++) {
+    const cur = prefix[i + 1] - prefix[i + 1 - numDays];
+    const prev = prefix[i + 1 - numDays] - prefix[i + 1 - 2 * numDays];
+    const time = ewToBusinessDay(dates[i]);
+    if (!time) continue;
+    data.push({ time, value: mfPctChange(cur, prev) });
+    dateByTime.set(`${time.year}-${time.month}-${time.day}`, dates[i]);
+  }
+  return { data, dateByTime };
+}
+
+function icBuildMoneyFlowChart() {
+  const container = document.getElementById('icMoneyFlowChartContainer');
+  if (!container || typeof LightweightCharts === 'undefined') return;
+  icDisposeMoneyFlowChart();
+  container.innerHTML = '';
+
+  const numDays = IC_MF_PERIOD_DAYS[icMfPeriod];
+  const { data, dateByTime } = icComputeIndustryMoneyFlowSeries(icStocks, numDays);
+  if (data.length === 0) {
+    container.innerHTML = `<div class="ic-mf-empty">Not enough history for a ${icMfPeriod.toUpperCase()} money flow line (needs ${numDays * 2} trading days).</div>`;
+    return;
+  }
+
+  const styles = getComputedStyle(document.documentElement);
+  const textColor = (styles.getPropertyValue('--text2') || '#94a3b8').trim();
+  const gridColor = (styles.getPropertyValue('--border') || '#334155').trim();
+
+  const chart = LightweightCharts.createChart(container, {
+    layout: { background: { color: IC_CHART_BG }, textColor },
+    grid: { vertLines: { visible: false }, horzLines: { color: gridColor, style: LightweightCharts.LineStyle.Dotted } },
+    rightPriceScale: { borderColor: gridColor },
+    timeScale: { borderColor: gridColor, rightOffset: 4 },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    autoSize: true,
+  });
+
+  // Baseline series split at 0%: the line/fill above it uses the "top" colors
+  // (green), below it the "bottom" colors (red), switching exactly at the crossing.
+  const series = chart.addSeries(LightweightCharts.BaselineSeries, {
+    baseValue: { type: 'price', price: 0 },
+    topLineColor: IC_MF_UP_COLOR,
+    topFillColor1: ewHexToRgba(IC_MF_UP_COLOR, 0.28),
+    topFillColor2: ewHexToRgba(IC_MF_UP_COLOR, 0.02),
+    bottomLineColor: IC_MF_DOWN_COLOR,
+    bottomFillColor1: ewHexToRgba(IC_MF_DOWN_COLOR, 0.02),
+    bottomFillColor2: ewHexToRgba(IC_MF_DOWN_COLOR, 0.28),
+    lineWidth: 2,
+    priceLineVisible: false,
+    priceFormat: { type: 'custom', minMove: 0.01, formatter: v => `${v.toFixed(0)}%` },
+  });
+  series.setData(data);
+  series.createPriceLine({ price: 0, color: textColor, lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: false, title: '' });
+
+  // Show the whole history. The chart may not have its real pixel width yet (the
+  // tab was only just made visible) and would keep a stale bar spacing, so the
+  // range is applied now and once more when the container first has a real size.
+  const showAll = () => chart.timeScale().setVisibleLogicalRange({ from: 0, to: data.length - 1 + 4 });
+  showAll();
+  const sizeWatcher = new ResizeObserver(entries => {
+    if (entries[0].contentRect.width > 0) { showAll(); sizeWatcher.disconnect(); }
+  });
+  sizeWatcher.observe(container);
+
+  container.style.position = container.style.position || 'relative';
+  const legendEl = document.createElement('div');
+  legendEl.className = 'ic-legend';
+  container.appendChild(legendEl);
+
+  const updateLegend = point => {
+    const p = point || data[data.length - 1];
+    const dateStr = dateByTime.get(`${p.time.year}-${p.time.month}-${p.time.day}`) || '';
+    legendEl.innerHTML =
+      `<span>${escapeHtml(icIndustry || '')}</span>` +
+      `<span>${icMfPeriod.toUpperCase()} money flow <b class="${p.value > 0 ? 'positive' : 'negative'}">${fmtPct(p.value)}</b></span>` +
+      `<span>${escapeHtml(dateStr)}</span>`;
+  };
+  updateLegend(null);
+  chart.subscribeCrosshairMove(param => {
+    const point = param.time ? param.seriesData.get(series) : null;
+    updateLegend(point && point.value !== undefined ? { time: param.time, value: point.value } : null);
+  });
+
+  icMfChartInst = { chart, series, sizeWatcher };
+}
+
+function icDisposeMoneyFlowChart() {
+  if (icMfChartInst && icMfChartInst.chart) {
+    try { icMfChartInst.sizeWatcher.disconnect(); } catch (e) {}
+    try { icMfChartInst.chart.remove(); } catch (e) {}
+  }
+  icMfChartInst = null;
+}
+
+function icSetMfPeriod(period) {
+  if (!IC_MF_PERIOD_DAYS[period]) return;
+  icMfPeriod = period;
+  document.querySelectorAll('#icMfPeriodToggle .ic-layout-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.period === period);
+  });
+  icBuildMoneyFlowChart();
 }
 
 // ── SMA toggle (updates existing chart instances without rebuilding them) ────

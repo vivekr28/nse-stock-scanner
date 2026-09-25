@@ -635,6 +635,12 @@ canvas { max-width: 100%; display: block; }
 .ic-modal-body { flex: 1; padding: 12px; min-height: 0; }
 .ic-industry-chart-wrap { height: 100%; display: flex; flex-direction: column; }
 .ic-industry-chart-container { flex: 1; min-height: 0; }
+/* Industry Money Flow Chart tab: period selector row above the chart; the candlestick
+   header controls (SMAs, dots, layout, pagination) don't apply there, so they hide */
+.ic-mf-toolbar { display: flex; align-items: center; gap: 12px; padding: 0 4px 10px; flex-shrink: 0; }
+.ic-mf-toolbar-label { color: var(--text2); font-size: 13px; }
+.ic-mf-empty { color: var(--text2); font-size: 14px; padding: 24px; }
+.ic-mf-active .ic-header-controls { display: none; }
 .ic-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
