@@ -757,6 +757,15 @@ function sortScreener(key) {
   renderScreenerTable();
 }
 
+// Clears only the symbol search box and re-runs the current scan, leaving
+// filters and any active Multi-Preset scan untouched (unlike resetScreener).
+function clearScreenerSearch() {
+  const input = document.getElementById('scrSearch');
+  input.value = '';
+  input.focus();
+  rerunScreenerRespectingMultiPreset();
+}
+
 function resetScreener() {
   document.getElementById('scrF1On').checked = false;
   document.getElementById('scrF2On').checked = false;
@@ -796,6 +805,8 @@ function resetScreener() {
   if (multiStatusEl) multiStatusEl.innerHTML = '';
   const multiListEl = document.getElementById('scrMultiPresetList');
   if (multiListEl) multiListEl.querySelectorAll('input[type=checkbox]').forEach(cb => { cb.checked = false; });
+  const multiAnd = document.querySelector('input[name="scrMultiMode"][value="AND"]');
+  if (multiAnd) multiAnd.checked = true;
   // Reset values to defaults
   document.getElementById('scrF1Mult').value = '3';
   document.getElementById('scrF1Len').value = '50';
@@ -820,16 +831,10 @@ function resetScreener() {
   document.getElementById('scrF9Val').value = '60';
   document.getElementById('scrF9MinStk').value = '3';
   document.getElementById('scrF9MinMcap').value = '0';
-  screenerResults = [];
-  screenerPassed = [];
-  screenerFailed = [];
-  screenerPage = 0;
-  updateToggleButton();
-  document.getElementById('screenerStats').innerHTML = '';
-  document.getElementById('screenerHead').innerHTML = '';
-  document.getElementById('screenerBody').innerHTML = '';
-  document.getElementById('screenerPagination').innerHTML = '';
-  document.getElementById('screenerResultCount').textContent = '';
+  // No preset applies any more: deselect it, then re-scan with no filters so all stocks show.
+  const presetSel = document.getElementById('scrPresetSelect');
+  if (presetSel) presetSel.value = '';
+  runScreener();
   updateFilterBadge();
 }
 
@@ -897,10 +902,13 @@ function copyTvWatchlist() {
     const btn = document.getElementById('tvCopyBtn');
     btn.classList.add('copied');
     btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Copied!';
+    // Leave "Copied!" up briefly as confirmation, then dismiss the popup and
+    // restore the button for next time.
     setTimeout(() => {
+      closeTvModal();
       btn.classList.remove('copied');
       btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg> Copy';
-    }, 2000);
+    }, 800);
   });
 }
 
@@ -914,8 +922,10 @@ function closeTvModal() {
 // scan, otherwise any auto-triggered re-scan (e.g. typing in the search box)
 // would silently discard the combined result.
 function rerunScreenerRespectingMultiPreset() {
-  if (typeof _multiPresetActive !== 'undefined' && _multiPresetActive && typeof runMultiPresetScan === 'function') {
-    runMultiPresetScan();
+  if (typeof _multiPresetActive !== 'undefined' && _multiPresetActive) {
+    // Presets were unticked since the combined scan ran: it no longer applies
+    if (multiPresetsTicked() < 2) { clearMultiPresetState(); runScreener(); }
+    else runMultiPresetScan();
   } else {
     runScreener();
   }
@@ -929,7 +939,7 @@ function rerunScreenerRespectingMultiPreset() {
     const tag = e.target.tagName;
     // Checkboxes used to pick which presets to combine are staged for the
     // explicit "Run Combined Scan" button, not an auto-run trigger.
-    if (e.target.closest && e.target.closest('#scrMultiPresetList')) return;
+    if (e.target.closest && e.target.closest('#scrMultiPresetList')) { updateApplyBtn(); return; }
     if (tag === 'SELECT' || (tag === 'INPUT' && e.target.type === 'checkbox')) {
       clearTimeout(_scrDebounce);
       _scrDebounce = setTimeout(rerunScreenerRespectingMultiPreset, 150);
@@ -955,6 +965,53 @@ function closeScreenerFilters() {
   if (modal) modal.classList.remove('active');
 }
 
+function isMultiTabActive() {
+  const tab = document.getElementById('scrTabMulti');
+  return !!(tab && tab.classList.contains('active'));
+}
+
+// Filters enabled on the Technicals / Sector & Industry tabs (the scrF<n>On switches)
+function singleFilterCount() {
+  return document.querySelectorAll('#scrFiltersModal input[type=checkbox][id^="scrF"][id$="On"]:checked').length;
+}
+
+function anySingleFilterOn() {
+  return singleFilterCount() > 0;
+}
+
+function multiPresetsTicked() {
+  return document.querySelectorAll('#scrMultiPresetList input[type=checkbox]:checked').length;
+}
+
+function clearMultiPresetState() {
+  if (typeof _multiPresetActive !== 'undefined') _multiPresetActive = null;
+  const multiStatusEl = document.getElementById('scrMultiStatus');
+  if (multiStatusEl) multiStatusEl.innerHTML = '';
+}
+
+// Apply & Scan and Reset All act on the filters as a whole, whichever tab is showing.
+// Apply combines every enabled filter with the ticked presets (two or more); with fewer
+// than two presets ticked it just applies the enabled filters.
+function applyScreenerFilters() {
+  if (multiPresetsTicked() >= 2) {
+    runMultiPresetScan();
+  } else {
+    clearMultiPresetState();
+    runScreener();
+  }
+  closeScreenerFilters();
+}
+
+// Enabled when there is something to apply anywhere: an enabled filter on any tab,
+// or two or more ticked presets.
+function updateApplyBtn() {
+  const btn = document.getElementById('scrApplyBtn');
+  if (!btn) return;
+  const canApply = anySingleFilterOn() || multiPresetsTicked() >= 2;
+  btn.disabled = !canApply;
+  btn.title = canApply ? '' : 'Enable a filter or tick at least two presets to scan';
+}
+
 function updateFilterBadge() {
   const techIds = ['scrF1On','scrF2On','scrF3On','scrF4On','scrF5On','scrF6On','scrF7On','scrF8On','scrF10On','scrF15On','scrF16On'];
   const indIds  = ['scrF9On','scrF11On','scrF12On','scrF13On','scrF14On'];
@@ -969,6 +1026,8 @@ function updateFilterBadge() {
     badge.textContent = total;
     badge.style.display = total > 0 ? '' : 'none';
   }
+
+  updateApplyBtn();
 
   const techBadge = document.getElementById('scrTabTechCount');
   if (techBadge) {
@@ -1001,4 +1060,5 @@ function switchFilterTab(tab) {
   multiTab.classList.toggle('active', tab === 'multi');
 
   if (tab === 'multi' && typeof populateMultiPresetList === 'function') populateMultiPresetList();
+  updateApplyBtn();
 }
