@@ -1,0 +1,6 @@
+NSE_DATA/
+__pycache__/
+*.pyc
+*.bak
+.claude/settings.local.json
+.claude/scheduled_tasks.lock

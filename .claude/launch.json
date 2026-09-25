@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "nse-dashboard",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["nse_server.py"],
+      "port": 8765
+    }
+  ]
+}

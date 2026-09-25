@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NSE EOD Dashboard</title>
+<link rel="stylesheet" href="css/styles.css?v=2">
+</head>
+<body>
+
+<!-- TV Watchlist Modal -->
+<div class="modal-overlay" id="tvModal" onclick="if(event.target===this)closeTvModal()">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>TradingView Watchlist</h3>
+      <div class="modal-actions">
+        <button class="modal-copy-btn" id="tvCopyBtn" onclick="copyTvWatchlist()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+          Copy
+        </button>
+        <button class="modal-close-btn" onclick="closeTvModal()" title="Close">&times;</button>
+      </div>
+    </div>
+    <div class="modal-body">
+      <pre id="tvModalContent"></pre>
+    </div>
+    <div class="modal-footer" id="tvModalFooter"></div>
+  </div>
+</div>
+
+<!-- Data Files Modal (latest downloaded files + dates) -->
+<div class="modal-overlay" id="dataFilesModal" onclick="if(event.target===this)closeDataFiles()">
+  <div class="modal-box" style="max-width:760px;">
+    <div class="modal-header">
+      <h3>Data Files</h3>
+      <div class="modal-actions">
+        <button class="modal-close-btn" onclick="closeDataFiles()" title="Close">&times;</button>
+      </div>
+    </div>
+    <div class="modal-body" id="dataFilesBody" style="padding:16px 18px;overflow:auto;">Loading&hellip;</div>
+  </div>
+</div>
+
+<div class="header">
+  <h1>NSE EOD Dashboard</h1>
+  <div class="status">
+    Stocks: <span class="count" id="totalStocks">0</span> |
+    Trading Days: <span class="count" id="totalDays">0</span> |
+    Latest: <span class="count" id="latestDate">-</span>
+  </div>
+  <button class="btn btn-secondary" style="margin-left:auto;font-size:12px;padding:6px 14px;" onclick="openDataFiles()" title="Latest downloaded bhavcopy / price band dates and reference file update times">Data Files</button>
+  <button class="btn btn-primary" style="margin-left:8px;font-size:12px;padding:6px 14px;" onclick="location.href='reprocess.html?refresh=1'" title="Download any new data from NSE, reprocess it, then reload the dashboard">Refresh Data</button>
+  <button class="btn btn-secondary" style="margin-left:8px;font-size:12px;padding:6px 14px;" onclick="location.href='reprocess.html'" title="Re-run the server's CSV -&gt; JSON processing pipeline (splits/bonuses, indicators, indices) without re-downloading data">Reprocess Data</button>
+</div>
+
+<!-- Loading progress (shown during auto-fetch from server) -->
+<div id="loaderSection" class="panel" style="display:none;">
+  <div class="loader-bar">
+    <div class="info" id="loadStatus">Connecting to server...</div>
+    <div class="progress-wrap" id="progressWrap">
+      <div class="progress-label" id="progressLabel">Loading...</div>
+      <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+      <div class="progress-detail" id="progressDetail"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Tab bar (hidden until data loaded) -->
+<div id="tabBar" class="tabs hidden">
+  <div class="tab active" data-tab="screener">Stock Scanner</div>
+  <div class="tab" data-tab="scanner">Stocks</div>
+  <div class="tab" data-tab="breadth">Market Breadth</div>
+  <div class="tab" data-tab="sector">Sector Analysis</div>
+  <div class="tab" data-tab="industry">Industry Analysis</div>
+  <div class="tab" data-tab="ewindex" style="display:none;">EW Index</div>
+  <div class="tab" data-tab="dataquality">Data Quality</div>
+</div>
+
+<!-- Scanner Panel -->
+<div id="panel-scanner" class="panel">
+  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;margin-bottom:10px;overflow:hidden;" id="scannerFiltersWrap">
+    <div style="padding:8px 14px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none;" onclick="toggleScannerFilters()">
+      <h3 style="font-size:13px;color:var(--accent);margin:0;" id="scannerFilterTitle">Filters</h3>
+      <span style="font-size:18px;color:var(--text2);transition:transform .2s;" id="scannerFilterArrow">&#9650;</span>
+    </div>
+    <div id="scannerFiltersBody" style="padding:0 14px 10px 14px;">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;margin-bottom:10px;">
+        <div class="filter-group">
+          <label>Search Symbol</label>
+          <input type="text" class="search-box" id="searchSymbol" placeholder="e.g. RELIANCE" oninput="runScanner()" style="width:100%;box-sizing:border-box;">
+        </div>
+        <div class="filter-group">
+          <label>Scan Type</label>
+          <select id="scanType" onchange="runScanner()" style="width:100%;">
+            <option value="all">All Stocks (Latest)</option>
+            <option value="uc_hit">Upper Circuit Hitters</option>
+            <option value="lc_hit">Lower Circuit Hitters</option>
+            <option value="high_turnover">High Turnover (Top 50)</option>
+            <option value="high_adr">High ADR % (Top 50)</option>
+            <option value="near_52w_high">Near 52W High (&lt;5%)</option>
+            <option value="near_52w_low">Near 52W Low (&lt;5%)</option>
+            <option value="above_20sma">Above 20 SMA</option>
+            <option value="below_20sma">Below 20 SMA</option>
+            <option value="near_20sma">Near 20 SMA (±2%)</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label>Sector</label>
+          <select id="filterSector" onchange="populateIndustryFilter(); runScanner()" style="width:100%;">
+            <option value="ALL">All Sectors</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label>Industry</label>
+          <select id="filterIndustry" onchange="runScanner()" style="width:100%;">
+            <option value="ALL">All Industries</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label>Min Turnover (Cr)</label>
+          <input type="number" id="minTurnover" value="0" min="0" step="1" oninput="runScanner()" style="width:100%;box-sizing:border-box;">
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-primary" onclick="runScanner()">Scan</button>
+        <button class="btn btn-secondary" onclick="resetFilters()">Reset</button>
+        <button class="btn btn-secondary export-btn" onclick="exportCSV()">Export CSV</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="stats-row" id="scannerStats"></div>
+  <div id="scannerResultCount" style="font-size:12px; color:var(--text2); margin-bottom:8px;"></div>
+  <div class="table-wrap">
+    <table id="scannerTable">
+      <thead><tr id="scannerHead"></tr></thead>
+      <tbody id="scannerBody"></tbody>
+    </table>
+  </div>
+  <div class="pagination" id="scannerPagination"></div>
+</div>
+
+<!-- Stock Scanner Panel (Advanced Filters) -->
+<div id="panel-screener" class="panel">
+
+  <!-- Screener Toolbar -->
+  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 16px;margin-bottom:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+    <button class="btn btn-primary" onclick="openScreenerFilters()" style="display:flex;align-items:center;gap:6px;font-size:14px;padding:8px 16px;" title="Open Filters">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+      Filters <span id="scrActiveFilterBadge" style="background:var(--accent);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;font-weight:700;display:none;">0</span>
+    </button>
+    <div class="filter-group" style="margin:0;">
+      <input type="text" class="search-box" id="scrSearch" placeholder="Search symbol..." style="min-width:160px;">
+    </div>
+    <button class="btn btn-primary" onclick="runScreener()">Scan</button>
+    <button class="btn btn-secondary" onclick="resetScreener()">Reset</button>
+    <button class="btn btn-secondary export-btn" onclick="exportScreenerCSV()">Export CSV</button>
+    <button class="btn btn-secondary export-btn" onclick="exportTradingViewWatchlist()" title="Copy TradingView watchlist to clipboard">TV Watchlist</button>
+    <button class="btn btn-secondary scr-toggle-btn showing-passed" id="scrToggleView" onclick="togglePassedFailed()">Showing Passed — Click for Failed</button>
+    <span style="width:1px;align-self:stretch;background:var(--border);"></span>
+    <button class="btn btn-secondary export-btn" onclick="copySelectedStocksWatchlist()" title="Copy stocks picked in chart popups, grouped by industry">Copy Selected</button>
+    <button class="btn btn-secondary" onclick="clearSelectedStocks()">Clear Selected</button>
+    <span id="selCountLabelScreener" style="font-size:12px;color:var(--text2);">0 stocks selected</span>
+
+  </div>
+
+  <!-- Screener Filters Modal -->
+  <div id="scrFiltersModal" class="modal-overlay" onclick="if(event.target===this)closeScreenerFilters()">
+    <div class="modal-box" style="width:96%;max-width:1400px;max-height:90vh;">
+      <div class="modal-header scr-modal-head" style="flex-wrap:wrap;gap:8px 16px;">
+        <h3 style="display:flex;align-items:center;gap:10px;margin-right:auto;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+          Stock Scanner — AND Filters
+        </h3>
+        <div class="scr-preset-bar">
+          <select id="scrPresetSelect" onchange="loadPreset()">
+            <option value="">— Select preset —</option>
+          </select>
+          <button class="btn btn-primary" onclick="savePresetPrompt()" style="font-size:12px;padding:4px 14px;">Save</button>
+          <button class="btn btn-secondary" onclick="editPresetPrompt()" style="font-size:12px;padding:4px 12px;">Rename</button>
+          <button class="btn btn-secondary" onclick="deletePreset()" style="font-size:12px;padding:4px 12px;color:var(--red);">Delete</button>
+        </div>
+        <button class="modal-close-btn" onclick="closeScreenerFilters()" title="Close">&times;</button>
+      </div>
+      <div class="modal-body" style="padding:0;overflow:auto;max-height:calc(90vh - 130px);">
+        <div id="screenerFiltersBody">
+
+        <!-- Tab bar -->
+        <div class="scr-filter-tabbar">
+          <button id="scrTabTechnicals" class="scr-filter-tab active" onclick="switchFilterTab('technicals')">Technicals<span id="scrTabTechCount" class="scr-tab-count"></span></button>
+          <button id="scrTabIndustry" class="scr-filter-tab" onclick="switchFilterTab('industry')">Sector & Industry<span id="scrTabIndCount" class="scr-tab-count"></span></button>
+          <button id="scrTabMulti" class="scr-filter-tab" onclick="switchFilterTab('multi')">Multi-Preset<span id="scrTabMultiCount" class="scr-tab-count"></span></button>
+        </div>
+
+        <!-- ═══ Technicals Tab ═══ -->
+        <div id="scrPaneTechnicals" class="scr-filter-pane">
+          <div class="scr-filters-list">
+            <div class="scr-tech-col">
+            <!-- F10: Close Above Moving Averages -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF10On">
+              <span class="scr-label">Price Above:</span>
+              <div class="scr-inputs">
+                <div class="scr-cb-group">
+                  <label><input type="checkbox" id="scrF10_20sma" checked> 20 SMA</label>
+                  <label><input type="checkbox" id="scrF10_50sma"> 50 SMA</label>
+                  <label><input type="checkbox" id="scrF10_200sma"> 200 SMA</label>
+                  <label><input type="checkbox" id="scrF10_200ema"> 200 EMA</label>
+                </div>
+              </div>
+            </div>
+
+            <!-- F2: SMA Turnover > value -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF2On">
+              <span class="scr-label">Avg Turnover:</span>
+              <div class="scr-inputs">
+                <input type="number" id="scrF2Len" value="50" min="5" step="1"> <span class="scr-unit">Days &gt;</span>
+                <input type="number" id="scrF2Val" value="1" min="0" step="0.5"> <span class="scr-unit">Cr</span>
+              </div>
+            </div>
+
+            <!-- F5: Close % from 52W High (range) -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF5On">
+              <span class="scr-label">% from 52W High Range:</span>
+              <div class="scr-inputs">
+                <input type="number" id="scrF5Min" value="0" step="1"> <span class="scr-unit">-</span>
+                <input type="number" id="scrF5Max" value="10" step="1">
+              </div>
+            </div>
+
+            <!-- F8: Price / SMA proximity -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF8On">
+              <span class="scr-label">Close/SMA:</span>
+              <div class="scr-inputs">
+                <span class="scr-unit">Price ×</span>
+                <input type="number" id="scrF8Min" value="0.97" step="0.01" style="width:70px;"> <span class="scr-unit">&lt;</span>
+                <input type="number" id="scrF8Len" value="50" min="5" step="1"> <span class="scr-unit">SMA &lt;</span>
+                <input type="number" id="scrF8Max" value="1.10" step="0.01" style="width:70px;"> <span class="scr-unit">× Price</span>
+              </div>
+            </div>
+
+            <!-- F4: Co-occurrence (main row + sub row grouped so the grid treats them as one cell) -->
+            <div class="scr-filter-pair">
+              <div class="scr-filter-row scr-highlight">
+                <input type="checkbox" id="scrF4On">
+                <div class="scr-inputs">
+                  <span class="scr-inline-label">Day Chg &gt;</span> <input type="number" id="scrF4Val" value="2" step="0.5" style="width:55px;"> <span class="scr-unit">%</span>
+                  <span class="scr-unit" style="font-weight:600;color:var(--accent);">AND</span>
+                  <span class="scr-inline-label">T/O &gt;</span> <input type="number" id="scrF4Mult" value="3" min="1" step="0.5" style="width:50px;"> <span class="scr-unit">×</span>
+                  <input type="number" id="scrF4SmaLen" value="50" min="5" step="1" style="width:50px;"> <span class="scr-unit">Day Avg Turnover</span>
+                </div>
+              </div>
+              <div class="scr-filter-row scr-sub">
+                <span class="scr-unit">Both on same day, at least</span>
+                <input type="number" id="scrF4MinTimes" value="1" min="1" step="1" style="width:45px;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-size:14px;text-align:center;">
+                <span class="scr-unit">time(s) in last</span>
+                <input type="number" id="scrF4Lookback" value="10" min="1" step="1" style="width:55px;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-size:14px;text-align:center;">
+                <span class="scr-unit">trading days</span>
+              </div>
+            </div>
+            </div>
+
+            <div class="scr-tech-col">
+            <!-- F1: Turnover > N × SMA Turnover -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF1On">
+              <span class="scr-label">Turnover:</span>
+              <div class="scr-inputs">
+                <span class="scr-unit">&gt;</span>
+                <input type="number" id="scrF1Mult" value="3" min="1" step="0.5"> <span class="scr-unit">×</span>
+                <input type="number" id="scrF1Len" value="50" min="5" step="1"> <span class="scr-unit">Day Avg Turnover</span>
+              </div>
+            </div>
+
+            <!-- F3: Current Turnover > value -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF3On">
+              <span class="scr-label">Turnover &gt;:</span>
+              <div class="scr-inputs">
+                <input type="number" id="scrF3Val" value="5" min="0" step="0.5"> <span class="scr-unit">Cr</span>
+              </div>
+            </div>
+
+            <!-- F6: ADR > value -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF6On">
+              <span class="scr-label">ADR%:</span>
+              <div class="scr-inputs">
+                <input type="number" id="scrF6Len" value="50" min="5" step="1"> <span class="scr-unit">Days ADR% &gt;</span>
+                <input type="number" id="scrF6Val" value="3" min="0" step="0.5">
+              </div>
+            </div>
+
+            <!-- F7: Exclude circuit stocks -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF7On">
+              <span class="scr-label">Exclude Circuits:</span>
+              <div class="scr-inputs">
+                <div class="scr-cb-group">
+                  <label><input type="checkbox" id="scrF7_2" checked> 2%</label>
+                  <label><input type="checkbox" id="scrF7_5" checked> 5%</label>
+                  <label><input type="checkbox" id="scrF7_10" checked> 10%</label>
+                </div>
+              </div>
+            </div>
+
+            <!-- F15: Performance (price change over period) -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF15On">
+              <span class="scr-label">Performance:</span>
+              <div class="scr-inputs">
+                <select id="scrF15Period" style="min-width:70px;">
+                  <option value="1d">1D</option>
+                  <option value="1w">1W</option>
+                  <option value="1m" selected>1M</option>
+                  <option value="3m">3M</option>
+                  <option value="6m">6M</option>
+                  <option value="1y">1Y</option>
+                </select>
+                <span class="scr-unit">&ge;</span>
+                <input type="number" id="scrF15Val" value="0" step="5" style="width:70px;"> <span class="scr-unit">%</span>
+              </div>
+            </div>
+
+            <!-- F16: % change between two chosen dates, each on a chosen O/H/L/C field -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF16On">
+              <span class="scr-label">% Change:</span>
+              <div class="scr-inputs">
+                <span class="scr-unit">From</span>
+                <input type="date" id="scrF16FromDate">
+                <select id="scrF16FromField">
+                  <option value="open">Open</option>
+                  <option value="high">High</option>
+                  <option value="low">Low</option>
+                  <option value="close" selected>Close</option>
+                </select>
+                <span class="scr-unit">to</span>
+                <input type="date" id="scrF16ToDate">
+                <select id="scrF16ToField">
+                  <option value="open">Open</option>
+                  <option value="high">High</option>
+                  <option value="low">Low</option>
+                  <option value="close" selected>Close</option>
+                </select>
+                <span class="scr-unit">&ge;</span>
+                <input type="number" id="scrF16Val" value="0" step="5" style="width:70px;"> <span class="scr-unit">%</span>
+              </div>
+            </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- ═══ Sector & Industry Tab ═══ -->
+        <div id="scrPaneIndustry" class="scr-filter-pane" style="display:none;">
+          <div class="scr-filters-list">
+
+            <!-- F11: Sector filter -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF11On">
+              <span class="scr-label">Sector:</span>
+              <div class="scr-inputs">
+                <select id="scrF11Sector" style="min-width:180px;">
+                  <option value="">All Sectors</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- F9: Industry RS filter -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF9On">
+              <span class="scr-label">Industry RS Score &ge;:</span>
+              <div class="scr-inputs">
+                <input type="number" id="scrF9Val" value="60" min="0" max="100" step="5">
+                <span class="scr-unit">Min Stocks:</span> <input type="number" id="scrF9MinStk" value="3" min="1" step="1" style="width:50px;">
+                <span class="scr-unit">Min MCap(Cr):</span> <input type="number" id="scrF9MinMcap" value="0" min="0" step="100" style="width:80px;">
+              </div>
+            </div>
+
+            <!-- F13: Min Stocks in Industry (standalone) -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF13On">
+              <span class="scr-label">Min Stocks in Industry &ge;:</span>
+              <div class="scr-inputs">
+                <input type="number" id="scrF13Val" value="3" min="1" step="1" style="width:60px;">
+              </div>
+            </div>
+
+            <!-- F14: Min Industry Market Cap (standalone) -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF14On">
+              <span class="scr-label">Min Industry MCap(Cr) &ge;:</span>
+              <div class="scr-inputs">
+                <input type="number" id="scrF14Val" value="0" min="0" step="100" style="width:100px;">
+              </div>
+            </div>
+
+            <!-- F12: Industry Money Flow filter -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF12On">
+              <span class="scr-label">Industry Money Flow:</span>
+              <div class="scr-inputs">
+                <select id="scrF12Period" style="min-width:80px;">
+                  <option value="1w">1 Week</option>
+                  <option value="1m">1 Month</option>
+                  <option value="3m">3 Months</option>
+                  <option value="6m" selected>6 Months</option>
+                  <option value="1y">12 Months</option>
+                </select>
+                <span class="scr-unit">&gt;</span>
+                <input type="number" id="scrF12Val" value="0" step="5" style="width:60px;">
+                <span class="scr-unit">%</span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- ═══ Multi-Preset Tab: run several saved presets combined ═══ -->
+        <div id="scrPaneMulti" class="scr-filter-pane" style="display:none;">
+          <div class="scr-multi-wrap">
+            <p style="color:var(--text2);font-size:12px;margin:0 0 10px;">Run two or more saved presets together and combine their results — the single-filter tabs above are ignored while this runs.</p>
+            <div class="scr-multi-mode">
+              <label><input type="radio" name="scrMultiMode" value="AND" checked> <b>AND</b> — stock must pass every checked preset</label>
+              <label><input type="radio" name="scrMultiMode" value="OR"> <b>OR</b> — stock passes if it matches any checked preset</label>
+            </div>
+            <div id="scrMultiPresetList" class="scr-multi-preset-list"></div>
+            <div class="scr-multi-actions">
+              <button class="btn btn-primary" onclick="runMultiPresetScan()">Run Combined Scan</button>
+              <button class="btn btn-secondary" onclick="clearMultiPresetScan()">Clear</button>
+            </div>
+            <div id="scrMultiStatus" class="scr-multi-status"></div>
+          </div>
+        </div>
+
+        </div><!-- end screenerFiltersBody -->
+
+        <!-- Modal footer with Scan/Reset + Partial history -->
+        <div class="scr-modal-footer">
+          <button class="btn btn-primary" onclick="runScreener(); closeScreenerFilters()" style="font-size:14px;padding:9px 26px;">Apply & Scan</button>
+          <button class="btn btn-secondary" onclick="resetScreener()">Reset All</button>
+          <label style="margin-left:auto;font-size:13px;color:var(--text2);cursor:pointer;display:flex;align-items:center;gap:5px;" title="For newly listed stocks with insufficient price history, calculate indicators using available data (min 5 bars) instead of rejecting them">
+            <input type="checkbox" id="scrAllowPartial" checked style="width:16px;height:16px;"> Partial history
+          </label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="stats-row" id="screenerStats"></div>
+  <div id="screenerResultCount" style="font-size:12px;color:var(--text2);margin-bottom:8px;"></div>
+  <div class="table-wrap">
+    <table id="screenerTable">
+      <thead><tr id="screenerHead"></tr></thead>
+      <tbody id="screenerBody"></tbody>
+    </table>
+  </div>
+  <div class="pagination" id="screenerPagination"></div>
+</div>
+
+<!-- Industry Charts Modal (full-screen 2x2 candlestick grid) — top-level so it isn't
+     hidden when a `.panel` other than Stock Scanner is the active tab -->
+<div class="modal-overlay" id="industryChartsModal" onclick="if(event.target===this)closeIndustryCharts()">
+  <div class="modal-box ic-modal-box">
+    <div class="modal-header">
+      <div class="ic-title-wrap">
+        <div class="ic-title-line1">
+          <label id="icSingleSelectWrap" class="ic-cell-select" style="display:none;"><input type="checkbox" id="icSingleSelectCb"></label>
+          <h3 id="icTitle">Industry Charts</h3>
+          <span id="icSingleOhlc" class="ic-cell-ohlc" style="display:none;"></span>
+        </div>
+        <div id="icSingleStats" class="ic-cell-line2" style="display:none;"></div>
+      </div>
+      <div class="ic-header-controls">
+        <label><input type="checkbox" id="icSMA10"> 10 SMA</label>
+        <label><input type="checkbox" id="icSMA20" checked> 20 SMA</label>
+        <label><input type="checkbox" id="icSMA50"> 50 SMA</label>
+        <label title="Purple dot below the candle's low on any day with Money Flow >= 40 Cr and |change%| >= 5% (up or down)"><input type="checkbox" id="icShowMFDots" checked> Purple Dots</label>
+        <label><input type="checkbox" id="icPctMode"> % Change</label>
+        <label><input type="checkbox" id="icShowADR" checked> 50D ADR</label>
+        <label><input type="checkbox" id="icShowAvgMF" checked> 50D Avg MF</label>
+        <label title="Click a start point, then click an end point to measure % change, price change, and trading days between them"><input type="checkbox" id="icMeasureMode"> Measure</label>
+        <span id="icSelectedBadge" style="color:var(--text2);font-size:12px;">0 stocks selected</span>
+        <div class="ic-layout-toggle" id="icLayoutToggle">
+          <button class="btn btn-secondary ic-layout-btn active" id="icLayout2x2Btn" onclick="icSetLayout('2x2')" title="2x2 grid">2×2</button>
+          <button class="btn btn-secondary ic-layout-btn" id="icLayout1x1Btn" onclick="icSetLayout('1x1')" title="Single chart">1×1</button>
+        </div>
+        <div class="ic-pagination" id="icPaginationWrap">
+          <button class="btn btn-secondary" id="icPrevBtn" onclick="icPrevPage()">&lt; Prev</button>
+          <span id="icPageInfo"></span>
+          <button class="btn btn-secondary" id="icNextBtn" onclick="icNextPage()">Next &gt;</button>
+        </div>
+        <div class="ic-pagination" id="icSinglePaginationWrap" style="display:none;">
+          <button class="btn btn-secondary" id="icSinglePrevBtn" onclick="icPrevStock()">&lt; Prev</button>
+          <span id="icSinglePageInfo"></span>
+          <button class="btn btn-secondary" id="icSingleNextBtn" onclick="icNextStock()">Next &gt;</button>
+        </div>
+      </div>
+      <button class="modal-close-btn" onclick="closeIndustryCharts()" title="Close">&times;</button>
+    </div>
+    <div class="ic-tabbar" id="icTabbar">
+      <button id="icTabStocks" class="ic-tab active" onclick="icSwitchTab('stocks')">Stock Charts</button>
+      <button id="icTabIndustry" class="ic-tab" onclick="icSwitchTab('industry')">Industry Chart</button>
+    </div>
+    <div class="modal-body ic-modal-body">
+      <div id="icGrid" class="ic-grid"></div>
+      <div id="icIndustryChartWrap" class="ic-industry-chart-wrap" style="display:none;">
+        <div id="icIndustryChartContainer" class="ic-industry-chart-container"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Breadth Panel -->
+<div id="panel-breadth" class="panel">
+  <div class="stats-row" id="breadthStats"></div>
+  <div class="brd-tabbar" id="brdTabbar">
+    <button class="brd-tab active" data-tab="above20" onclick="brdSwitchTab('above20')">Above 20 SMA</button>
+    <button class="brd-tab" data-tab="above50" onclick="brdSwitchTab('above50')">Above 50 SMA</button>
+    <button class="brd-tab" data-tab="move4d" onclick="brdSwitchTab('move4d')">4%+ Move (Day)</button>
+    <button class="brd-tab" data-tab="move10w" onclick="brdSwitchTab('move10w')">10%+ Move (Week)</button>
+    <button class="brd-tab" data-tab="move20m" onclick="brdSwitchTab('move20m')">20%+ Move (Month)</button>
+  </div>
+  <div class="chart-container brd-chart-container">
+    <div class="ic-title-line1" style="margin-bottom:2px;">
+      <h3 id="brdChartTitle" style="margin:0;">% Stocks Above 20 SMA</h3>
+      <span id="brdChartOhlc" class="ic-cell-ohlc"></span>
+    </div>
+    <div id="brdUniverseNote" class="ic-cell-line2" style="margin-bottom:6px;"></div>
+    <div id="brdChartContainer" class="brd-chart"></div>
+  </div>
+</div>
+
+<!-- Sector Panel -->
+<div id="panel-sector" class="panel">
+  <div class="filters">
+    <div class="filter-group">
+      <label>Sort By</label>
+      <select id="sectorSort" onchange="renderSectorAnalysis()">
+        <option value="avg_change">Avg % Change</option>
+        <option value="breadth">Breadth (% above 20 SMA)</option>
+        <option value="turnover">Total Turnover</option>
+        <option value="stocks">Stock Count</option>
+      </select>
+    </div>
+    <button class="btn btn-primary" onclick="renderSectorAnalysis()">Apply</button>
+  </div>
+  <div style="margin-top:14px;">
+    <div class="table-wrap">
+      <table id="sectorTable">
+        <thead><tr id="sectorHead"></tr></thead>
+        <tbody id="sectorBody"></tbody>
+      </table>
+    </div>
+  </div>
+  <div style="margin-top:16px;">
+    <h3 style="font-size:14px; margin-bottom:12px;">Sector Heatmap</h3>
+    <div class="sector-grid" id="sectorGrid"></div>
+  </div>
+</div>
+
+<!-- Industry Analysis Panel -->
+<div id="panel-industry" class="panel">
+  <div class="filters" style="flex-wrap:wrap;">
+    <div class="filter-group">
+      <label>Min Stocks</label>
+      <input type="number" id="indMinStocks" oninput="renderIndustryAnalysis()" value="3" style="width:70px;">
+    </div>
+    <div class="filter-group">
+      <label>Min Market Cap (Cr)</label>
+      <input type="number" id="indMinMcap" oninput="renderIndustryAnalysis()" value="0" style="width:110px;">
+    </div>
+    <div class="filter-group">
+      <label>Sort By</label>
+      <select id="industrySort" onchange="renderIndustryAnalysis()">
+        <option value="rs_score">Relative Strength Score</option>
+        <option value="avg_change">Avg Monthly Change %</option>
+        <option value="breadth">Breadth (% above 20 SMA)</option>
+        <option value="mcap">Market Cap</option>
+        <option value="turnover">Total Turnover</option>
+        <option value="avg_dist52h">Avg Dist from 52W High</option>
+        <option value="stocks">Stock Count</option>
+        <option value="money_flow">Money Flow</option>
+      </select>
+    </div>
+    <div class="filter-group" id="mfPeriodGroup" style="display:none;">
+      <label>Money Flow Period</label>
+      <select id="moneyFlowPeriod" onchange="renderIndustryAnalysis()">
+        <option value="1w">Last 1 Week</option>
+        <option value="1m">Last 1 Month</option>
+        <option value="3m">Last 3 Months</option>
+        <option value="6m" selected>Last 6 Months</option>
+        <option value="1y">Last 1 Year</option>
+      </select>
+    </div>
+    <div id="mfAllPeriodsGroup" style="display:none;align-self:center;">
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);font-weight:400;cursor:pointer;white-space:nowrap;">
+        <input type="checkbox" id="mfAllPeriodsToggle" onchange="renderIndustryAnalysis()"> All-periods table
+      </label>
+    </div>
+  </div>
+
+  <!-- Selected-stocks toolbar (picks made from the chart popups opened via industry/heatmap clicks below) -->
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+    <button class="btn btn-secondary export-btn" onclick="copySelectedStocksWatchlist()" title="Copy stocks picked in chart popups, grouped by industry">Copy Selected</button>
+    <button class="btn btn-secondary" onclick="clearSelectedStocks()">Clear Selected</button>
+    <span id="selCountLabelIndustry" style="font-size:12px;color:var(--text2);">0 stocks selected</span>
+  </div>
+
+  <!-- RS Summary Cards -->
+  <div class="stats-row" id="industryStats" style="margin-top:12px;">
+    <div class="stat-card">
+      <div class="stat-label">INDUSTRIES SHOWN</div>
+      <div class="stat-val" id="indCount">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">TOTAL STOCKS</div>
+      <div class="stat-val" id="indStockCount">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">TOTAL MARKET CAP</div>
+      <div class="stat-val" id="indTotalMcap">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">AVG BREADTH</div>
+      <div class="stat-val" id="indAvgBreadth">0%</div>
+    </div>
+  </div>
+
+  <!-- RS Chart (hidden — replaced by the Money Flow all-periods table below — when
+       the "All-periods table" checkbox is ticked) -->
+  <div id="rsChartSection" style="margin-top:16px;">
+    <h3 id="industryChartTitle" style="font-size:14px; margin-bottom:4px; cursor:help;" title="">Industry Relative Strength</h3>
+      <p id="industryChartTip" style="font-size:11px; color:var(--text2); margin:0 0 10px 0;"></p>
+    <div id="rsChartWrap" style="overflow-x:auto;">
+      <canvas id="rsChart" height="400"></canvas>
+    </div>
+  </div>
+
+  <!-- Money Flow — All Periods (shown in place of the RS Chart above) -->
+  <div id="mfAllPeriodsSection" style="display:none;margin-top:16px;">
+    <h3 style="font-size:14px; margin-bottom:10px;">Money Flow — All Periods (Cr)</h3>
+    <div class="table-wrap">
+      <table id="mfAllPeriodsTable">
+        <thead><tr id="mfAllPeriodsHead"></tr></thead>
+        <tbody id="mfAllPeriodsBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Industry Table -->
+  <div style="margin-top:16px;">
+    <h3 style="font-size:14px; margin-bottom:10px;">Industry Breakdown</h3>
+    <div class="table-wrap">
+      <table id="industryTable">
+        <thead><tr id="industryHead"></tr></thead>
+        <tbody id="industryBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Industry Heatmap -->
+  <div style="margin-top:16px;">
+    <h3 style="font-size:14px; margin-bottom:12px;">Industry Heatmap (by RS Score)</h3>
+    <div class="sector-grid" id="industryGrid"></div>
+  </div>
+</div>
+
+<!-- Equal-Weight MidSmallcap 400 Index Panel -->
+<div id="panel-ewindex" class="panel">
+  <div class="ew-controls">
+    <span class="ew-title">Nifty MidSmallcap 400 — Equal Weight Index</span>
+    <label><input type="checkbox" id="ewMA20"> 20 SMA</label>
+    <label><input type="checkbox" id="ewMA50"> 50 SMA</label>
+    <label><input type="checkbox" id="ewMA200"> 200 SMA</label>
+    <span id="ewConstituentInfo" class="ew-info"></span>
+  </div>
+  <div id="ewChartContainer"></div>
+</div>
+
+<!-- Data Quality Panel -->
+<div id="panel-dataquality" class="panel">
+  <div class="card" style="margin-bottom:16px;">
+    <h3 style="margin-bottom:12px;">Data Quality Report</h3>
+    <p style="color:var(--text2);margin-bottom:12px;">Stocks with missing or mismatched data across Bhavcopy, Price Band, and Sector Mapping files.</p>
+    <div class="stats-grid" style="margin-bottom:16px;">
+      <div class="stat-card"><div class="label">Bhavcopy Stocks</div><div class="value" id="dqBhavCount">-</div></div>
+      <div class="stat-card"><div class="label">Band Matched</div><div class="value" id="dqBandMatched">-</div></div>
+      <div class="stat-card"><div class="label">Sector Matched</div><div class="value" id="dqSectorMatched">-</div></div>
+      <div class="stat-card"><div class="label">Unmatched</div><div class="value" id="dqUnmatched">-</div></div>
+      <div class="stat-card"><div class="label">Not Traded (Stale)</div><div class="value" id="dqStaleCount">-</div></div>
+      <div class="stat-card"><div class="label">Unadjusted Corp Actions</div><div class="value" id="dqCorpActionCount">-</div></div>
+    </div>
+  </div>
+  <div class="card dq-section" style="margin-bottom:16px;">
+    <div class="dq-section-header" onclick="dqToggleSection('dqNoSector')">
+      <h4 style="margin:0;">In Bhavcopy but NOT in Sector Mapping</h4>
+      <span class="dq-section-arrow" id="dqNoSectorArrow">&#9650;</span>
+    </div>
+    <div class="dq-section-body" id="dqNoSectorBody" style="display:none;">
+      <p style="color:var(--text2);font-size:12px;margin:8px 0;">These stocks are assigned to "Undefined-Diversified" sector/industry.</p>
+      <div class="table-wrap"><table id="dqNoSectorTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
+    </div>
+  </div>
+  <div class="card dq-section" style="margin-bottom:16px;">
+    <div class="dq-section-header" onclick="dqToggleSection('dqNoBand')">
+      <h4 style="margin:0;">In Bhavcopy but NOT in Price Band</h4>
+      <span class="dq-section-arrow" id="dqNoBandArrow">&#9650;</span>
+    </div>
+    <div class="dq-section-body" id="dqNoBandBody" style="display:none;">
+      <p style="color:var(--text2);font-size:12px;margin:8px 0;">These stocks have no circuit limit info (treated as no circuit limit).</p>
+      <div class="table-wrap"><table id="dqNoBandTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
+    </div>
+  </div>
+  <div class="card dq-section" style="margin-bottom:16px;">
+    <div class="dq-section-header" onclick="dqToggleSection('dqNoTrade')">
+      <h4 style="margin:0;">In Sector Mapping but NOT in Bhavcopy</h4>
+      <span class="dq-section-arrow" id="dqNoTradeArrow">&#9650;</span>
+    </div>
+    <div class="dq-section-body" id="dqNoTradeBody" style="display:none;">
+      <p style="color:var(--text2);font-size:12px;margin:8px 0;">These stocks exist in the mapping file but have no trading data.</p>
+      <div class="table-wrap"><table id="dqNoTradeTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
+    </div>
+  </div>
+  <div class="card dq-section" style="margin-bottom:16px;">
+    <div class="dq-section-header" onclick="dqToggleSection('dqStale')">
+      <h4 style="margin:0;">In Bhavcopy but NOT traded on latest day</h4>
+      <span class="dq-section-arrow" id="dqStaleArrow">&#9650;</span>
+    </div>
+    <div class="dq-section-body" id="dqStaleBody" style="display:none;">
+      <p style="color:var(--text2);font-size:12px;margin:8px 0;">These stocks have historical data but didn't trade on the most recent trading day. They are excluded from the scanner and analysis.</p>
+      <div class="table-wrap"><table id="dqStaleTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
+    </div>
+  </div>
+  <div class="card dq-section" style="margin-bottom:16px;">
+    <div class="dq-section-header" onclick="dqToggleSection('dqNoBhav')">
+      <h4 style="margin:0;">In Price Band but NOT in Bhavcopy</h4>
+      <span class="dq-section-arrow" id="dqNoBhavArrow">&#9650;</span>
+    </div>
+    <div class="dq-section-body" id="dqNoBhavBody" style="display:none;">
+      <p style="color:var(--text2);font-size:12px;margin:8px 0;">These stocks have band data but no trading data.</p>
+      <div class="table-wrap"><table id="dqNoBhavTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
+    </div>
+  </div>
+  <div class="card dq-section">
+    <div class="dq-section-header" onclick="dqToggleSection('dqCorpAction')">
+      <h4 style="margin:0;">Recent Corporate Actions Not Price-Adjusted</h4>
+      <span class="dq-section-arrow" id="dqCorpActionArrow">&#9650;</span>
+    </div>
+    <div class="dq-section-body" id="dqCorpActionBody" style="display:none;">
+      <p style="color:var(--text2);font-size:12px;margin:8px 0;">Splits and bonuses ARE back-adjusted automatically and don't appear here. These are other corporate actions (demergers, NCRPS bonuses, capital reductions, etc.) from the last ~370 days that cause a real price discontinuity NSE doesn't publish a clean adjustment ratio for — SMA, 52W high/low, ADR, and change% may look distorted for these stocks until the affected window rolls past the ex-date.</p>
+      <div class="table-wrap"><table id="dqCorpActionTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
+    </div>
+  </div>
+</div>
+
+<!-- JS Modules (dependency order matters for const/let declarations) -->
+<script src="js/store.js?v=3"></script>
+<script src="js/utils.js?v=2"></script>
+<script src="js/cache.js?v=2"></script>
+<script src="js/data-processor.js?v=2"></script>
+<script src="js/scanner.js?v=2"></script>
+<script src="js/screener.js?v=6"></script>
+<script src="js/breadth.js?v=4"></script>
+<script src="js/sector.js?v=2"></script>
+<script src="js/industry.js?v=9"></script>
+<script src="js/lib/lightweight-charts.standalone.production.js"></script>
+<script src="js/ew-index.js?v=1"></script>
+<script src="js/industry-charts.js?v=10"></script>
+<script src="js/data-quality.js?v=3"></script>
+<script src="js/presets.js?v=6"></script>
+<script src="js/ui.js?v=7"></script>
+<script src="js/nse-download.js?v=3"></script>
+
+</body>
+</html>
