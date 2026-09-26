@@ -8,12 +8,15 @@
     - Downloads CM-UDiFF format bhavcopy (ZIP with ISIN) + price band
     - Merges all files into combined CSVs for the dashboard
     - Downloads EQUITY_L.csv (master equity list with ISIN mappings)
+    - Keeps reference-data\CorporateActions.csv as a permanent archive (merged, never truncated);
+      use -CorpActionsFrom "01-Jan-2010" once to archive everything NSE still serves
     - Keeps window open so you can see the results
 #>
 
 # -- Parameters ----------------------------------------------------------------
 param(
     [string]$StartFrom = "",   # Optional: force start date, e.g. "01-Sep-2024" or "2024-09-01"
+    [string]$CorpActionsFrom = "", # Optional: archive corporate actions from this date (one-time backfill), e.g. "01-Jan-2010"
     [switch]$NoPause           # Headless (launched by the dashboard's Refresh Data): no key prompts, no server reprocess call
 )
 
@@ -84,7 +87,10 @@ $RetryDelay = 2  # seconds between requests
 # the mtime (nse_server.py reprocesses everything when these files look newer).
 function Save-IfChanged {
     param([string]$Path, [string]$Text)
-    if ((Test-Path $Path) -and ((Get-Content $Path -Raw -Encoding UTF8) -eq $Text)) { return $false }
+    # Compare ignoring line-ending style: with core.autocrlf, git rewrites a tracked file (reference-data\) with
+    # CRLF on checkout, which is not a real change and must not rewrite the file, bump its timestamp and force a
+    # reprocess.
+    if ((Test-Path $Path) -and ((([string](Get-Content $Path -Raw -Encoding UTF8)) -replace "`r`n", "`n") -eq ($Text -replace "`r`n", "`n"))) { return $false }
     Set-Content -Path $Path -Value $Text -Encoding UTF8 -NoNewline
     return $true
 }
@@ -429,14 +435,36 @@ catch {
 }
 
 # -- Download Corporate Actions (splits/bonuses, for price adjustment) ---------
-# Full ~3-year window pulled fresh every run (like MidSmallcap 400 above) rather
-# than incrementally - the endpoint is cheap (a few thousand rows even for a
-# multi-year range) and this avoids tracking any incremental state. Actual
-# ratio parsing happens server-side (nse_server.py); this is just a size filter
-# so the CSV doesn't carry every dividend/AGM notice too.
+# reference-data\CorporateActions.csv is an ARCHIVE, not a mirror of NSE's feed. NSE is asked for a window
+# (default: the last 3 years) and:
+#   * rows INSIDE that window are REPLACED by NSE's fresh copy, so a revised ex-date or a withdrawn event
+#     takes effect and no stale duplicate survives;
+#   * rows OLDER than the window are KEPT, so an event that ages out of NSE's window is never lost;
+#   * a failed, empty or implausibly small download changes nothing.
+# Run once with -CorpActionsFrom "01-Jan-2010" to archive everything NSE still serves. Actual ratio parsing
+# happens server-side (nse_server.py); this is only a size filter so the CSV doesn't carry every dividend/AGM
+# notice too. Rows are written sorted (ex-date, symbol, subject, ISIN) because NSE returns rows that share an
+# ex-date in an arbitrary order, which would otherwise make every download look "changed" (file rewritten,
+# noisy git diffs, and a pointless reprocess on every launch).
 Write-Host "`nDownloading corporate actions (splits/bonuses)..." -ForegroundColor Cyan
 $CorpActionsFile = Join-Path $ReferenceFolder "CorporateActions.csv"
-$CorpFromDate = (Get-Date).AddYears(-3).ToString("dd-MM-yyyy")
+
+function ConvertTo-ExDate([string]$Text) {
+    $d = [datetime]::MinValue
+    if ([datetime]::TryParseExact($Text, 'dd-MMM-yyyy', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$d)) { return $d }
+    return $null
+}
+
+$CorpFromDT = (Get-Date).Date.AddYears(-3)
+if ($CorpActionsFrom) {
+    $fromParsed = [datetime]::MinValue
+    if ([datetime]::TryParse($CorpActionsFrom, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$fromParsed)) {
+        $CorpFromDT = $fromParsed.Date
+    } else {
+        Write-Host "  Warning: could not parse -CorpActionsFrom '$CorpActionsFrom' - using the default 3-year window" -ForegroundColor Yellow
+    }
+}
+$CorpFromDate = $CorpFromDT.ToString("dd-MM-yyyy")
 $CorpToDate = (Get-Date).ToString("dd-MM-yyyy")
 $CorpActionsUrl = "$CorpActionsBaseUrl&from_date=$CorpFromDate&to_date=$CorpToDate"
 try {
@@ -450,29 +478,43 @@ try {
     $corpFiltered = $corpJson | Where-Object {
         $_.subject -match '(?i)bonus|split|sub-division|consolidation of equity shares|demerger'
     }
-    # NSE returns rows that share an ex-date in an arbitrary order that differs from call to call, which made
-    # every download look "changed" (file rewritten, reprocess triggered, noisy git diffs now that the file is
-    # tracked). Write them in a stable order instead: ex-date, then symbol, then subject.
-    $corpFiltered = @($corpFiltered | Sort-Object `
-        @{ Expression = { $d = [datetime]::MinValue
-                          if ([datetime]::TryParseExact($_.exDate, 'dd-MMM-yyyy', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$d)) { $d } else { [datetime]::MaxValue } } }, `
-        @{ Expression = { $_.symbol } }, `
-        @{ Expression = { $_.subject } })
-    $corpLines = @("ISIN,SYMBOL,EXDATE,SUBJECT")
+    $freshRows = @()
     foreach ($row in $corpFiltered) {
-        $isin = ($row.isin -replace '"','""')
-        $sym = ($row.symbol -replace '"','""')
-        $exDate = ($row.exDate -replace '"','""')
-        $subj = ($row.subject -replace '"','""').Trim()
-        if ($isin -and $exDate -and $subj) {
-            $corpLines += "`"$isin`",`"$sym`",`"$exDate`",`"$subj`""
+        $subj = ([string]$row.subject).Trim()
+        if ($row.isin -and $row.exDate -and $subj) {
+            $freshRows += [pscustomobject]@{ ISIN = [string]$row.isin; SYMBOL = [string]$row.symbol; EXDATE = [string]$row.exDate; SUBJECT = $subj }
         }
     }
-    if ($corpLines.Count -gt 1) {
-        $corpChanged = Save-IfChanged $CorpActionsFile ($corpLines -join "`n")
-        Write-Host "  Corporate actions: $($corpLines.Count - 1) split/bonus rows $(if ($corpChanged) { 'updated' } else { 'unchanged' }) ($CorpFromDate to $CorpToDate)" -ForegroundColor Green
+
+    if ($freshRows.Count -eq 0) {
+        Write-Host "  Warning: No split/bonus corporate actions found in range - keeping the existing file" -ForegroundColor Yellow
     } else {
-        Write-Host "  Warning: No split/bonus corporate actions found in range" -ForegroundColor Yellow
+        $stored = @()
+        if (Test-Path $CorpActionsFile) { $stored = @(Import-Csv -Path $CorpActionsFile -Encoding UTF8 | Where-Object { $_.ISIN -and $_.SUBJECT }) }
+        # older than the window (or with a date we can't read - never drop data we don't understand) -> archive
+        $retained = @($stored | Where-Object { $d = ConvertTo-ExDate $_.EXDATE; ($null -eq $d) -or ($d -lt $CorpFromDT) })
+        $storedInWindow = @($stored | Where-Object { $d = ConvertTo-ExDate $_.EXDATE; ($null -ne $d) -and ($d -ge $CorpFromDT) })
+
+        if (($storedInWindow.Count -ge 20) -and ($freshRows.Count -lt [math]::Ceiling($storedInWindow.Count * 0.5))) {
+            # Replacing the window with a much smaller list would silently delete good rows if NSE's answer was truncated.
+            Write-Host "  Warning: NSE returned only $($freshRows.Count) rows for the window but $($storedInWindow.Count) are stored - looks incomplete, keeping the existing file" -ForegroundColor Yellow
+        } else {
+            $seen = New-Object 'System.Collections.Generic.HashSet[string]'
+            $unique = @(foreach ($r in (@($freshRows) + @($retained))) {
+                if ($seen.Add(('{0}|{1}|{2}|{3}' -f $r.ISIN, $r.SYMBOL, $r.EXDATE, $r.SUBJECT))) { $r }
+            })
+            $sorted = @($unique | Sort-Object `
+                @{ Expression = { $d = ConvertTo-ExDate $_.EXDATE; if ($null -ne $d) { $d } else { [datetime]::MaxValue } } }, `
+                @{ Expression = { $_.SYMBOL } }, `
+                @{ Expression = { $_.SUBJECT } }, `
+                @{ Expression = { $_.ISIN } })
+            $corpLines = @("ISIN,SYMBOL,EXDATE,SUBJECT")
+            foreach ($r in $sorted) {
+                $corpLines += ('"{0}","{1}","{2}","{3}"' -f ($r.ISIN -replace '"','""'), ($r.SYMBOL -replace '"','""'), ($r.EXDATE -replace '"','""'), ($r.SUBJECT -replace '"','""'))
+            }
+            $corpChanged = Save-IfChanged $CorpActionsFile ($corpLines -join "`n")
+            Write-Host "  Corporate actions: $($sorted.Count) rows ($($freshRows.Count) from NSE, $($retained.Count) kept from the archive) $(if ($corpChanged) { 'updated' } else { 'unchanged' }) ($CorpFromDate to $CorpToDate)" -ForegroundColor Green
+        }
     }
 }
 catch {
