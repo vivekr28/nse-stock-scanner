@@ -5,7 +5,7 @@
 This project is an offline, self-contained NSE (National Stock Exchange of India) end-of-day stock analysis system. It consists of:
 
 1. **`Download-NSE-Bhavcopy.ps1`** — PowerShell script to download and merge daily NSE data (CM-UDiFF format)
-2. **Modular Dashboard** — `index.html` + 1 CSS + 15 own JS files + 1 vendored charting library, for analysis (dark theme, server-assisted), plus a standalone `reprocess.html` utility page
+2. **Modular Dashboard** — `index.html` + 1 CSS + 15 own JS files + 1 vendored charting library, for analysis (dark theme, server-assisted), plus a standalone `pages/reprocess.html` utility page
 
 All files live in `C:\Users\vivek\Documents\NSE-StockScanner\` on the user's Windows machine.
 
@@ -15,17 +15,19 @@ All files live in `C:\Users\vivek\Documents\NSE-StockScanner\` on the user's Win
 
 ```
 NSE-StockScanner/
-├── index.html                    # HTML shell — all markup, 15 script tags at bottom (cache-busted ?v=N)
-├── reprocess.html                # Standalone page: triggers a background reprocess, polls/shows live progress, links back to index.html
+├── index.html                    # HTML shell — all markup, 15 script tags at bottom (cache-busted ?v=N). Stays at the top level: it is the app's entry point and its css/ and js/ paths are relative to it
 ├── agent.md                      # This file — project documentation
-├── nse_server.py                 # Python HTTP server — pre-processes CSV→JSON, serves dashboard + API
-├── tv_adjust.py                  # TradingView-assisted demerger price correction (stdlib-only DevTools client + factor derivation) — only ever runs when the Data Quality button is clicked; see "TradingView-Derived Demerger Corrections"
+├── pages/
+│   └── reprocess.html            # Standalone page: triggers a background reprocess, polls/shows live progress, links back to ../index.html
+├── src/                          # Python (stdlib only). The server treats the folder ABOVE src/ as the project root (web root, NSE_DATA/, presets.json, Download-NSE-Bhavcopy.ps1); `--dir` overrides
+│   ├── nse_server.py             # Python HTTP server — pre-processes CSV→JSON, serves dashboard + API
+│   └── tv_adjust.py              # TradingView-assisted demerger price correction (stdlib-only DevTools client + factor derivation) — only ever runs when the Data Quality button is clicked; see "TradingView-Derived Demerger Corrections"
 ├── Start-Dashboard.ps1           # One-click launcher: runs Download-NSE-Bhavcopy.ps1 (-NoPause), then starts server + opens browser
 ├── Download-NSE-Bhavcopy.ps1     # Standalone data downloader (no browser launch)
 ├── Sector-Stock-Mapping.csv      # Manual sector/industry mapping file
 ├── presets.json                  # Screener presets saved by server API
 ├── .claude/
-│   └── launch.json               # Dev-server launch config (python nse_server.py, port 8765) for browser previewing
+│   └── launch.json               # Dev-server launch config (python src/nse_server.py, port 8765) for browser previewing
 ├── css/
 │   ├── styles.css                 # All CSS (dark theme, responsive, components)
 │   └── fonts/
@@ -202,7 +204,7 @@ The `Store.symbolToISIN` map bridges symbol-based lookups (needed for sector map
 2. **CSV fetch from server** (fallback) — `tryAutoFetchCSV()` fetches raw CSVs from `NSE_DATA/` paths served by the static file handler
 3. **IndexedDB cache** (last resort) — `tryLoadFromCache()` restores previously cached CSV data
 
-Manual file upload and live NSE download from the browser have been removed. All data flows through the Python server (`nse_server.py`), launched by `Start-Dashboard.ps1`.
+Manual file upload and live NSE download from the browser have been removed. All data flows through the Python server (`src/nse_server.py`), launched by `Start-Dashboard.ps1`.
 
 ### Data Caching (IndexedDB)
 
@@ -215,7 +217,7 @@ Manual file upload and live NSE download from the browser have been removed. All
 
 Raw CSV text is stored in `Store._rawBhav`, `Store._rawBand`, `Store._rawSector` and cached via `cacheCSV()` on every file load. On page load, `tryLoadFromCache()` auto-restores cached data.
 
-### Python Server (`nse_server.py`)
+### Python Server (`src/nse_server.py`)
 
 HTTP server on port 8765 (Python stdlib `http.server`). Pre-processes 163MB bhavcopy CSV into ~49MB `processed_data.json` on startup (or when CSVs change). Serves dashboard HTML, static files, and API endpoints.
 
@@ -226,8 +228,8 @@ HTTP server on port 8765 (Python stdlib `http.server`). Pre-processes 163MB bhav
 - `GET /api/presets` — Load screener presets from `presets.json`.
 - `POST /api/presets` — Save screener presets to `presets.json`.
 - `GET /api/reprocess` — Force re-process CSVs into JSON, **blocking** — doesn't respond until `process_data()` + save fully complete (~30-90s). Kept exactly as-is for the PowerShell scripts' own post-download auto-trigger, which waits for completion before printing its own "reprocessed automatically" message.
-- `GET /api/reprocess/start` — Force re-process, **non-blocking**: starts `process_data()` in a background `threading.Thread` and returns immediately (`{"ok": true, "started": true}`, or `{"ok": true, "alreadyRunning": true}` if one is already in flight). Because the heavy work moves off the server's single request-handling loop, `/api/status` and everything else keeps responding normally while it runs — unlike the old blocking endpoint, which used to freeze the entire server (nothing else could be served, not even `/api/status`) for the full duration. Used by `reprocess.html`.
-- `GET /api/reprocess/status` — Returns the shared `_reprocess_state` dict (`status`: `idle`/`running`/`done`/`error`, `step`, `startedAt`, `finishedAt`, `error`, `stocks`), updated live via a `progress_cb` threaded through `process_data()`'s major phases (reading bhavcopy, split/bonus adjustment, sector mapping, indicators, price band, EW index, saving). Polled by `reprocess.html` every ~600ms.
+- `GET /api/reprocess/start` — Force re-process, **non-blocking**: starts `process_data()` in a background `threading.Thread` and returns immediately (`{"ok": true, "started": true}`, or `{"ok": true, "alreadyRunning": true}` if one is already in flight). Because the heavy work moves off the server's single request-handling loop, `/api/status` and everything else keeps responding normally while it runs — unlike the old blocking endpoint, which used to freeze the entire server (nothing else could be served, not even `/api/status`) for the full duration. Used by `pages/reprocess.html`.
+- `GET /api/reprocess/status` — Returns the shared `_reprocess_state` dict (`status`: `idle`/`running`/`done`/`error`, `step`, `startedAt`, `finishedAt`, `error`, `stocks`), updated live via a `progress_cb` threaded through `process_data()`'s major phases (reading bhavcopy, split/bonus adjustment, sector mapping, indicators, price band, EW index, saving). Polled by `pages/reprocess.html` every ~600ms.
 - `POST /api/tv-adjust/start` — Data Quality tab's "Adjust prices from TradingView" button (see "TradingView-Derived Demerger Corrections"). Starts `run_tv_adjust()` in a background thread and returns immediately (`{"ok": true, "started": true}`, `alreadyRunning`, or 409 if a reprocess is in flight). Requires an `X-Requested-With: nse-dashboard` header (else 403): a custom header forces a CORS preflight for any cross-site caller, and the server's preflight only approves `Content-Type`, so a random web page can't make the dashboard drive TradingView or rewrite the corrections file. **The only place the server ever contacts TradingView** — never at startup.
 - `GET /api/tv-adjust/status` — The shared `_tv_state` (`status`, `step`, `current`/`total`, `adjusted`, `results`, `error`, `warning`) plus `corrections` (every row of `DemergerAdjustments.csv`), `appliedCount` and `tvPort`. Polled by the Data Quality tab during a run, and fetched once on render to label the list rows.
 - `POST /api/tv-verify/start` / `GET /api/tv-verify/status` — Data Quality tab's "Verify against TradingView" button (see "Verifying Adjusted Prices Against TradingView"). Same `X-Requested-With: nse-dashboard` same-origin rule as `/api/tv-adjust/start`; 409 while a correction run is using the TradingView chart (and vice versa). Status returns the run state (`_tv_verify_state`) plus `last`, the saved result.
@@ -670,23 +672,23 @@ NSE's own raw feed does **not** adjust `PrvsClsgPric` either — confirmed live:
 
 ---
 
-## Completed: Reprocess Data Page (`reprocess.html`)
+## Completed: Reprocess Data Page (`pages/reprocess.html`)
 
 **Goal:** an in-dashboard way to force a reprocess (e.g. after a code fix, or to pick up an already-refreshed `CorporateActions.csv`) without needing a terminal — a "Reprocess Data" button on the main page, a dedicated page showing live progress, and a way back to the dashboard when it's done.
 
 **Server-side (`nse_server.py`):** the pre-existing `GET /api/reprocess` is **blocking** — it doesn't respond until `process_data()` + save fully complete (~30-90s), which the PowerShell scripts' own post-download auto-trigger relies on (waits for completion before printing its "reprocessed automatically" message) — left completely unchanged. A **new**, separate pair was added for the interactive page instead of changing that endpoint's behavior:
 - `GET /api/reprocess/start` — starts `process_data()` in a background `threading.Thread` (guarded by `_reprocess_lock` so a second call while one's already running just returns `{"alreadyRunning": true}` instead of starting a duplicate) and returns immediately. Because the heavy work moves off the server's single request-handling loop, every other endpoint (`/api/status`, page loads, etc.) keeps responding normally throughout — a real, if secondary, fix for a problem hit earlier in this same session: the old blocking `/api/reprocess` used to freeze the *entire* server, nothing else could be served, for the whole run.
-- `GET /api/reprocess/status` — returns the shared `_reprocess_state` dict (`status`: `idle`/`running`/`done`/`error`, `step`, `startedAt`, `finishedAt`, `error`, `stocks`). `process_data()` gained an optional `progress_cb` parameter, called at each major phase via a small `report()` closure that both prints (unchanged console behavior) and forwards the same message to the callback — reading bhavcopy, applying split/bonus adjustments, loading sector mapping, computing indicators, processing price band, computing the EW index, saving. `reprocess.html` polls this every ~600ms.
+- `GET /api/reprocess/status` — returns the shared `_reprocess_state` dict (`status`: `idle`/`running`/`done`/`error`, `step`, `startedAt`, `finishedAt`, `error`, `stocks`). `process_data()` gained an optional `progress_cb` parameter, called at each major phase via a small `report()` closure that both prints (unchanged console behavior) and forwards the same message to the callback — reading bhavcopy, applying split/bonus adjustments, loading sector mapping, computing indicators, processing price band, computing the EW index, saving. `pages/reprocess.html` polls this every ~600ms.
 
-**Client (`reprocess.html`, new standalone page, not part of the SPA)**: on load, calls `/api/reprocess/start` then polls `/api/reprocess/status`. Shows a spinner + the current phase text + a live elapsed-time counter while running; on `done`, shows a checkmark, the stocks-processed count, and a "Back to Dashboard" button (`location.href='index.html'`); on `error`, shows the error message and both "Back to Dashboard" and "Try Again" buttons. Styled with the dashboard's own `css/styles.css` (dark theme, `.btn`/`.btn-primary`/`.btn-secondary`) so it looks native rather than a bare unstyled page.
+**Client (`pages/reprocess.html`, new standalone page, not part of the SPA)**: on load, calls `/api/reprocess/start` then polls `/api/reprocess/status`. Shows a spinner + the current phase text + a live elapsed-time counter while running; on `done`, shows a checkmark, the stocks-processed count, and a "Back to Dashboard" button (`location.href='index.html'`); on `error`, shows the error message and both "Back to Dashboard" and "Try Again" buttons. Styled with the dashboard's own `css/styles.css` (dark theme, `.btn`/`.btn-primary`/`.btn-secondary`) so it looks native rather than a bare unstyled page.
 
-**Entry point:** a "Reprocess Data" button added to `index.html`'s header (top-right, `margin-left:auto`), linking to `reprocess.html`.
+**Entry point:** a "Reprocess Data" button added to `index.html`'s header (top-right, `margin-left:auto`), linking to `pages/reprocess.html`.
 
 **Verified:** button renders and links correctly; the page's spinner, phase text, and live elapsed-time counter all work correctly client-side even before a server restart (confirmed the polling loop correctly retries through repeated 404s against the pre-restart server, exactly as expected, since the new endpoints don't exist until the code-loading process is restarted — same restart caveat as any other server-side change in this project, see "Development Notes" below).
 
 **Reprocess, scoped precisely:** neither `/api/reprocess` nor `/api/reprocess/start` ever touches `NSE_Bhavcopy_Combined.csv`, `NSE_PriceBand_Combined.csv`, or downloads anything from NSE — `process_data()` only *reads* those files as they currently exist on disk and regenerates `processed_data.json` from them. Fetching new data and merging it into those combined CSVs is done entirely by the PowerShell scripts, which call `/api/reprocess` themselves once that's done. Reprocessing bad/missing data in the source CSVs faithfully reproduces the same bad/missing output — only a fresh PowerShell download fixes that; reprocess only helps when the *code* changed or the cached JSON is stale/corrupted relative to already-correct source CSVs.
 
-**Refresh Data (added later):** a primary "Refresh Data" button next to "Reprocess Data" on `index.html` → `reprocess.html?refresh=1`, which calls `GET /api/reprocess/start?download=1`. The background worker first runs `Download-NSE-Bhavcopy.ps1 -NoPause` as a hidden `powershell` subprocess (stdout mirrored line-by-line into `_reprocess_state['step']` as "Downloading: ..."; nonzero exit -> `error` with the last output lines), then runs the normal `process_data()` + save, and the page auto-redirects to `index.html` ~1.2s after `done`. `_reprocess_state` gained a `mode` field (`reprocess`/`refresh`). The downloader's new `-NoPause` switch skips its "Press any key" prompts **and** its own end-of-run `/api/reprocess` call (the server does the reprocess itself). Interactive double-click runs are unchanged. Like all server-side changes, needs a server restart to take effect. Verified end to end on a temp server (~80-90s total, 2900 stocks).
+**Refresh Data (added later):** a primary "Refresh Data" button next to "Reprocess Data" on `index.html` → `pages/reprocess.html?refresh=1`, which calls `GET /api/reprocess/start?download=1`. The background worker first runs `Download-NSE-Bhavcopy.ps1 -NoPause` as a hidden `powershell` subprocess (stdout mirrored line-by-line into `_reprocess_state['step']` as "Downloading: ..."; nonzero exit -> `error` with the last output lines), then runs the normal `process_data()` + save, and the page auto-redirects to `index.html` ~1.2s after `done`. `_reprocess_state` gained a `mode` field (`reprocess`/`refresh`). The downloader's new `-NoPause` switch skips its "Press any key" prompts **and** its own end-of-run `/api/reprocess` call (the server does the reprocess itself). Interactive double-click runs are unchanged. Like all server-side changes, needs a server restart to take effect. Verified end to end on a temp server (~80-90s total, 2900 stocks).
 
 **Single download implementation:** `Start-Dashboard.ps1` used to carry a ~600-line copy of the downloader's download + merge code that had to be edited in lockstep. It now just runs `& Download-NSE-Bhavcopy.ps1 -NoPause -StartFrom $StartFrom` (nonzero exit -> message, wait for key, don't launch), then does only the launch work (kill old server on 8765, Job Object, start `nse_server.py`, open browser). **All download/merge logic lives only in `Download-NSE-Bhavcopy.ps1`** — Start-Dashboard, the double-clickable downloader, and the dashboard's Refresh Data button all use it. Dropped as a result: Start-Dashboard's `$SkipDownload` "already up to date" shortcut (cosmetic - the downloader finds nothing new and moves on). A pre-change copy was kept as `Start-Dashboard.ps1.bak` (safe to delete). Verified with a temp-port copy of the launcher: download step ran, server started and answered `/api/status`.
 
@@ -770,7 +772,7 @@ Both scripts now download the MidSmallcap 400 constituent list from the NSE API 
 - `js/store.js`: added `ewIndex: null` property
 - `js/nse-download.js`: `Store.ewIndex = data.ewIndex || null` added to the Phase-1 lite-data population in `tryAutoFetchJSON()`
 - `js/ui.js`: `showDashboard()` calls `updateEWIndexTabVisibility()`; the tab-click handler calls `renderEWIndexChart()` specifically when the `ewindex` tab is clicked (not eagerly on load — see lazy-creation note above)
-- `.claude/launch.json` added (`python nse_server.py`, port 8765) so the dashboard can be previewed via the Claude Code browser tooling
+- `.claude/launch.json` added (`python src/nse_server.py`, port 8765) so the dashboard can be previewed via the Claude Code browser tooling
 
 ### Design Decisions
 
@@ -815,12 +817,16 @@ Both scripts now download the MidSmallcap 400 constituent list from the NSE API 
 - Pure vanilla JS, with one exception: TradingView Lightweight Charts (vendored locally at `js/lib/`, not CDN) for the EW Index tab — everything else remains dependency-free
 - CORS restrictions may block live NSE downloads (fallback: manual upload or PowerShell script)
 
+### Project layout (reorganised)
+
+Python moved to `src/` (`src/nse_server.py`, `src/tv_adjust.py`) and `reprocess.html` to `pages/`; `index.html` and its `css/` + `js/` stay at the top level. Everything that depended on the old locations was updated: the server's default project root (now the parent of `src/`), the launcher's `$ServerScript`, the two `index.html` buttons and the page's stylesheet/back links, `.claude/launch.json`. **The reprocess page's URL is now `/pages/reprocess.html`** — an old `/reprocess.html` bookmark 404s. `Download-NSE-Bhavcopy.ps1` and `Start-Dashboard.ps1` stay at the top level (the downloader derives the project root from its own folder, so moving it is a separate change). Run the server with `python src/nse_server.py`.
+
 ### Server restarts — when they're actually needed
 
 Recurring source of confusion during development, worth stating plainly:
 - **JS/HTML/CSS changes** — take effect on the **next browser reload**, no server restart needed. `nse_server.py` serves these as static files with `Cache-Control: no-cache` specifically so this always works.
 - **`nse_server.py` code changes** — need the Python **process restarted**. Editing the `.py` file has zero effect on an already-running process; Python doesn't hot-reload.
-- **Restart alone often isn't enough**, either: on startup, `run_server()` only calls `process_data()` if `needs_processing()` says the cached `processed_data.json` is older than the watched CSVs. If only the *code* changed (not any CSV), the fresh process just loads the same old cached JSON, computed by the old (pre-fix) code, and the fix appears to do nothing. A **forced reprocess** (`/api/reprocess`, `/api/reprocess/start`, or the "Reprocess Data" button → `reprocess.html`) is needed after every restart-for-a-code-fix, to actually recompute output with the new code. This exact sequence — fix code, restart, reprocess — was needed repeatedly while landing the split/bonus adjustment fixes above.
+- **Restart alone often isn't enough**, either: on startup, `run_server()` only calls `process_data()` if `needs_processing()` says the cached `processed_data.json` is older than the watched CSVs. If only the *code* changed (not any CSV), the fresh process just loads the same old cached JSON, computed by the old (pre-fix) code, and the fix appears to do nothing. A **forced reprocess** (`/api/reprocess`, `/api/reprocess/start`, or the "Reprocess Data" button → `pages/reprocess.html`) is needed after every restart-for-a-code-fix, to actually recompute output with the new code. This exact sequence — fix code, restart, reprocess — was needed repeatedly while landing the split/bonus adjustment fixes above.
 - **The single-threaded server can appear to hang** under normal use — `nse_server.py` uses plain `http.server.HTTPServer`, which handles one request at a time. A long-running blocking request (the old `/api/reprocess`, or a slow/stalled client mid-download of a large gzip payload) can make the *entire* server unresponsive, including simple health checks, until that one request finishes or errors out. `/api/reprocess/start`'s background-threading (see "Reprocess Data Page" above) fixes this specifically for reprocessing; the same class of issue could in principle recur elsewhere since the server still isn't `ThreadingHTTPServer` — a possible future hardening if it comes up again.
 
 ---

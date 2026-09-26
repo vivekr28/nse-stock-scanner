@@ -5,7 +5,7 @@
     1. Runs Download-NSE-Bhavcopy.ps1 (the single copy of the download + merge
        code): missing bhavcopy + price band CSVs, EQUITY_L.csv, MidSmallcap 400,
        corporate actions, merged into the combined CSVs
-    2. Starts the local dashboard server (nse_server.py) and opens the dashboard
+    2. Starts the local dashboard server (src\nse_server.py) and opens the dashboard
        in your default browser
 #>
 
@@ -46,7 +46,7 @@ if ($downloadExit -ne 0) {
 
 # -- Launch Dashboard via Custom Server ----------------------------------------
 $DashboardPath = Join-Path $ScriptDir "index.html"
-$ServerScript = Join-Path $ScriptDir "nse_server.py"
+$ServerScript = Join-Path $ScriptDir "src\nse_server.py"
 $port = 8765
 
 if (Test-Path $DashboardPath) {

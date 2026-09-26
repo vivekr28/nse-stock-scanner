@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 NSE Dashboard Server — serves dashboard, pre-processed JSON data, and preset API.
-Usage: python nse_server.py [--port 8765] [--dir /path/to/NSE-StockScanner]
+Usage: python src/nse_server.py [--port 8765] [--dir /path/to/NSE-StockScanner]
 """
 
 import http.server
@@ -71,7 +71,7 @@ _tv_verify_state = {
     'warning': None,
 }
 
-# ─── Reprocess progress state (for the /reprocess.html page) ─────────────────
+# ─── Reprocess progress state (for the /pages/reprocess.html page) ─────────────────
 # Runs the actual reprocessing in a background thread so /api/reprocess
 # returns immediately instead of blocking the server's single request-handling
 # loop for the full ~30-90s process_data()+save takes - a prior version of
@@ -542,7 +542,7 @@ def build_adjusted_corp_actions(recognized, corrections, corrected_keys, latest_
 def process_data(base_dir, progress_cb=None):
     """Process raw CSVs into pre-computed JSON. Mirrors JS processData().
     `progress_cb`, if given, is called with a short human-readable phase
-    name at each major step (used by /reprocess.html's progress display)."""
+    name at each major step (used by /pages/reprocess.html's progress display)."""
     def report(msg):
         print(msg)
         if progress_cb:
@@ -1476,7 +1476,7 @@ class NSEHandler(http.server.SimpleHTTPRequestHandler):
         """Force re-process data. Blocking (used by the PowerShell scripts'
         post-download auto-trigger, which waits for completion before
         printing its own "reprocessed automatically" message) - the
-        interactive /reprocess.html page uses the non-blocking
+        interactive /pages/reprocess.html page uses the non-blocking
         /api/reprocess/start + /api/reprocess/status pair below instead."""
         print("\n[Server] Forced reprocess requested...")
         with _cache_lock:
@@ -1501,7 +1501,7 @@ class NSEHandler(http.server.SimpleHTTPRequestHandler):
         unlike /api/reprocess, this doesn't block the server's single
         request-handling loop for the full run, so /api/reprocess/status
         polls (and everything else) keep working while it runs. Used by
-        /reprocess.html for a live progress display. With ?download=1, the
+        /pages/reprocess.html for a live progress display. With ?download=1, the
         NSE downloader script runs first ("Refresh Data")."""
         download = 'download' in parse_qs(urlparse(self.path).query)
         with _reprocess_lock:
@@ -1593,7 +1593,7 @@ class NSEHandler(http.server.SimpleHTTPRequestHandler):
 
     def _serve_reprocess_status(self):
         """Current state of a background reprocess started via
-        /api/reprocess/start - polled by /reprocess.html."""
+        /api/reprocess/start - polled by /pages/reprocess.html."""
         body = json.dumps(_reprocess_state).encode('utf-8')
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
@@ -1824,13 +1824,14 @@ def run_server(port, base_dir, tv_port=tv_adjust.DEFAULT_CDP_PORT):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='NSE Dashboard Server')
     parser.add_argument('--port', type=int, default=DEFAULT_PORT, help=f'Port (default {DEFAULT_PORT})')
-    parser.add_argument('--dir', type=str, default=None, help='Base directory (default: script directory)')
+    parser.add_argument('--dir', type=str, default=None, help='Project root: web root, NSE_DATA, presets.json (default: the parent of src/)')
     parser.add_argument('--tv-port', type=int, default=tv_adjust.DEFAULT_CDP_PORT,
                         help=f'TradingView Desktop DevTools port, used only by the Data Quality '
                              f'"Adjust prices from TradingView" button (default {tv_adjust.DEFAULT_CDP_PORT})')
     args = parser.parse_args()
 
-    base_dir = args.dir or os.path.dirname(os.path.abspath(__file__))
+    # This file lives in <root>/src/; the project root (web root, NSE_DATA, presets.json) is one level up.
+    base_dir = args.dir or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     if not os.path.isdir(base_dir):
         print(f"Error: {base_dir} is not a directory")
         sys.exit(1)
