@@ -16,6 +16,7 @@ import time
 import argparse
 import threading
 import subprocess
+import shutil
 from datetime import datetime, timedelta
 from collections import defaultdict
 from pathlib import Path
@@ -30,10 +31,21 @@ BHAV_FILE = 'NSE_Bhavcopy_Combined.csv'
 BAND_FILE = 'NSE_PriceBand_Combined.csv'
 SECTOR_FILE = 'Sector-Stock-Mapping.csv'
 PROCESSED_FILE = 'processed_data.json'
-PRESETS_FILE = 'presets.json'
+# Saved screener presets (server-managed via /api/presets). Lives in a git-tracked folder.
+PRESETS_FILE = 'scanner-presets/presets.json'
 MIDSMALL400_FILE = 'MidSmallcap400_Constituents.csv'
+# reference-data/ is GIT-TRACKED (unlike the bulk, git-ignored NSE_DATA/): it holds data that may not be
+# obtainable from NSE again later - the corporate-actions feed is a rolling ~3-year window overwritten on
+# every download - plus our own TradingView-derived corrections.
+REFERENCE_SUBDIR = 'reference-data'
 CORPACTIONS_FILE = 'CorporateActions.csv'
 CORRECTIONS_FILE = 'DemergerAdjustments.csv'  # TradingView-derived price corrections (see tv_adjust.py)
+# Where these files used to live: (old, new) paths relative to the project root. See migrate_legacy_file().
+LEGACY_LOCATIONS = [
+    (os.path.join(DATA_SUBDIR, CORPACTIONS_FILE), os.path.join(REFERENCE_SUBDIR, CORPACTIONS_FILE)),
+    (os.path.join(DATA_SUBDIR, CORRECTIONS_FILE), os.path.join(REFERENCE_SUBDIR, CORRECTIONS_FILE)),
+    ('presets.json', PRESETS_FILE),
+]
 VERIFY_FILE = 'TradingViewVerification.json'  # last "Verify against TradingView" result (see run_tv_verify)
 # Bump whenever processed_data.json gains/changes a field the client relies on: startup then
 # reprocesses an older cache by itself instead of silently serving output missing the new field.
@@ -245,7 +257,7 @@ def load_split_bonus_events(base_dir, latest_date_str, recognized=None):
         still cause a genuine price discontinuity around exDate but can't be
         (or, for a demerger, shouldn't be) back-adjusted by a simple ratio.
         Surfaced in the Data Quality tab rather than silently left unadjusted."""
-    path = os.path.join(base_dir, DATA_SUBDIR, CORPACTIONS_FILE)
+    path = os.path.join(base_dir, REFERENCE_SUBDIR, CORPACTIONS_FILE)
     if not os.path.exists(path):
         return {}, []
 
@@ -433,7 +445,7 @@ def apply_split_adjustments(daily_by_symbol, events_by_isin):
 # Demergers (and similar) have no ratio in NSE's feed, so they land in the Data
 # Quality tab's "Not Price-Adjusted" list. The "Adjust prices from TradingView" button
 # (see run_tv_adjust) compares TradingView's already-adjusted history with ours and
-# stores one factor per event in NSE_DATA/DemergerAdjustments.csv. Every processing run
+# stores one factor per event in reference-data/DemergerAdjustments.csv. Every processing run
 # - including server start - then applies the stored factors through the SAME machinery
 # as splits/bonuses, with no TradingView access at all. Deleting a row from the CSV
 # undoes that correction on the next (re)process.
@@ -452,7 +464,7 @@ def correction_key(symbol, ex_date_str):
 def load_demerger_corrections(base_dir):
     """All rows of DemergerAdjustments.csv as dicts (missing file -> [])."""
     rows = []
-    for r in read_csv_file(os.path.join(base_dir, DATA_SUBDIR, CORRECTIONS_FILE)):
+    for r in read_csv_file(os.path.join(base_dir, REFERENCE_SUBDIR, CORRECTIONS_FILE)):
         symbol, ex_date = r.get('SYMBOL', ''), r.get('EXDATE', '')
         if not symbol or not parse_date_str(ex_date):
             continue
@@ -470,7 +482,8 @@ def load_demerger_corrections(base_dir):
 
 def save_demerger_corrections(base_dir, rows):
     """Write the corrections CSV atomically (newest ex-date first)."""
-    path = os.path.join(base_dir, DATA_SUBDIR, CORRECTIONS_FILE)
+    path = os.path.join(base_dir, REFERENCE_SUBDIR, CORRECTIONS_FILE)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + '.tmp'
     ordered = sorted(rows, key=lambda r: parse_date_str(r['exDate']) or datetime.min, reverse=True)
     with open(tmp, 'w', encoding='utf-8', newline='') as f:
@@ -970,8 +983,9 @@ def needs_processing(base_dir):
         return True
 
     json_mtime = os.path.getmtime(json_path)
-    for csv_file in [BHAV_FILE, BAND_FILE, SECTOR_FILE, MIDSMALL400_FILE, CORPACTIONS_FILE, CORRECTIONS_FILE]:
-        csv_path = os.path.join(data_dir, csv_file)
+    watched = [os.path.join(data_dir, f) for f in (BHAV_FILE, BAND_FILE, SECTOR_FILE, MIDSMALL400_FILE)]
+    watched += [os.path.join(base_dir, REFERENCE_SUBDIR, f) for f in (CORPACTIONS_FILE, CORRECTIONS_FILE)]
+    for csv_path in watched:
         if os.path.exists(csv_path) and os.path.getmtime(csv_path) > json_mtime:
             return True
 
@@ -1014,6 +1028,7 @@ def load_presets(base_dir):
 def save_presets(base_dir, presets):
     """Save presets to JSON file."""
     path = os.path.join(base_dir, PRESETS_FILE)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(presets, f, indent=2, ensure_ascii=False)
 
@@ -1754,11 +1769,41 @@ def get_data_files_info(base_dir):
             ref('Price band (combined)', BAND_FILE),
             ref('Equity list (ISIN master)', 'EQUITY_L.csv'),
             ref('MidSmallcap 400 constituents', MIDSMALL400_FILE),
-            ref('Corporate actions', CORPACTIONS_FILE),
+            ref('Corporate actions', CORPACTIONS_FILE, folder=os.path.join(base_dir, REFERENCE_SUBDIR)),
             ref('Sector mapping', SECTOR_FILE),
             ref('Processed data (dashboard JSON)', PROCESSED_FILE),
         ],
     }
+
+
+def migrate_legacy_file(base_dir, old_rel, new_rel):
+    """One-time, idempotent, NON-DESTRUCTIVE move of a data file to its new location. Returns a
+    description of what was done, or None if there was nothing to do.
+      - old missing                    -> nothing
+      - new missing                    -> move old -> new
+      - both, identical (ignoring CR)  -> remove the redundant old copy
+      - both, different                -> the NEWER one becomes the live file; the older one is set aside
+                                          as a .bak (git-ignored), never deleted - so no data can be lost
+    Needed because the old paths may still be in use (a server started before the move, the downloader run
+    from the old code) and because copies were added to git while the originals were still in place."""
+    old, new = os.path.join(base_dir, old_rel), os.path.join(base_dir, new_rel)
+    if not os.path.isfile(old):
+        return None
+    os.makedirs(os.path.dirname(new), exist_ok=True)
+    if not os.path.exists(new):
+        shutil.move(old, new)
+        return f'moved {old_rel} -> {new_rel}'
+    with open(old, 'rb') as a, open(new, 'rb') as b:
+        same = a.read().replace(b'\r\n', b'\n') == b.read().replace(b'\r\n', b'\n')
+    if same:
+        os.remove(old)
+        return f'removed {old_rel} (identical to {new_rel})'
+    if os.path.getmtime(old) > os.path.getmtime(new):
+        shutil.copy2(new, new + '.replaced.bak')
+        os.replace(old, new)
+        return f'{old_rel} was newer than {new_rel}: it is now the live file (previous copy kept as {new_rel}.replaced.bak)'
+    os.replace(old, old + '.superseded.bak')
+    return f'{new_rel} is newer than {old_rel}: kept it, old file set aside as {old_rel}.superseded.bak'
 
 
 class ThreadingNSEServer(http.server.ThreadingHTTPServer):
@@ -1782,6 +1827,14 @@ def run_server(port, base_dir, tv_port=tv_adjust.DEFAULT_CDP_PORT):
     """Start the HTTP server. `tv_port` is TradingView Desktop's DevTools port - only used
     when the Data Quality "Adjust prices from TradingView" button is clicked."""
     os.chdir(base_dir)
+
+    for old_rel, new_rel in LEGACY_LOCATIONS:
+        try:
+            msg = migrate_legacy_file(base_dir, old_rel, new_rel)
+        except OSError as e:
+            msg = f'could not migrate {old_rel} -> {new_rel}: {e}'
+        if msg:
+            print(f"[Server] Data layout: {msg}")
 
     # Pre-process data on startup if needed
     data_dir = os.path.join(base_dir, DATA_SUBDIR)
@@ -1824,13 +1877,13 @@ def run_server(port, base_dir, tv_port=tv_adjust.DEFAULT_CDP_PORT):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='NSE Dashboard Server')
     parser.add_argument('--port', type=int, default=DEFAULT_PORT, help=f'Port (default {DEFAULT_PORT})')
-    parser.add_argument('--dir', type=str, default=None, help='Project root: web root, NSE_DATA, presets.json (default: the parent of src/)')
+    parser.add_argument('--dir', type=str, default=None, help='Project root: web root, NSE_DATA, reference-data, scanner-presets (default: the parent of src/)')
     parser.add_argument('--tv-port', type=int, default=tv_adjust.DEFAULT_CDP_PORT,
                         help=f'TradingView Desktop DevTools port, used only by the Data Quality '
                              f'"Adjust prices from TradingView" button (default {tv_adjust.DEFAULT_CDP_PORT})')
     args = parser.parse_args()
 
-    # This file lives in <root>/src/; the project root (web root, NSE_DATA, presets.json) is one level up.
+    # This file lives in <root>/src/; the project root (web root, NSE_DATA, reference-data, scanner-presets) is one level up.
     base_dir = args.dir or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     if not os.path.isdir(base_dir):
         print(f"Error: {base_dir} is not a directory")

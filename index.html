@@ -767,7 +767,7 @@
     </div>
     <div class="dq-section-body" id="dqCorpActionBody" style="display:none;">
       <p style="color:var(--text2);font-size:12px;margin:8px 0;">Splits and bonuses ARE back-adjusted automatically and don't appear here. These are other corporate actions (demergers, NCRPS bonuses, capital reductions, etc.) from the last ~370 days that cause a real price discontinuity NSE doesn't publish a clean adjustment ratio for — SMA, 52W high/low, ADR, and change% may look distorted for these stocks until the affected window rolls past the ex-date.</p>
-      <p style="color:var(--text2);font-size:12px;margin:8px 0;">Use the button to correct these prices from TradingView's already-adjusted history. Corrected events are saved to <code>NSE_DATA/DemergerAdjustments.csv</code>, re-applied on every server start and removed from this list; anything TradingView can't confirm stays listed. TradingView is only contacted when you click — it must be running with <code>--remote-debugging-port=<span id="dqTvPort">9222</span></code> and have a chart open (your chart's symbol is restored afterwards).</p>
+      <p style="color:var(--text2);font-size:12px;margin:8px 0;">Use the button to correct these prices from TradingView's already-adjusted history. Corrected events are saved to <code>reference-data/DemergerAdjustments.csv</code>, re-applied on every server start and removed from this list; anything TradingView can't confirm stays listed. TradingView is only contacted when you click — it must be running with <code>--remote-debugging-port=<span id="dqTvPort">9222</span></code> and have a chart open (your chart's symbol is restored afterwards).</p>
       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:10px 0;">
         <button id="dqTvAdjustBtn" class="btn btn-primary" onclick="dqRunTvAdjust()">Adjust prices from TradingView</button>
         <span id="dqTvAdjustStatus" style="font-size:12px;color:var(--text2);"></span>
@@ -815,7 +815,7 @@
 <script src="js/lib/lightweight-charts.standalone.production.js"></script>
 <script src="js/ew-index.js?v=1"></script>
 <script src="js/industry-charts.js?v=17"></script>
-<script src="js/data-quality.js?v=6"></script>
+<script src="js/data-quality.js?v=7"></script>
 <script src="js/presets.js?v=8"></script>
 <script src="js/ui.js?v=8"></script>
 <script src="js/nse-download.js?v=4"></script>
