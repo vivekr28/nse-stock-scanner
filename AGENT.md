@@ -387,7 +387,7 @@ Filter labels use white text (`var(--text)`). `switchFilterTab()` toggles betwee
   - Breadth rank (40%) + Avg Monthly Change rank (30%) + Proximity to 52W High rank (30%)
   - Each component percentile-ranked across filtered industry set
 - Canvas horizontal bar chart (top 40 industries by RS) — hidden in favor of the all-periods table below when that's toggled on
-- Industry table + heatmap cards (top 30)
+- Industry Breakdown table lists **every** industry passing the filters (the chart is capped at the top 40, the heatmap cards at the top 30), in the same order as the chart (the Sort By metric = "filter order"). Every column header except `#` is click-to-sort (`sortIndustryBreakdown()`): first click uses the column's natural direction (A→Z for Industry/Sector, high→low for metrics, ascending for Avg Dist 52WH and Top 1M Loser), a second click flips it. The default filter order shows its arrow on the Sort By column; a manual sort shows a "Reset to filter order" button (`resetIndustryBreakdownSort()`) and is cleared automatically when Sort By (or the Money Flow period, in that mode) changes, but survives Min Stocks/Min Market Cap edits. Manual sorting only re-orders the table — the chart and heatmap stay in filter order. Ties keep filter order (stable sort); missing values always sort last.
 - Filterable by min stocks and min market cap (also applied to the Money Flow all-periods table)
 - Money flow lookup uses ISIN keys directly (matches `computeIndustryMoneyFlow()` output)
 - **Money Flow sort mode** (`Sort By → Money Flow`) reveals a period dropdown (1W/1M/3M/6M/1Y) driving the chart/table/heatmap, plus an **"All-periods table" checkbox** that replaces the RS bar chart with a dedicated `Industry × {1W,1M,3M,6M,1Y}` comparison table (`computeAllPeriodsMoneyFlow()`/`renderMoneyFlowAllPeriodsTable()`) — each cell shows the period's turnover *and* its % change vs. the prior equivalent period. Column headers are click-sortable by % change (not raw turnover, so you see where money is flowing fastest); the sort column auto-follows the period dropdown unless you've manually clicked a different column (tracked via `_mfAllPeriodTrack`), matching the single-period view's behavior.
@@ -513,6 +513,7 @@ At the user's request, the palette and typeface were re-sampled from `wealthlab.
 - `renderBreadth()` / `renderBreadthChart(canvasId, numDays)` — breadth bars + canvas charts
 - `renderSectorAnalysis()` — sector table + heatmap
 - `renderIndustryAnalysis()` — industry RS table + chart + heatmap + Money Flow all-periods table
+- `renderIndustryBreakdownTable()` / `sortIndustryBreakdown(key)` / `resetIndustryBreakdownSort()` — Industry Breakdown table (all filtered industries) and its click-to-sort headers; default order = Sort By/filter order
 - `renderRSChart(data)` — canvas horizontal bar chart
 - `renderDataQuality()` — cross-file matching report
 
