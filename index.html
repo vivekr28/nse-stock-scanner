@@ -707,6 +707,7 @@
       <div class="stat-card"><div class="label">Unmatched</div><div class="value" id="dqUnmatched">-</div></div>
       <div class="stat-card"><div class="label">Not Traded (Stale)</div><div class="value" id="dqStaleCount">-</div></div>
       <div class="stat-card"><div class="label">Unadjusted Corp Actions</div><div class="value" id="dqCorpActionCount">-</div></div>
+      <div class="stat-card"><div class="label">Price Adjustments Applied</div><div class="value" id="dqAdjustedCount">-</div></div>
     </div>
   </div>
   <div class="card dq-section" style="margin-bottom:16px;">
@@ -759,7 +760,7 @@
       <div class="table-wrap"><table id="dqNoBhavTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
     </div>
   </div>
-  <div class="card dq-section">
+  <div class="card dq-section" style="margin-bottom:16px;">
     <div class="dq-section-header" onclick="dqToggleSection('dqCorpAction')">
       <h4 style="margin:0;">Recent Corporate Actions Not Price-Adjusted</h4>
       <span class="dq-section-arrow" id="dqCorpActionArrow">&#9650;</span>
@@ -774,10 +775,35 @@
       <div class="table-wrap"><table id="dqCorpActionTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
     </div>
   </div>
+  <div class="card dq-section">
+    <div class="dq-section-header" onclick="dqToggleSection('dqAdjusted')">
+      <h4 style="margin:0;">Price Adjustments Applied</h4>
+      <span class="dq-section-arrow" id="dqAdjustedArrow">&#9650;</span>
+    </div>
+    <div class="dq-section-body" id="dqAdjustedBody" style="display:none;">
+      <p style="color:var(--text2);font-size:12px;margin:8px 0;">Every stock whose historical prices were adjusted so an ex-date doesn't show up as a fake crash: splits and bonuses (ratio from NSE's corporate-actions feed) and demergers (factor derived from TradingView — see the section above). <b>Factor</b> is what prices before the ex-date were multiplied by. Dividends are not adjusted. Stocks no longer trading, and events older than the price history the dashboard keeps, aren't listed.</p>
+      <p style="color:var(--text2);font-size:12px;margin:8px 0;">Use the button to check these against what TradingView shows: our daily closes are compared with TradingView's over their whole shared history, and any stock that differs is flagged. Read-only — no price is changed. TradingView Desktop must be running with <code>--remote-debugging-port=<span id="dqTvVerifyPort">9222</span></code> and have a chart open (your chart's symbol is restored afterwards). The first run takes about five minutes for ~200 stocks (it loads about two years of TradingView history for each); later runs only check what is still listed. Differences are explained where possible, e.g. TradingView adjusting for a rights issue that isn't in the corporate-actions data. If TradingView's own "adjust for dividends" setting is on, it shows up as small steady differences.</p>
+      <p style="color:var(--text2);font-size:12px;margin:8px 0;">This list is a to-do queue: a stock that matches TradingView is removed from it and only returns when it gets a new or changed adjustment. Stocks with a difference stay until they match, and the button re-checks only the stocks still listed.</p>
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:10px 0;">
+        <button id="dqTvVerifyBtn" class="btn btn-primary" onclick="dqRunTvVerify()">Verify against TradingView</button>
+        <span id="dqTvVerifyStatus" style="font-size:12px;color:var(--text2);"></span>
+      </div>
+      <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin:0 0 6px;font-size:12px;color:var(--text2);">
+        <label style="display:flex;align-items:center;gap:6px;font-weight:400;cursor:pointer;">
+          <input type="checkbox" id="dqTvShowVerified" onchange="dqToggleShowVerified(this.checked)"> Show verified stocks (<span id="dqTvVerifiedCount">0</span>)
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-weight:400;cursor:pointer;">
+          <input type="checkbox" id="dqTvVerifyAll"> Re-check verified stocks too (slower)
+        </label>
+      </div>
+      <div id="dqTvVerifySummary" style="font-size:12px;margin:8px 0 12px;"></div>
+      <div class="table-wrap"><table id="dqAdjustedTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
+    </div>
+  </div>
 </div>
 
 <!-- JS Modules (dependency order matters for const/let declarations) -->
-<script src="js/store.js?v=3"></script>
+<script src="js/store.js?v=4"></script>
 <script src="js/utils.js?v=2"></script>
 <script src="js/cache.js?v=2"></script>
 <script src="js/data-processor.js?v=2"></script>
@@ -789,10 +815,10 @@
 <script src="js/lib/lightweight-charts.standalone.production.js"></script>
 <script src="js/ew-index.js?v=1"></script>
 <script src="js/industry-charts.js?v=17"></script>
-<script src="js/data-quality.js?v=4"></script>
+<script src="js/data-quality.js?v=6"></script>
 <script src="js/presets.js?v=8"></script>
 <script src="js/ui.js?v=8"></script>
-<script src="js/nse-download.js?v=3"></script>
+<script src="js/nse-download.js?v=4"></script>
 
 </body>
 </html>

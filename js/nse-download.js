@@ -25,6 +25,7 @@ async function tryAutoFetchJSON() {
     Store.sectorMap = data.sectorMap || {};
     Store.ewIndex = data.ewIndex || null;
     Store.unadjustedCorpActions = data.unadjustedCorpActions || [];
+    Store.adjustedCorpActions = data.adjustedCorpActions || [];
 
     // Mark as loaded
     Store.loaded.bhav = true;

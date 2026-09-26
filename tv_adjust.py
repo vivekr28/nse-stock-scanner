@@ -144,7 +144,10 @@ _JS_STATE = """(() => {
 
 # Switch the chart to `sym` on the daily resolution, wait until the series has loaded
 # for exactly that symbol, then return [[unixSeconds, close], ...] for every loaded bar.
-_JS_LOAD_BARS = """(async (sym, resolution, timeoutMs) => {
+# TradingView only loads ~300 daily bars up front, so if `needFrom` (unix seconds, 0 = don't
+# care) is older than the first loaded bar, keep calling requestMoreData() (300 bars a call)
+# until the history reaches back far enough or runs out.
+_JS_LOAD_BARS = """(async (sym, resolution, timeoutMs, needFrom) => {
   const w = window.TradingViewApi._activeChartWidgetWV.value();
   const ms = w.chartModel().mainSeries();
   if (w.resolution() !== resolution) w.setResolution(resolution);
@@ -165,6 +168,17 @@ _JS_LOAD_BARS = """(async (sym, resolution, timeoutMs) => {
     const s1 = bars.size();
     await new Promise(r => setTimeout(r, 250));
     if (ms.isLoading() || bars.size() !== s1) continue;
+    for (let round = 0; needFrom > 0 && round < 6 && bars.valueAt(bars.firstIndex())[0] > needFrom
+                        && ms.requestMoreDataAvailable(); round++) {
+      const before = bars.size();
+      ms.requestMoreData(300);
+      const t1 = Date.now();
+      while (Date.now() - t1 < 10000) {
+        await new Promise(r => setTimeout(r, 150));
+        if (bars.size() > before && !ms.isLoading()) break;
+      }
+      if (bars.size() === before) break;
+    }
     const out = [];
     for (let i = bars.firstIndex(); i <= bars.lastIndex(); i++) {
       const v = bars.valueAt(i);
@@ -172,7 +186,7 @@ _JS_LOAD_BARS = """(async (sym, resolution, timeoutMs) => {
     }
     return { name: si.name, fullName: si.full_name, bars: out };
   }
-})(%s, %s, %d)"""
+})(%s, %s, %d, %d)"""
 
 _JS_RESTORE = """(async (sym, resolution) => {
   const w = window.TradingViewApi._activeChartWidgetWV.value();
@@ -239,11 +253,13 @@ class TradingViewChart:
             self._conn.close()
         self._conn = None
 
-    def daily_closes(self, nse_symbol, load_timeout=25):
-        """{date: close} for every daily bar TradingView has loaded for `nse_symbol`."""
+    def daily_closes(self, nse_symbol, since=None, load_timeout=25):
+        """{date: close} for the daily bars TradingView has for `nse_symbol`, loading older
+        history until it reaches back to the date `since` (or runs out)."""
         sym = tv_symbol(nse_symbol)
+        need_from = int(datetime(since.year, since.month, since.day, tzinfo=IST).timestamp()) if since else 0
         try:
-            res = self._conn.evaluate(_JS_LOAD_BARS % (json.dumps(sym), json.dumps('1D'), load_timeout * 1000))
+            res = self._conn.evaluate(_JS_LOAD_BARS % (json.dumps(sym), json.dumps('1D'), load_timeout * 1000, need_from))
         except OSError as e:
             raise TradingViewConnectionError(f'Lost connection to TradingView: {e}')
         want = sym.split(':', 1)[1]
@@ -297,3 +313,113 @@ def derive_correction(tv_closes, our_closes, ex_date):
                 'note': f'Implausible factor {factor:.4f} - not applied'}
     return {'status': 'adjusted', 'factor': round(factor, 6),
             'note': f'Pre-ex-date prices scaled by {factor:.5f} to match TradingView' + move}
+
+
+# ── Verifying our adjusted prices against TradingView ────────────────────────
+_MONTHS = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec')
+
+
+def format_date(d):
+    """date -> 'DD-Mon-YYYY', the dashboard's date format (English month names, no locale)."""
+    return f'{d.day:02d}-{_MONTHS[d.month - 1]}-{d.year}'
+
+
+def _explain_level_changes(common, ratios, our_closes, events, tolerance):
+    """Say what each level change in r(t) = TradingView / ours corresponds to. `events` are our
+    own adjustments as (ex_date, factor) - the factor pre-ex-date prices were multiplied by.
+    Walking forward in time, a step at date d means the two sources part ways there:
+      - next to one of our events and equal to that event's factor  -> TradingView is NOT
+        adjusted for it (ours moved by F, theirs didn't);
+      - next to one of our events but a different size              -> the two adjustments differ;
+      - nowhere near any event of ours                              -> TradingView adjusts for an
+        action our corporate-actions data doesn't contain (e.g. a rights issue).
+    A step immediately undone on the next bar is a one-bar blip, not a level change."""
+    by_date = {}
+    for ex, f in events:                       # several events on one day compound
+        by_date[ex] = by_date.get(ex, 1.0) * f
+    steps = []
+    for i in range(1, len(common)):
+        s = ratios[i] / ratios[i - 1]
+        if abs(s - 1) > tolerance + 0.01 / our_closes[common[i]]:
+            steps.append((i, s))
+    causes = []
+    for k, (i, s) in enumerate(steps):
+        if k + 1 < len(steps) and steps[k + 1][0] == i + 1 and abs(s * steps[k + 1][1] - 1) < 0.02:
+            continue                           # start of a one-bar blip
+        if k and steps[k - 1][0] == i - 1 and abs(s * steps[k - 1][1] - 1) < 0.02:
+            continue                           # end of a one-bar blip
+        d = common[i]
+        near = [(abs((ex - d).days), ex, f) for ex, f in by_date.items() if abs((ex - d).days) <= 4]
+        if near:
+            _, ex, f = min(near)
+            if abs(s / f - 1) < 0.05:
+                causes.append(f'TradingView shows no adjustment for the {format_date(ex)} event (dashboard applied x{f:.4g})')
+            else:
+                # TradingView's own factor = ours x (TradingView/ours before the step) = f / s
+                causes.append(f'Adjustments differ at {format_date(ex)}: dashboard x{f:.4g}, TradingView x{f / s:.4g}')
+        else:
+            causes.append(f'TradingView also scales prices before {format_date(d)} by x{1 / s:.4g}, which the dashboard '
+                          f'has no event for (a rights issue or other action missing from the corporate-actions data?)')
+    return causes[:3]
+
+
+def compare_series(our_closes, tv_closes, tolerance=0.01, min_bars=20, events=None):
+    """Compare our (already adjusted) daily closes with TradingView's over every date both
+    have. Both arguments are {date: close}.
+
+    A bar 'differs' when |TradingView / ours - 1| exceeds `tolerance` (1%) plus a rounding
+    allowance - our adjusted prices carry 2 decimals, so cheap stocks legitimately wobble
+    by more in percentage terms. Grading: 'match' (no bar differs), 'minor' (a few bars
+    differ, worst under 5%) or 'major' (worst >= 5%, or 5+ bars differ - i.e. a sustained
+    shift like a wrong split ratio). Too little overlap -> 'inconclusive'.
+
+    `events` (optional): this stock's own adjustments as [(ex_date, factor)]. They let the
+    result say WHY it differs (_explain_level_changes) and catch events that predate the
+    shared history - there the adjustment itself can't be tested, so a stock whose events
+    are all like that is 'inconclusive' rather than a hollow 'match'.
+
+    Also returns the dates inside the shared date range that only one side has
+    (tvOnlyDates / oursOnlyDates), which the caller aggregates into calendar differences.
+    """
+    events = events or []
+    empty = {'bars': 0, 'barsOff': 0, 'maxDevPct': None, 'worstDate': None, 'firstOff': None,
+             'lastOff': None, 'tvOnlyDates': [], 'oursOnlyDates': [], 'causes': []}
+    common = sorted(set(our_closes) & set(tv_closes))
+    if len(common) < min_bars:
+        return {**empty, 'status': 'inconclusive', 'bars': len(common),
+                'note': f'Only {len(common)} matching bars - too few to compare'}
+
+    ratios = [tv_closes[d] / our_closes[d] for d in common]
+    devs = [(d, r - 1) for d, r in zip(common, ratios)]
+    off = [(d, dev) for d, dev in devs if abs(dev) > tolerance + 0.01 / our_closes[d]]
+    worst_date, worst = max(devs, key=lambda x: abs(x[1]))
+    status = 'match'
+    if off:
+        status = 'major' if (abs(worst) >= 0.05 or len(off) >= 5) else 'minor'
+
+    lo, hi = common[0], common[-1]
+    untestable = [ex for ex, _ in events if ex <= lo]
+    if events and len(untestable) == len(events) and status == 'match':
+        status = 'inconclusive'
+
+    tv_only = sorted(d for d in tv_closes if lo <= d <= hi and d not in our_closes)
+    ours_only = sorted(d for d in our_closes if lo <= d <= hi and d not in tv_closes)
+    causes = _explain_level_changes(common, ratios, our_closes, events, tolerance) if off else []
+
+    if off:
+        note = (f"{len(off)} of {len(common)} bars differ by more than {tolerance * 100:.0f}% "
+                f"(worst {worst * 100:+.2f}% on {format_date(worst_date)})")
+    elif status == 'inconclusive':
+        note = (f'Adjustment predates the shared history ({format_date(lo)} onward) - '
+                f'both sides are already on the post-event scale, so it cannot be tested')
+    else:
+        note = f'Matches on all {len(common)} bars (largest difference {abs(worst) * 100:.2f}%)'
+        if untestable:
+            note += f'; {len(untestable)} older event(s) predate the shared history'
+    return {'status': status, 'bars': len(common), 'barsOff': len(off),
+            'maxDevPct': round(worst * 100, 3), 'worstDate': format_date(worst_date),
+            'firstOff': format_date(off[0][0]) if off else None,
+            'lastOff': format_date(off[-1][0]) if off else None,
+            'tvOnlyDates': [format_date(d) for d in tv_only],
+            'oursOnlyDates': [format_date(d) for d in ours_only],
+            'causes': causes, 'note': note}
