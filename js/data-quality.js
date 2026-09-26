@@ -116,6 +116,7 @@ function renderDataQuality() {
   dqLoadTvState();
   dqRenderAdjusted();
   dqLoadTvVerify();
+  dqLoadTvFull();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -444,5 +445,217 @@ async function dqPollTvVerify() {
   } finally {
     _dqVerify.polling = false;
     if (btn) btn.disabled = false;
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// FULL PRICE VERIFICATION  —  every stock against TradingView, then a report
+// ═══════════════════════════════════════════════════════════════════════════════
+// Like "Verify against TradingView" above, but for ALL stocks, on demand, and it ends with a report
+// (Markdown summary + CSV, written server-side to NSE_DATA/verification-reports/). Read-only. The server
+// checkpoints its progress, so a Stop / interruption can be resumed. The run and its results live
+// server-side: this only starts/stops it, polls its progress and shows the last saved run.
+let _dqFull = { polling: false, last: null, flagged: [], filter: 'all' };
+
+const DQ_FULL_CAUSE = {
+  'missing-event': 'TradingView adjusts for an action we have no event for',
+  'adjustments-differ': "Our adjustment differs from TradingView's",
+  'tv-no-adjustment': 'TradingView shows no adjustment for an event we applied',
+  'unexplained': 'Isolated bars differ (no level shift found)',
+};
+const DQ_FULL_SECONDS_PER_STOCK = 0.8;   // measured on real runs: 0.6-0.9 s a stock
+
+const dqFullInt = n => Number(n || 0).toLocaleString('en-US');
+function dqFullDuration(seconds) {
+  const m = Math.round(seconds / 60);
+  if (m < 1) return 'under a minute';
+  return m < 90 ? `${m} min` : `${(m / 60).toFixed(1)} h`;
+}
+
+function dqFullSetStatus(text, kind) {
+  const el = document.getElementById('dqFullStatus');
+  if (!el) return;
+  el.textContent = text;
+  el.style.color = kind === 'error' ? 'var(--red)' : kind === 'ok' ? 'var(--green)' : 'var(--text2)';
+}
+
+// Buttons for the three situations: idle (maybe with an interrupted run to resume), running, stopping.
+function dqFullSetRunning(running, stopping) {
+  const last = _dqFull.last;
+  const resumable = !running && last && last.resumable;
+  document.getElementById('dqFullBtn').disabled = running;
+  document.getElementById('dqFullScope').disabled = running;
+  const resume = document.getElementById('dqFullResumeBtn');
+  resume.style.display = resumable ? '' : 'none';
+  if (resumable) resume.textContent = `Resume (${dqFullInt(last.remaining)} left)`;
+  const stop = document.getElementById('dqFullStopBtn');
+  stop.style.display = running ? '' : 'none';
+  stop.disabled = !!stopping;
+  stop.textContent = stopping ? 'Stopping…' : 'Stop';
+  document.getElementById('dqFullProgress').style.display = running ? '' : 'none';
+}
+
+function dqFullFilterChange(v) {
+  _dqFull.filter = v;
+  dqRenderFullTable();
+}
+
+function dqRenderFullSummary() {
+  const el = document.getElementById('dqFullSummary');
+  const badge = document.getElementById('dqFullBadge');
+  const last = _dqFull.last;
+  const stocks = Object.keys(Store.latestBySymbol || {}).length;
+  document.getElementById('dqFullEta').textContent = stocks
+    ? `A run over all ${dqFullInt(stocks)} stocks takes roughly ${dqFullDuration(stocks * DQ_FULL_SECONDS_PER_STOCK)}.` : '';
+  badge.textContent = '';
+  if (!last) { el.innerHTML = '<span style="color:var(--text2)">No full verification has been run yet.</span>'; return; }
+
+  const c = last.categories || {};
+  const flaggedN = (c.minor || 0) + (c.major || 0);
+  const cannot = (c['not-found'] || 0) + (c['tv-error'] || 0) + (c['few-bars'] || 0) + (c.predates || 0) + (c.other || 0);
+  const scope = last.limit ? `top ${dqFullInt(last.limit)} by turnover` : 'all stocks';
+  let html = `<div><span style="color:var(--text2)">Last run ${escapeHtml(last.startedAt || '?')} → ${escapeHtml(last.finishedAt || '(interrupted)')}` +
+    `${last.durationSec ? ' (' + dqFullDuration(last.durationSec) + ')' : ''} · prices up to ${escapeHtml(last.dataDate || '?')} · ${scope}</span>` +
+    `${last.complete ? '' : ' <span class="negative">· ' + (last.stopped ? 'stopped' : 'interrupted') + ` at ${dqFullInt(last.verified)} of ${dqFullInt(last.universe)} stocks</span>`}</div>`;
+  html += `<div style="margin-top:4px;"><span class="positive">${dqFullInt(c.match)} match</span> · ` +
+    `<span class="negative">${dqFullInt(c.major)} major</span> · <span style="color:var(--orange)">${dqFullInt(c.minor)} minor</span> · ` +
+    `<span style="color:var(--text2)">${dqFullInt(cannot)} could not be compared` +
+    (cannot ? ` (${[['not-found', 'not on TradingView'], ['few-bars', 'too little history'], ['predates', 'adjustment predates history'], ['tv-error', 'TradingView error'], ['other', 'other']]
+      .filter(([k]) => c[k]).map(([k, label]) => `${dqFullInt(c[k])} ${label}`).join(', ')})` : '') + '</span></div>';
+  if (last.report) {
+    html += `<div style="margin-top:6px;"><a href="/api/tv-full/report?format=md" style="color:var(--accent);">Download report (.md)</a> · ` +
+      `<a href="/api/tv-full/report?format=csv" style="color:var(--accent);">Download data (.csv)</a> ` +
+      `<span style="color:var(--text2)">· saved as ${escapeHtml(last.report.md)} in NSE_DATA/verification-reports/</span></div>`;
+  }
+  const cal = _dqFull.calendar || {};
+  if ((cal.tvOnly || []).length || (cal.oursOnly || []).length) {
+    html += `<div style="color:var(--text2);margin-top:4px;">Calendar: TradingView has ${(cal.tvOnly || []).length} trading day(s) we lack, we have ${(cal.oursOnly || []).length} it lacks (details in the report).</div>`;
+  }
+  if (c.major) html += `<div class="negative" style="margin-top:4px;">⚠ ${dqFullInt(c.major)} stock${c.major === 1 ? '' : 's'} differ materially from TradingView — see the table below and the report.</div>`;
+  el.innerHTML = html;
+  if (c.major) { badge.style.color = 'var(--red)'; badge.textContent = `⚠ ${c.major} major`; }
+  else if (flaggedN) { badge.style.color = 'var(--orange)'; badge.textContent = `${flaggedN} minor`; }
+  else if (last.complete) { badge.style.color = 'var(--green)'; badge.textContent = '✓ all match'; }
+}
+
+function dqRenderFullTable() {
+  const t = document.getElementById('dqFullTable');
+  t.querySelector('thead tr').innerHTML =
+    '<th>#</th><th>Symbol</th><th>Grade</th><th>Max dev</th><th>Latest-bar dev</th><th>Differs</th><th>Bars off</th><th>Turnover (Cr)</th><th>Why</th>';
+  const all = _dqFull.flagged || [];
+  const rows = _dqFull.filter === 'major' ? all.filter(r => r.status === 'major') : all;
+  const CAP = 500;
+  let empty = '';
+  if (!_dqFull.last) empty = 'No full verification has been run yet.';
+  else if (!rows.length) empty = all.length ? 'No major differences.' : '✓ No stock differs from TradingView.';
+  t.querySelector('tbody').innerHTML = empty
+    ? `<tr><td colspan="9" style="text-align:center;color:${_dqFull.last ? 'var(--green)' : 'var(--text2)'}">${empty}</td></tr>`
+    : rows.slice(0, CAP).map((r, i) => {
+      const causes = (r.causes || []).map(c => `<div style="font-size:11px;margin-top:2px">→ ${escapeHtml(c)}</div>`).join('');
+      const nse = (r.nse || []).map(n => `<div style="font-size:11px;margin-top:2px;color:var(--orange)">NSE feed: ${escapeHtml(n)} — in CorporateActions.csv but not price-adjusted</div>`).join('');
+      const why = `<span style="color:var(--text2);font-size:11px">${escapeHtml(DQ_FULL_CAUSE[r.cause] || r.cause || '')}</span>` +
+        (causes || `<div style="font-size:11px;margin-top:2px;color:var(--text2)">${escapeHtml(r.note || '')}</div>`) + nse;
+      return `<tr${r.status === 'major' ? ' style="background:rgba(248,113,113,.08)"' : ''}>
+        <td>${i + 1}</td><td>${escapeHtml(r.symbol)}${r.adjusted ? ' <span style="color:var(--text2);font-size:11px" title="The dashboard price-adjusted this stock">(adj.)</span>' : ''}</td>
+        <td>${r.status === 'major' ? '<span class="negative" style="font-weight:700">MAJOR</span>' : '<span style="color:var(--orange);font-weight:600">Minor</span>'}</td>
+        <td>${fmtPct(r.maxDevPct)}</td><td>${fmtPct(r.endDevPct)}</td>
+        <td style="white-space:nowrap">${r.firstOff ? escapeHtml(r.firstOff) + ' → ' + escapeHtml(r.lastOff) : '-'}</td>
+        <td>${r.barsOff}/${r.bars}</td><td>${Number(r.turnover || 0).toLocaleString('en-US', { maximumFractionDigits: 1 })}</td>
+        <td>${why}</td></tr>`;
+    }).join('') + (rows.length > CAP ? `<tr><td colspan="9" style="text-align:center;color:var(--text2)">… and ${dqFullInt(rows.length - CAP)} more — see the CSV.</td></tr>` : '');
+}
+
+// The saved run (summary + flagged stocks). Two small requests only when nothing is running.
+async function dqLoadFullResults() {
+  try {
+    const resp = await fetch('/api/tv-full/results', { cache: 'no-store' });
+    if (!resp.ok) return;
+    const j = await resp.json();
+    _dqFull.last = j.summary || null;
+    _dqFull.flagged = j.flagged || [];
+    _dqFull.calendar = j.calendar || null;
+  } catch (e) { /* no server */ }
+  dqRenderFullSummary();
+  dqRenderFullTable();
+}
+
+async function dqLoadTvFull() {
+  try {
+    const resp = await fetch('/api/tv-full/status', { cache: 'no-store' });
+    if (!resp.ok) return;
+    const s = await resp.json();
+    const portEl = document.getElementById('dqFullPort');
+    if (portEl && s.tvPort) portEl.textContent = s.tvPort;
+    if (s.status === 'running') {
+      dqFullSetRunning(true, s.stopping);
+      dqPollTvFull();
+      return;
+    }
+    await dqLoadFullResults();
+    dqFullSetRunning(false);
+  } catch (e) { /* no server - nothing to show */ }
+}
+
+async function dqRunTvFull(resume) {
+  dqFullSetRunning(true);
+  dqFullSetStatus('Starting…');
+  try {
+    const params = [];
+    const limit = document.getElementById('dqFullScope').value;
+    if (resume) params.push('resume=1');
+    else if (limit) params.push('limit=' + encodeURIComponent(limit));
+    const resp = await fetch('/api/tv-full/start' + (params.length ? '?' + params.join('&') : ''),
+      { method: 'POST', headers: { 'X-Requested-With': 'nse-dashboard' } });
+    const j = await resp.json().catch(() => ({}));
+    if (!resp.ok || j.ok === false) throw new Error(j.error || `Server returned HTTP ${resp.status}`);
+  } catch (e) {
+    dqFullSetStatus(e.message, 'error');
+    dqFullSetRunning(false);
+    return;
+  }
+  dqPollTvFull();
+}
+
+async function dqStopTvFull() {
+  dqFullSetRunning(true, true);
+  dqFullSetStatus('Stopping — finishing the current stock and saving progress…');
+  try {
+    await fetch('/api/tv-full/stop', { method: 'POST', headers: { 'X-Requested-With': 'nse-dashboard' } });
+  } catch (e) { dqFullSetStatus('Could not reach the server: ' + e.message, 'error'); }
+}
+
+async function dqPollTvFull() {
+  if (_dqFull.polling) return;
+  _dqFull.polling = true;
+  try {
+    for (;;) {
+      const s = await (await fetch('/api/tv-full/status', { cache: 'no-store' })).json();
+      if (s.status === 'running') {
+        dqFullSetRunning(true, s.stopping);
+        const done = s.current || 0, total = s.total || 0;
+        document.getElementById('dqFullFill').style.width = (total ? Math.min(100, done / total * 100) : 0) + '%';
+        const elapsed = Date.now() / 1000 - (s.startedAt || Date.now() / 1000);
+        const eta = done >= 5 && total > done ? ` · about ${dqFullDuration(elapsed / done * (total - done))} left` : '';
+        const c = s.counts || {};
+        dqFullSetStatus(s.stopping ? 'Stopping — finishing the current stock and saving progress…' : s.step);
+        document.getElementById('dqFullDetail').textContent = total
+          ? `${dqFullInt(done)} of ${dqFullInt(total)} checked${eta} · so far ${dqFullInt(c.match)} match, ${dqFullInt(c.major)} major, ${dqFullInt(c.minor)} minor, ${dqFullInt(c.inconclusive)} not comparable`
+          : '';
+        await new Promise(r => setTimeout(r, 700));
+        continue;
+      }
+      dqFullSetRunning(false);
+      await dqLoadFullResults();
+      dqFullSetRunning(false);   // the summary just loaded decides whether Resume is offered
+      if (s.status === 'error') dqFullSetStatus(s.error || 'Verification failed.', 'error');
+      else dqFullSetStatus(s.step + (s.warning ? ' ' + s.warning : ''), s.warning ? 'error' : 'ok');
+      dqLoadTvVerify();   // a full run also updates the "Price Adjustments Applied" verification list
+      break;
+    }
+  } catch (e) {
+    dqFullSetStatus('Lost contact with the server: ' + e.message, 'error');
+  } finally {
+    _dqFull.polling = false;
   }
 }
