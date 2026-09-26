@@ -237,11 +237,16 @@ def parse_corp_action_ratio(subject):
     return ratio
 
 
-def load_split_bonus_events(base_dir, latest_date_str, recognized=None):
+def load_split_bonus_events(base_dir, latest_date_str, recognized=None, earliest_date_str=None):
     """Read CorporateActions.csv and return (events, unhandled). If a list is passed as
     `recognized`, every row that parsed to a ratio is also appended to it as
     {isin, symbol, exDate, subject, ratio} (used for the Data Quality "Price Adjustments
-    Applied" list; the return value is unaffected).
+    Applied" list; the return value is unaffected). `earliest_date_str` is the first date of
+    the price history we hold: recognized split/bonus events with an earlier exDate are
+    ignored. CorporateActions.csv is a permanent, ever-growing archive, and such an event
+    cannot change any stored price (every day is on the post-event scale already) - its only
+    possible effect would be to switch on ISIN bridging for a stock that has no in-window
+    event, so it is dropped up front. (Unhandled rows are not affected by this.)
       - events and unhandled as follows:
       - events: {isin: [(exDate_dt, ratio, symbol), ...]} sorted ascending,
         limited to events whose exDate has already occurred (<= latest_date).
@@ -262,6 +267,7 @@ def load_split_bonus_events(base_dir, latest_date_str, recognized=None):
         return {}, []
 
     latest_dt = parse_date_str(latest_date_str) if latest_date_str else None
+    earliest_dt = parse_date_str(earliest_date_str) if earliest_date_str else None
     rows = read_csv_file(path)
     events = defaultdict(list)
     unhandled = []
@@ -286,6 +292,8 @@ def load_split_bonus_events(base_dir, latest_date_str, recognized=None):
             skipped_subjects.append(subject)
             unhandled.append({'isin': isin, 'symbol': symbol, 'exDate': ex_date_str, 'subject': subject})
             continue
+        if earliest_dt and ex_dt < earliest_dt:
+            continue  # predates all price history we hold - cannot change a price (see docstring)
         events[isin].append((ex_dt, ratio, symbol))
         if recognized is not None:
             recognized.append({'isin': isin, 'symbol': symbol, 'exDate': ex_date_str,
@@ -660,7 +668,8 @@ def process_data(base_dir, progress_cb=None):
     t1b = time.time()
     report(f"  Applying split/bonus price adjustments...")
     recognized_corp_events = []
-    corp_events, unhandled_corp_events = load_split_bonus_events(base_dir, latest_date, recognized_corp_events)
+    corp_events, unhandled_corp_events = load_split_bonus_events(
+        base_dir, latest_date, recognized_corp_events, dates[0] if dates else None)
     demerger_corrections = load_demerger_corrections(base_dir)
     corrected_keys = add_demerger_corrections(corp_events, demerger_corrections, latest_date)
     corp_events = bridge_split_induced_isin_changes(daily_by_symbol, symbol_to_isin, corp_events)

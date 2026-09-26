@@ -5,7 +5,7 @@ re-downloadable), these can't be recovered from NSE later, so the repo is their 
 
 | File | What it is | Written by |
 |---|---|---|
-| `CorporateActions.csv` | NSE's splits / bonuses / demergers (`ISIN, SYMBOL, EXDATE, SUBJECT`). NSE only serves a rolling ~3-year window and the downloader overwrites this file on every run, so events that age out of that window are gone from NSE for good. Git history keeps them. | `Download-NSE-Bhavcopy.ps1` (Refresh Data / `Start-Dashboard.ps1`); rows are written sorted by ex-date, symbol, subject so an unchanged feed leaves the file untouched |
+| `CorporateActions.csv` | NSE's splits / bonuses / demergers (`ISIN, SYMBOL, EXDATE, SUBJECT`). NSE only serves a rolling window, so this file is a permanent **archive**: each download replaces the rows inside NSE's window with its fresh copy and keeps everything older, so events that age out are never lost. Run `Download-NSE-Bhavcopy.ps1 -CorpActionsFrom "01-Jan-2010"` once to archive everything NSE still serves. The server ignores events older than its price history, so the archive can grow safely. | `Download-NSE-Bhavcopy.ps1` (Refresh Data / `Start-Dashboard.ps1`); rows are written sorted by ex-date, symbol, subject so an unchanged feed leaves the file untouched |
 | `DemergerAdjustments.csv` | Price-correction factors for demergers, derived from TradingView (`ISIN, SYMBOL, EXDATE, FACTOR, STATUS, CHECKED_AT, NOTE`). Only rows with `STATUS = adjusted` change prices. Can only be re-derived for events in the last ~370 days, and needs TradingView. Delete a row to undo that correction. | The Data Quality tab's "Adjust prices from TradingView" button |
 
 Presets live next to this in `scanner-presets/presets.json` (also tracked).
