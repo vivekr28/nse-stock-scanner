@@ -16,7 +16,7 @@ import time
 import argparse
 import threading
 import subprocess
-from datetime import datetime
+from datetime import datetime, timedelta
 from collections import defaultdict
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
@@ -34,6 +34,10 @@ PRESETS_FILE = 'presets.json'
 MIDSMALL400_FILE = 'MidSmallcap400_Constituents.csv'
 CORPACTIONS_FILE = 'CorporateActions.csv'
 CORRECTIONS_FILE = 'DemergerAdjustments.csv'  # TradingView-derived price corrections (see tv_adjust.py)
+VERIFY_FILE = 'TradingViewVerification.json'  # last "Verify against TradingView" result (see run_tv_verify)
+# Bump whenever processed_data.json gains/changes a field the client relies on: startup then
+# reprocesses an older cache by itself instead of silently serving output missing the new field.
+PROCESSED_SCHEMA = 2
 CORRECTION_COLUMNS = ['ISIN', 'SYMBOL', 'EXDATE', 'FACTOR', 'STATUS', 'CHECKED_AT', 'NOTE']
 
 # ─── TradingView correction run state (polled by the Data Quality tab) ───────
@@ -51,6 +55,20 @@ _tv_state = {
     'warning': None,
     'adjusted': 0,      # events newly corrected by the last run
     'results': [],      # [{symbol, exDate, status, factor, note}] for the last run
+}
+
+# Same for "Verify against TradingView" (compares our adjusted prices with TradingView's).
+# Shares _tv_lock with the correction run: both drive the one TradingView chart, so only
+# one of them may run at a time.
+_tv_verify_state = {
+    'status': 'idle',   # 'idle' | 'running' | 'done' | 'error'
+    'step': '',
+    'current': 0,
+    'total': 0,
+    'startedAt': None,
+    'finishedAt': None,
+    'error': None,
+    'warning': None,
 }
 
 # ─── Reprocess progress state (for the /reprocess.html page) ─────────────────
@@ -207,8 +225,12 @@ def parse_corp_action_ratio(subject):
     return ratio
 
 
-def load_split_bonus_events(base_dir, latest_date_str):
-    """Read CorporateActions.csv and return (events, unhandled):
+def load_split_bonus_events(base_dir, latest_date_str, recognized=None):
+    """Read CorporateActions.csv and return (events, unhandled). If a list is passed as
+    `recognized`, every row that parsed to a ratio is also appended to it as
+    {isin, symbol, exDate, subject, ratio} (used for the Data Quality "Price Adjustments
+    Applied" list; the return value is unaffected).
+      - events and unhandled as follows:
       - events: {isin: [(exDate_dt, ratio, symbol), ...]} sorted ascending,
         limited to events whose exDate has already occurred (<= latest_date).
         An announced-but-not-yet-effective split must NOT be applied yet -
@@ -253,6 +275,9 @@ def load_split_bonus_events(base_dir, latest_date_str):
             unhandled.append({'isin': isin, 'symbol': symbol, 'exDate': ex_date_str, 'subject': subject})
             continue
         events[isin].append((ex_dt, ratio, symbol))
+        if recognized is not None:
+            recognized.append({'isin': isin, 'symbol': symbol, 'exDate': ex_date_str,
+                               'subject': subject, 'ratio': ratio})
 
     if skipped_subjects:
         uniq_skipped = sorted(set(skipped_subjects))
@@ -481,6 +506,39 @@ def add_demerger_corrections(events_by_isin, corrections, latest_date_str):
     return applied
 
 
+def build_adjusted_corp_actions(recognized, corrections, corrected_keys, latest_by_symbol,
+                                daily_by_symbol, symbol_to_isin, max_days):
+    """The Data Quality "Price Adjustments Applied" list: every split/bonus and every
+    TradingView demerger correction that actually changed prices the dashboard keeps
+    (stock still trading, ex-date inside its retained window - an older event has no
+    visible price effect). `factor` is what pre-ex-date prices were multiplied by
+    (1/ratio for splits/bonuses). Sorted newest ex-date first."""
+    out, seen = [], set()
+
+    def add(isin_hint, symbol, ex_date_str, kind, detail, factor):
+        isin = symbol_to_isin.get(normalize_symbol(symbol)) or isin_hint
+        latest, days, ex_dt = latest_by_symbol.get(isin), daily_by_symbol.get(isin), parse_date_str(ex_date_str)
+        if not latest or not days or not ex_dt:
+            return
+        first_dt = parse_date_str(days[-max_days:][0]['date'])
+        if first_dt and ex_dt <= first_dt:
+            return
+        key = (isin, ex_dt, kind, detail)
+        if key in seen:
+            return
+        seen.add(key)
+        out.append({'isin': isin, 'symbol': latest['symbol'], 'exDate': ex_date_str,
+                    'kind': kind, 'detail': detail, 'factor': round(factor, 6)})
+
+    for ev in recognized:
+        add(ev['isin'], ev['symbol'], ev['exDate'], 'split-bonus', ev['subject'], 1.0 / ev['ratio'])
+    for c in corrections:
+        if correction_key(c['symbol'], c['exDate']) in corrected_keys:
+            add(c['isin'], c['symbol'], c['exDate'], 'demerger', 'Demerger (factor derived from TradingView)', c['factor'])
+    out.sort(key=lambda e: parse_date_str(e['exDate']) or datetime.min, reverse=True)
+    return out
+
+
 def process_data(base_dir, progress_cb=None):
     """Process raw CSVs into pre-computed JSON. Mirrors JS processData().
     `progress_cb`, if given, is called with a short human-readable phase
@@ -588,8 +646,10 @@ def process_data(base_dir, progress_cb=None):
     # indicator below is computed from these prices.
     t1b = time.time()
     report(f"  Applying split/bonus price adjustments...")
-    corp_events, unhandled_corp_events = load_split_bonus_events(base_dir, latest_date)
-    corrected_keys = add_demerger_corrections(corp_events, load_demerger_corrections(base_dir), latest_date)
+    recognized_corp_events = []
+    corp_events, unhandled_corp_events = load_split_bonus_events(base_dir, latest_date, recognized_corp_events)
+    demerger_corrections = load_demerger_corrections(base_dir)
+    corrected_keys = add_demerger_corrections(corp_events, demerger_corrections, latest_date)
     corp_events = bridge_split_induced_isin_changes(daily_by_symbol, symbol_to_isin, corp_events)
     apply_split_adjustments(daily_by_symbol, corp_events)
     print(f"    Done in {time.time()-t1b:.1f}s")
@@ -782,6 +842,10 @@ def process_data(base_dir, progress_cb=None):
             for d in recent_days
         ]
 
+    adjusted_corp_actions = build_adjusted_corp_actions(
+        recognized_corp_events, demerger_corrections, corrected_keys,
+        latest_by_symbol, daily_by_symbol, symbol_to_isin, MAX_DAILY_DAYS)
+
     report(f"  Computing equal-weight MidSmallcap 400 index...")
     ew_index = compute_equal_weight_index(base_dir, daily_by_symbol, symbol_to_isin, dates)
     if ew_index:
@@ -790,6 +854,7 @@ def process_data(base_dir, progress_cb=None):
         print(f"    Skipped ({MIDSMALL400_FILE} missing or no constituents matched)")
 
     result = {
+        'schemaVersion': PROCESSED_SCHEMA,  # keep FIRST - needs_processing() reads it from the file's head
         'latestDate': latest_date,
         'dates': dates,
         'latestBySymbol': latest_by_symbol,
@@ -801,6 +866,7 @@ def process_data(base_dir, progress_cb=None):
         'staleStocks': stale_stocks,
         'ewIndex': ew_index,
         'unadjustedCorpActions': unadjusted_corp_actions,
+        'adjustedCorpActions': adjusted_corp_actions,
         'processedAt': datetime.now().isoformat(),
     }
 
@@ -893,6 +959,14 @@ def needs_processing(base_dir):
     json_path = os.path.join(data_dir, PROCESSED_FILE)
 
     if not os.path.exists(json_path):
+        return True
+
+    # Cache written by older code (no / lower schemaVersion, which process_data() writes as the
+    # file's very first key)? Regenerate so the new fields exist - without this a restart alone
+    # keeps serving the stale cache. Only the first few bytes are read.
+    with open(json_path, 'r', encoding='utf-8') as f:
+        m = re.match(r'\{"schemaVersion":(\d+)', f.read(64))
+    if not m or int(m.group(1)) < PROCESSED_SCHEMA:
         return True
 
     json_mtime = os.path.getmtime(json_path)
@@ -997,7 +1071,8 @@ def run_tv_adjust(base_dir, port):
                 else:
                     try:
                         res = tv_adjust.derive_correction(
-                            chart.daily_closes(ev['symbol']), item['ours'], item['key'][1])
+                            chart.daily_closes(ev['symbol'], since=item['key'][1] - timedelta(days=15)),
+                            item['ours'], item['key'][1])
                     except tv_adjust.TradingViewConnectionError as e:
                         stopped_early = str(e)
                         break
@@ -1041,6 +1116,148 @@ def run_tv_adjust(base_dir, port):
         st['adjusted'] = newly_adjusted
         if stopped_early:
             st['warning'] = f'Stopped early: {stopped_early}'
+        st['status'] = 'done'
+    except (tv_adjust.TradingViewError, RuntimeError, OSError, ValueError, KeyError) as e:
+        st['status'] = 'error'
+        st['error'] = str(e)
+    except Exception as e:  # never leave the UI stuck on "running"
+        st['status'] = 'error'
+        st['error'] = f'Unexpected error: {e}'
+    finally:
+        st['finishedAt'] = time.time()
+
+
+def load_verification(base_dir):
+    """The last saved "Verify against TradingView" result, or None."""
+    path = os.path.join(base_dir, DATA_SUBDIR, VERIFY_FILE)
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def save_verification(base_dir, payload):
+    path = os.path.join(base_dir, DATA_SUBDIR, VERIFY_FILE)
+    tmp = path + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(payload, f, separators=(',', ':'))
+    os.replace(tmp, path)
+
+
+def adjustments_match(stored, current):
+    """Do two [[exDate, factor], ...] lists describe the same set of price adjustments?
+    Order-insensitive; factors compared with a small relative tolerance. `stored` may be None
+    (results saved before adjustments were recorded) - then nothing matches."""
+    if not isinstance(stored, list) or len(stored) != len(current):
+        return False
+    a, b = sorted((str(d), float(f)) for d, f in stored), sorted((str(d), float(f)) for d, f in current)
+    return all(x[0] == y[0] and abs(x[1] - y[1]) <= 1e-6 * max(1.0, abs(y[1])) for x, y in zip(a, b))
+
+
+def run_tv_verify(base_dir, port, verify_all=False):
+    """Background worker behind POST /api/tv-verify/start. For the stocks in the Data Quality
+    "Price Adjustments Applied" list (splits, bonuses and TradingView demerger corrections),
+    compare our adjusted daily closes with TradingView's over their whole shared history
+    (tv_adjust.compare_series) and grade each stock match / minor / major / inconclusive.
+
+    A stock that already verified as 'match' for exactly the same adjustments is skipped
+    (the tab hides it from the list, and only comes back when a new/changed adjustment makes
+    the stored result stale) - so a repeat run only checks what's new or still flagged.
+    `verify_all` re-checks everything. Results are MERGED into the saved file.
+
+    Read-only apart from the result file: no price is changed. The user's chart symbol and
+    resolution are restored afterwards. Also reports calendar differences - dates TradingView
+    has that we don't (or vice versa) for most stocks, e.g. a special Sunday session."""
+    st = _tv_verify_state
+    try:
+        st['step'] = 'Reading dashboard data...'
+        with _cache_lock:
+            data = load_processed_data(base_dir)
+        if not data:
+            raise RuntimeError('No processed data available yet - reprocess first.')
+
+        cols = data.get('dailyCols') or []
+        date_i, close_i = cols.index('date'), cols.index('close')
+        daily = data.get('dailyBySymbol') or {}
+        stocks = {}
+        for a in data.get('adjustedCorpActions') or []:
+            isin = a['isin']
+            days = daily.get(isin)
+            if not days:
+                continue
+            if isin not in stocks:
+                stocks[isin] = {'symbol': a['symbol'], 'events': [], 'sig': [],
+                                'ours': {parse_date_str(r[date_i]).date(): r[close_i] for r in days}}
+            stocks[isin]['events'].append((parse_date_str(a['exDate']).date(), a['factor']))
+            stocks[isin]['sig'].append([a['exDate'], a['factor']])
+        data = daily = None  # only the per-stock closes are kept
+
+        prev = load_verification(base_dir) or {}
+        # Keep only earlier results that still describe the stock's CURRENT adjustments.
+        kept = {i: r for i, r in (prev.get('stocks') or {}).items()
+                if i in stocks and adjustments_match(r.get('events'), stocks[i]['sig'])}
+        todo = {i: s for i, s in stocks.items()
+                if verify_all or kept.get(i, {}).get('status') != 'match'}
+
+        st.update(total=len(todo), current=0)
+        if not stocks:
+            st['step'] = 'Nothing to verify - no price adjustments are listed.'
+            st['status'] = 'done'
+            return
+        if not todo:
+            st['step'] = 'Everything is already verified - nothing new to check.'
+            st['status'] = 'done'
+            return
+
+        results = {}
+        tv_only, ours_only = defaultdict(int), defaultdict(int)
+        stopped_early = None
+        stamp = datetime.now().strftime('%Y-%m-%d %H:%M')
+        with tv_adjust.TradingViewChart(port) as chart:
+            for i, (isin, s) in enumerate(todo.items()):
+                st.update(step=f"Verifying {s['symbol']} against TradingView", current=i)
+                try:
+                    res = tv_adjust.compare_series(
+                        s['ours'], chart.daily_closes(s['symbol'], since=min(s['ours'])), events=s['events'])
+                except tv_adjust.TradingViewConnectionError as e:
+                    stopped_early = str(e)
+                    break
+                except tv_adjust.TradingViewError as e:
+                    res = {'status': 'inconclusive', 'bars': 0, 'barsOff': 0, 'maxDevPct': None,
+                           'worstDate': None, 'firstOff': None, 'lastOff': None,
+                           'tvOnlyDates': [], 'oursOnlyDates': [], 'causes': [], 'note': str(e)}
+                for d in res.pop('tvOnlyDates'):
+                    tv_only[d] += 1
+                for d in res.pop('oursOnlyDates'):
+                    ours_only[d] += 1
+                res.update(symbol=s['symbol'], events=s['sig'], verifiedAt=stamp)
+                results[isin] = res
+
+        merged = {**kept, **results}
+        summary = {k: sum(1 for r in merged.values() if r['status'] == k)
+                   for k in ('match', 'minor', 'major', 'inconclusive')}
+        # A date is a calendar difference only if it shows up for at least half the stocks -
+        # meaningful only for a reasonably large run; a small re-check keeps the earlier finding.
+        if len(results) >= 10:
+            cutoff = max(3, len(results) // 2)
+            calendar = {
+                'tvOnly': sorted((d for d, n in tv_only.items() if n >= cutoff), key=lambda x: parse_date_str(x)),
+                'oursOnly': sorted((d for d, n in ours_only.items() if n >= cutoff), key=lambda x: parse_date_str(x)),
+            }
+        else:
+            calendar = prev.get('calendar') or {'tvOnly': [], 'oursOnly': []}
+        if results:
+            save_verification(base_dir, {
+                'verifiedAt': stamp, 'total': len(stocks), 'checked': len(results),
+                'complete': stopped_early is None,
+                'summary': summary, 'calendar': calendar, 'stocks': merged,
+            })
+        ok = sum(1 for r in results.values() if r['status'] == 'match')
+        st['step'] = (f'Checked {len(results)} stock{"s" if len(results) != 1 else ""}: {ok} verified'
+                      f'{"" if ok == len(results) else f", {len(results) - ok} flagged"}.')
+        if stopped_early:
+            st['warning'] = f'Stopped early after {len(results)} of {len(todo)} stocks: {stopped_early}'
         st['status'] = 'done'
     except (tv_adjust.TradingViewError, RuntimeError, OSError, ValueError, KeyError) as e:
         st['status'] = 'error'
@@ -1096,6 +1313,8 @@ class NSEHandler(http.server.SimpleHTTPRequestHandler):
             self._serve_reprocess_status()
         elif path == '/api/tv-adjust/status':
             self._serve_tv_adjust_status()
+        elif path == '/api/tv-verify/status':
+            self._serve_tv_verify_status()
         elif path == '/api/status':
             self._serve_status()
         elif path == '/api/files':
@@ -1109,6 +1328,8 @@ class NSEHandler(http.server.SimpleHTTPRequestHandler):
             self._save_presets()
         elif parsed.path == '/api/tv-adjust/start':
             self._handle_tv_adjust_start()
+        elif parsed.path == '/api/tv-verify/start':
+            self._handle_tv_verify_start()
         else:
             self.send_error(404)
 
@@ -1404,6 +1625,9 @@ class NSEHandler(http.server.SimpleHTTPRequestHandler):
             if _tv_state['status'] == 'running':
                 self._send_json({'ok': True, 'alreadyRunning': True})
                 return
+            if _tv_verify_state['status'] == 'running':
+                self._send_json({'ok': False, 'error': 'A TradingView verification is running - try again when it finishes.'}, 409)
+                return
             if _reprocess_state['status'] == 'running':
                 self._send_json({'ok': False, 'error': 'A data refresh/reprocess is running - try again when it finishes.'}, 409)
                 return
@@ -1424,6 +1648,35 @@ class NSEHandler(http.server.SimpleHTTPRequestHandler):
             'appliedCount': sum(1 for r in rows if r['status'] == 'adjusted'),
             'tvPort': self.server.tv_port,
         })
+
+    def _handle_tv_verify_start(self):
+        """POST /api/tv-verify/start - compare our adjusted prices with TradingView's in a
+        background thread (read-only; changes no price). By default only stocks that haven't
+        verified yet for their current adjustments are checked; ?all=1 re-checks everything.
+        Same same-origin header rule as the correction endpoint. Refused while a correction
+        run is using the TradingView chart."""
+        if self.headers.get('X-Requested-With') != 'nse-dashboard':
+            self._send_json({'ok': False, 'error': 'Forbidden'}, 403)
+            return
+        with _tv_lock:
+            if _tv_verify_state['status'] == 'running':
+                self._send_json({'ok': True, 'alreadyRunning': True})
+                return
+            if _tv_state['status'] == 'running':
+                self._send_json({'ok': False, 'error': 'A TradingView price correction is running - try again when it finishes.'}, 409)
+                return
+            _tv_verify_state.update(status='running', step='Starting...', current=0, total=0,
+                                    startedAt=time.time(), finishedAt=None, error=None, warning=None)
+        verify_all = 'all' in parse_qs(urlparse(self.path).query)
+        threading.Thread(target=run_tv_verify, args=(self.server.base_dir, self.server.tv_port, verify_all),
+                         daemon=True).start()
+        self._send_json({'ok': True, 'started': True})
+
+    def _serve_tv_verify_status(self):
+        """Run state plus the last saved verification result (per-stock grades, summary,
+        calendar differences), so flags survive page reloads and server restarts."""
+        self._send_json({**_tv_verify_state, 'last': load_verification(self.server.base_dir),
+                         'tvPort': self.server.tv_port})
 
     def _serve_files(self):
         """Latest downloaded data files + dates (Data Files popup)."""

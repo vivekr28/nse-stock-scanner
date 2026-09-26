@@ -19,6 +19,7 @@ const Store = {
   symbolToISIN: {},     // normalizedSymbol -> ISIN
   ewIndex: null,        // {cols, bars: [[date,open,high,low,close,turnover,count],...], constituentCount} or null
   unadjustedCorpActions: [], // [{isin, symbol, exDate, subject, close}] - recognized corp actions (demergers, etc.) NOT price-adjusted; see Data Quality tab
+  adjustedCorpActions: [],   // [{isin, symbol, exDate, kind: 'split-bonus'|'demerger', detail, factor}] - every price adjustment applied (factor = what pre-ex-date prices were multiplied by); see Data Quality tab
   loaded: { bhav: false, band: false, sector: false },
   dashboardVisible: false
 };
