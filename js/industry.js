@@ -171,18 +171,144 @@ function renderIndustryAnalysis() {
   if (rsChartSection) rsChartSection.style.display = allPeriodsOn ? 'none' : '';
   if (!allPeriodsOn) renderMetricChart(indList.slice(0, 40), sortBy, mfPeriod, mfData);
 
-  // ── Industry Table ──
-  const mfLabel = { '1w': '1W', '1m': '1M', '3m': '3M', '6m': '6M', '1y': '1Y' }[mfPeriod] || '6M';
-  const head = document.getElementById('industryHead');
-  head.innerHTML = `
-    <th>#</th><th>Industry</th><th>Sector</th><th>RS Score</th><th>Stocks</th>
-    <th>Mkt Cap (Cr)</th><th>Avg 1M Chg%</th><th>Breadth</th>
-    <th>Avg Dist 52WH</th><th>Turnover (Cr)</th>
-    <th>MF ${mfLabel} (Cr)</th><th>Prev ${mfLabel} (Cr)</th><th>MF Chg%</th>
-    <th>Top 1M Gainer</th><th>Top 1M Loser</th>`;
+  // ── Industry Table (all filtered industries; manual header sort layered on the filter order) ──
+  // A manual column sort only lasts until the Sort By metric / MF period changes, so picking a
+  // new Sort By always brings the table back in step with the chart.
+  const sortTrack = sortBy === 'money_flow' ? sortBy + '|' + mfPeriod : sortBy;
+  if (sortTrack !== _indSortTrack) {
+    _indSortTrack = sortTrack;
+    indSortCol = null;
+  }
+  _indBreakdown = {
+    list: indList,
+    sortBy,
+    sortLabel: document.getElementById('industrySort').selectedOptions[0].textContent,
+    mfLabel: { '1w': '1W', '1m': '1M', '3m': '3M', '6m': '6M', '1y': '1Y' }[mfPeriod] || '6M'
+  };
+  renderIndustryBreakdownTable();
 
-  const body = document.getElementById('industryBody');
-  body.innerHTML = indList.map((ind, idx) => {
+  // ── Industry Heatmap ──
+  const grid = document.getElementById('industryGrid');
+  grid.innerHTML = indList.slice(0, 30).map(ind => {
+    const rsColor = ind.rsScore >= 70 ? 142 : ind.rsScore >= 40 ? 40 : 0;
+    const sat = Math.min(ind.rsScore * 0.8, 70);
+    const bg = `hsla(${rsColor}, ${sat}%, 40%, 0.15)`;
+    const border = `hsla(${rsColor}, ${sat}%, 50%, 0.3)`;
+    const scoreColor = ind.rsScore >= 70 ? 'var(--green)' : ind.rsScore >= 40 ? 'var(--orange)' : 'var(--red)';
+    const mfChgColor2 = ind.moneyFlowChg >= 0 ? 'var(--green)' : 'var(--red)';
+    const mfSign = ind.moneyFlowChg >= 0 ? '+' : '';
+    return `
+      <div class="sector-card" style="background:${bg};border-color:${border};cursor:pointer;" onclick="openIndustryCharts('${ind.name.replace(/'/g, "\\'")}')">
+        <h4>
+          <span>${ind.name}</span>
+          <span style="color:${scoreColor};font-weight:700">${ind.rsScore.toFixed(0)}</span>
+        </h4>
+        <table class="mini-table">
+          <tr><td style="color:var(--text2)">Stocks</td><td style="text-align:right">${ind.stockCount}</td></tr>
+          <tr><td style="color:var(--text2)">Mkt Cap</td><td style="text-align:right">${fmtCr(ind.totalMcap)}</td></tr>
+          <tr><td style="color:var(--text2)">1M Chg%</td><td style="text-align:right" class="${ind.avgMonthlyChange >= 0 ? 'positive' : 'negative'}">${ind.avgMonthlyChange.toFixed(2)}%</td></tr>
+          <tr><td style="color:var(--text2)">Breadth</td><td style="text-align:right">${ind.breadth.toFixed(0)}%</td></tr>
+          <tr><td style="color:var(--text2)">MF Chg</td><td style="text-align:right;color:${mfChgColor2}">${mfSign}${ind.moneyFlowChg.toFixed(1)}%</td></tr>
+        </table>
+      </div>
+    `;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// INDUSTRY BREAKDOWN TABLE — click-to-sort headers.
+// Default order = the filter order shown in the chart (Sort By metric); a header click
+// re-sorts the table only (chart and heatmap keep the filter order).
+// ═══════════════════════════════════════════════════════════════════════════════
+let indSortCol = null;     // null = default (filter) order
+let indSortDir = -1;
+let _indSortTrack = null;  // Sort By (+ MF period) the manual sort was last cleared for
+let _indBreakdown = { list: [], sortBy: 'rs_score', sortLabel: '', mfLabel: '6M' };
+
+// Columns whose natural first-click direction is ascending (A→Z, closest to 52W high,
+// worst loser first); everything else starts high→low. Matches the Sort By order for avg_dist52h.
+const IND_ASC_COLS = new Set(['name', 'sector', 'avgDist52H', 'topLoser']);
+const indColDir = key => IND_ASC_COLS.has(key) ? 1 : -1;
+
+function indBreakdownCols(mfLabel) {
+  return [
+    { key: 'name', label: 'Industry' },
+    { key: 'sector', label: 'Sector' },
+    { key: 'rsScore', label: 'RS Score' },
+    { key: 'stockCount', label: 'Stocks' },
+    { key: 'totalMcap', label: 'Mkt Cap (Cr)' },
+    { key: 'avgMonthlyChange', label: 'Avg 1M Chg%' },
+    { key: 'breadth', label: 'Breadth' },
+    { key: 'avgDist52H', label: 'Avg Dist 52WH' },
+    { key: 'totalTurnover', label: 'Turnover (Cr)' },
+    { key: 'moneyFlow', label: `MF ${mfLabel} (Cr)` },
+    { key: 'moneyFlowPrev', label: `Prev ${mfLabel} (Cr)` },
+    { key: 'moneyFlowChg', label: 'MF Chg%' },
+    { key: 'topGainer', label: 'Top 1M Gainer', get: i => i.topGainer ? i.topGainer.monthlyChangePct : null },
+    { key: 'topLoser', label: 'Top 1M Loser', get: i => i.topLoser ? i.topLoser.monthlyChangePct : null }
+  ];
+}
+
+function indDefaultSort() {
+  const col = (METRIC_CONFIG[_indBreakdown.sortBy] || METRIC_CONFIG.rs_score).key;
+  return { col, dir: indColDir(col) };
+}
+
+function indEffectiveSort() {
+  return indSortCol ? { col: indSortCol, dir: indSortDir } : indDefaultSort();
+}
+
+function sortIndustryBreakdown(key) {
+  const cur = indEffectiveSort();
+  const dir = cur.col === key ? -cur.dir : indColDir(key);
+  const def = indDefaultSort();
+  if (key === def.col && dir === def.dir) {
+    indSortCol = null; // back on the filter order
+  } else {
+    indSortCol = key;
+    indSortDir = dir;
+  }
+  renderIndustryBreakdownTable();
+}
+
+function resetIndustryBreakdownSort() {
+  indSortCol = null;
+  renderIndustryBreakdownTable();
+}
+
+function renderIndustryBreakdownTable() {
+  const { list, sortLabel, mfLabel } = _indBreakdown;
+  const cols = indBreakdownCols(mfLabel);
+  const eff = indEffectiveSort();
+
+  let sorted = list; // already in filter order
+  if (indSortCol) {
+    const c = cols.find(x => x.key === indSortCol);
+    const get = c.get || (i => i[c.key]);
+    const missing = v => v == null || (typeof v === 'number' && isNaN(v));
+    // Array.sort is stable, so ties keep their filter order; missing values always sink to the bottom.
+    sorted = [...list].sort((a, b) => {
+      const va = get(a), vb = get(b);
+      if (missing(va) || missing(vb)) return (missing(va) ? 1 : 0) - (missing(vb) ? 1 : 0);
+      if (typeof va === 'string') return indSortDir * va.localeCompare(vb);
+      return indSortDir * (va - vb);
+    });
+  }
+
+  document.getElementById('industryHead').innerHTML = '<th>#</th>' + cols.map(c =>
+    `<th onclick="sortIndustryBreakdown('${c.key}')">${c.label}<span class="sort-arrow">${eff.col === c.key ? (eff.dir > 0 ? '▲' : '▼') : ''}</span></th>`
+  ).join('');
+
+  const note = document.getElementById('indBreakdownNote');
+  if (note) {
+    note.textContent = indSortCol
+      ? 'Sorted by ' + cols.find(x => x.key === indSortCol).label
+      : 'Filter order (' + sortLabel + ') — click a column header to re-sort';
+  }
+  const resetBtn = document.getElementById('indBreakdownReset');
+  if (resetBtn) resetBtn.style.display = indSortCol ? '' : 'none';
+
+  document.getElementById('industryBody').innerHTML = sorted.map((ind, idx) => {
     const rsColor = ind.rsScore >= 70 ? 'var(--green)' : ind.rsScore >= 40 ? 'var(--orange)' : 'var(--red)';
     const mfChgColor = ind.moneyFlowChg >= 0 ? 'var(--green)' : 'var(--red)';
     const mfChgSign = ind.moneyFlowChg >= 0 ? '+' : '';
@@ -218,33 +344,6 @@ function renderIndustryAnalysis() {
       <td class="positive">${ind.topGainer ? ind.topGainer.symbol + ' (' + fmtPct(ind.topGainer.monthlyChangePct) + ')' : '-'}</td>
       <td class="negative">${ind.topLoser ? ind.topLoser.symbol + ' (' + fmtPct(ind.topLoser.monthlyChangePct) + ')' : '-'}</td>
     </tr>`;
-  }).join('');
-
-  // ── Industry Heatmap ──
-  const grid = document.getElementById('industryGrid');
-  grid.innerHTML = indList.slice(0, 30).map(ind => {
-    const rsColor = ind.rsScore >= 70 ? 142 : ind.rsScore >= 40 ? 40 : 0;
-    const sat = Math.min(ind.rsScore * 0.8, 70);
-    const bg = `hsla(${rsColor}, ${sat}%, 40%, 0.15)`;
-    const border = `hsla(${rsColor}, ${sat}%, 50%, 0.3)`;
-    const scoreColor = ind.rsScore >= 70 ? 'var(--green)' : ind.rsScore >= 40 ? 'var(--orange)' : 'var(--red)';
-    const mfChgColor2 = ind.moneyFlowChg >= 0 ? 'var(--green)' : 'var(--red)';
-    const mfSign = ind.moneyFlowChg >= 0 ? '+' : '';
-    return `
-      <div class="sector-card" style="background:${bg};border-color:${border};cursor:pointer;" onclick="openIndustryCharts('${ind.name.replace(/'/g, "\\'")}')">
-        <h4>
-          <span>${ind.name}</span>
-          <span style="color:${scoreColor};font-weight:700">${ind.rsScore.toFixed(0)}</span>
-        </h4>
-        <table class="mini-table">
-          <tr><td style="color:var(--text2)">Stocks</td><td style="text-align:right">${ind.stockCount}</td></tr>
-          <tr><td style="color:var(--text2)">Mkt Cap</td><td style="text-align:right">${fmtCr(ind.totalMcap)}</td></tr>
-          <tr><td style="color:var(--text2)">1M Chg%</td><td style="text-align:right" class="${ind.avgMonthlyChange >= 0 ? 'positive' : 'negative'}">${ind.avgMonthlyChange.toFixed(2)}%</td></tr>
-          <tr><td style="color:var(--text2)">Breadth</td><td style="text-align:right">${ind.breadth.toFixed(0)}%</td></tr>
-          <tr><td style="color:var(--text2)">MF Chg</td><td style="text-align:right;color:${mfChgColor2}">${mfSign}${ind.moneyFlowChg.toFixed(1)}%</td></tr>
-        </table>
-      </div>
-    `;
   }).join('');
 }
 

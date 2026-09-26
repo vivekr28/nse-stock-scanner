@@ -663,7 +663,11 @@
 
   <!-- Industry Table -->
   <div style="margin-top:16px;">
-    <h3 style="font-size:14px; margin-bottom:10px;">Industry Breakdown</h3>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px;">
+      <h3 style="font-size:14px;">Industry Breakdown</h3>
+      <span id="indBreakdownNote" style="font-size:11px;color:var(--text2);"></span>
+      <button id="indBreakdownReset" class="btn btn-secondary" style="display:none;padding:3px 10px;font-size:11px;" onclick="resetIndustryBreakdownSort()">Reset to filter order</button>
+    </div>
     <div class="table-wrap">
       <table id="industryTable">
         <thead><tr id="industryHead"></tr></thead>
