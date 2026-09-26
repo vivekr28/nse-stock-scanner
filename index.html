@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NSE EOD Dashboard</title>
-<link rel="stylesheet" href="css/styles.css?v=9">
+<link rel="stylesheet" href="css/styles.css?v=10">
 </head>
 <body>
 
@@ -775,7 +775,7 @@
       <div class="table-wrap"><table id="dqCorpActionTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
     </div>
   </div>
-  <div class="card dq-section">
+  <div class="card dq-section" style="margin-bottom:16px;">
     <div class="dq-section-header" onclick="dqToggleSection('dqAdjusted')">
       <h4 style="margin:0;">Price Adjustments Applied</h4>
       <span class="dq-section-arrow" id="dqAdjustedArrow">&#9650;</span>
@@ -800,6 +800,43 @@
       <div class="table-wrap"><table id="dqAdjustedTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
     </div>
   </div>
+  <div class="card dq-section">
+    <div class="dq-section-header" onclick="dqToggleSection('dqFull')">
+      <h4 style="margin:0;">Full Price Verification (all stocks vs TradingView) <span id="dqFullBadge" style="font-size:12px;margin-left:8px;"></span></h4>
+      <span class="dq-section-arrow" id="dqFullArrow">&#9650;</span>
+    </div>
+    <div class="dq-section-body" id="dqFullBody" style="display:none;">
+      <p style="color:var(--text2);font-size:12px;margin:8px 0;">Checks <b>every stock</b> the dashboard holds &mdash; not only the price-adjusted ones above &mdash; against TradingView: each stock's daily closes are compared with TradingView's over their whole shared history (about 2 years) and graded match / minor / major. Run it now and then to make sure our prices haven't drifted from what you see on TradingView. Read-only &mdash; no price is changed. When it finishes it writes a <b>report</b> (a Markdown summary plus a CSV with one row per stock) to <code>NSE_DATA/verification-reports/</code> for analysis, including what changed since the previous full run.</p>
+      <p style="color:var(--text2);font-size:12px;margin:8px 0;">TradingView Desktop must be running with <code>--remote-debugging-port=<span id="dqFullPort">9222</span></code> and a chart open. <span id="dqFullEta"></span> While it runs the chart flips through every stock, so leave TradingView alone, keep its window open and the PC awake. You can <b>Stop</b> at any time (progress is saved) and <b>Resume</b> later, as long as the data hasn't been refreshed in between.</p>
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:10px 0;">
+        <button id="dqFullBtn" class="btn btn-primary" onclick="dqRunTvFull(false)">Verify all stocks</button>
+        <button id="dqFullResumeBtn" class="btn btn-secondary" style="display:none;" onclick="dqRunTvFull(true)">Resume</button>
+        <button id="dqFullStopBtn" class="btn btn-secondary" style="display:none;" onclick="dqStopTvFull()">Stop</button>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);font-weight:400;">Scope
+          <select id="dqFullScope" class="dq-select">
+            <option value="">All stocks</option>
+            <option value="500">Top 500 by turnover</option>
+            <option value="100">Top 100 by turnover (quick check)</option>
+          </select>
+        </label>
+        <span id="dqFullStatus" style="font-size:12px;color:var(--text2);"></span>
+      </div>
+      <div id="dqFullProgress" style="display:none;margin:6px 0 10px;">
+        <div class="progress-track"><div class="progress-fill" id="dqFullFill"></div></div>
+        <div class="progress-detail" id="dqFullDetail"></div>
+      </div>
+      <div id="dqFullSummary" style="font-size:12px;margin:8px 0 12px;"></div>
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 6px;font-size:12px;color:var(--text2);">
+        <label style="display:flex;align-items:center;gap:6px;font-weight:400;">Show
+          <select id="dqFullFilter" class="dq-select" onchange="dqFullFilterChange(this.value)">
+            <option value="all">Major + minor differences</option>
+            <option value="major">Major differences only</option>
+          </select>
+        </label>
+      </div>
+      <div class="table-wrap"><table id="dqFullTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
+    </div>
+  </div>
 </div>
 
 <!-- JS Modules (dependency order matters for const/let declarations) -->
@@ -815,7 +852,7 @@
 <script src="js/lib/lightweight-charts.standalone.production.js"></script>
 <script src="js/ew-index.js?v=1"></script>
 <script src="js/industry-charts.js?v=17"></script>
-<script src="js/data-quality.js?v=7"></script>
+<script src="js/data-quality.js?v=8"></script>
 <script src="js/presets.js?v=8"></script>
 <script src="js/ui.js?v=8"></script>
 <script src="js/nse-download.js?v=4"></script>

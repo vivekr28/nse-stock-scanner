@@ -17,12 +17,14 @@ import argparse
 import threading
 import subprocess
 import shutil
+from array import array
 from datetime import datetime, timedelta
 from collections import defaultdict
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
 import tv_adjust  # TradingView-assisted corrections; does nothing until the Data Quality button is clicked
+import tv_report  # report of a full "verify every stock" run (pure functions)
 
 # ─── Configuration ───────────────────────────────────────────────────────────
 DEFAULT_PORT = 8765
@@ -47,6 +49,11 @@ LEGACY_LOCATIONS = [
     ('presets.json', PRESETS_FILE),
 ]
 VERIFY_FILE = 'TradingViewVerification.json'  # last "Verify against TradingView" result (see run_tv_verify)
+# "Verify ALL stocks against TradingView" (see run_tv_verify_full): the latest run - also its resume checkpoint - the
+# last COMPLETE run before it (for the report's "changes since previous run"), and the reports folder (in NSE_DATA/).
+FULL_VERIFY_FILE = 'TradingViewFullVerification.json'
+FULL_VERIFY_PREV_FILE = 'TradingViewFullVerification.prev.json'
+REPORTS_SUBDIR = 'verification-reports'
 # Bump whenever processed_data.json gains/changes a field the client relies on: startup then
 # reprocesses an older cache by itself instead of silently serving output missing the new field.
 PROCESSED_SCHEMA = 2
@@ -82,6 +89,22 @@ _tv_verify_state = {
     'error': None,
     'warning': None,
 }
+
+# And for "Verify ALL stocks against TradingView" (every stock, then a report). Same lock: one TradingView chart.
+_tv_full_state = {
+    'status': 'idle',   # 'idle' | 'running' | 'done' | 'error'
+    'step': '',
+    'current': 0,       # stocks finished in this session
+    'total': 0,         # stocks this session has to check
+    'startedAt': None,
+    'finishedAt': None,
+    'error': None,
+    'warning': None,
+    'stopping': False,  # a Stop was requested and the run is winding down
+    'stopped': False,   # the run ended because it was stopped (resumable)
+    'counts': {},       # live {match, minor, major, inconclusive} over everything verified so far
+}
+_tv_full_stop = threading.Event()
 
 # ─── Reprocess progress state (for the /pages/reprocess.html page) ─────────────────
 # Runs the actual reprocessing in a background thread so /api/reprocess
@@ -1179,6 +1202,22 @@ def adjustments_match(stored, current):
     return all(x[0] == y[0] and abs(x[1] - y[1]) <= 1e-6 * max(1.0, abs(y[1])) for x, y in zip(a, b))
 
 
+def _verify_stock(chart, symbol, ours, events):
+    """Compare one stock's stored closes ({date: close}, already price-adjusted) with TradingView's:
+    tv_adjust.compare_series' result. A stock TradingView can't provide (not found, timeout) becomes an
+    'inconclusive' result with a `reason` ('not-found' / 'tv-error'); only a lost connection propagates
+    (TradingViewConnectionError), because then no further stock can be read either."""
+    try:
+        return tv_adjust.compare_series(ours, chart.daily_closes(symbol, since=min(ours)), events=events)
+    except tv_adjust.TradingViewConnectionError:
+        raise
+    except tv_adjust.TradingViewError as e:
+        return {'status': 'inconclusive', 'bars': 0, 'barsOff': 0, 'maxDevPct': None, 'endDevPct': None,
+                'worstDate': None, 'firstOff': None, 'lastOff': None, 'tvOnlyDates': [], 'oursOnlyDates': [],
+                'causes': [], 'causeDetails': [], 'note': re.sub(r'^Error:\s*', '', str(e)),
+                'reason': 'not-found' if isinstance(e, tv_adjust.TradingViewSymbolNotFound) else 'tv-error'}
+
+
 def run_tv_verify(base_dir, port, verify_all=False):
     """Background worker behind POST /api/tv-verify/start. For the stocks in the Data Quality
     "Price Adjustments Applied" list (splits, bonuses and TradingView demerger corrections),
@@ -1242,15 +1281,10 @@ def run_tv_verify(base_dir, port, verify_all=False):
             for i, (isin, s) in enumerate(todo.items()):
                 st.update(step=f"Verifying {s['symbol']} against TradingView", current=i)
                 try:
-                    res = tv_adjust.compare_series(
-                        s['ours'], chart.daily_closes(s['symbol'], since=min(s['ours'])), events=s['events'])
+                    res = _verify_stock(chart, s['symbol'], s['ours'], s['events'])
                 except tv_adjust.TradingViewConnectionError as e:
                     stopped_early = str(e)
                     break
-                except tv_adjust.TradingViewError as e:
-                    res = {'status': 'inconclusive', 'bars': 0, 'barsOff': 0, 'maxDevPct': None,
-                           'worstDate': None, 'firstOff': None, 'lastOff': None,
-                           'tvOnlyDates': [], 'oursOnlyDates': [], 'causes': [], 'note': str(e)}
                 for d in res.pop('tvOnlyDates'):
                     tv_only[d] += 1
                 for d in res.pop('oursOnlyDates'):
@@ -1293,6 +1327,320 @@ def run_tv_verify(base_dir, port, verify_all=False):
         st['finishedAt'] = time.time()
 
 
+# ─── Full verification: every stock against TradingView, then a report ───────
+def _write_json_atomic(path, obj):
+    tmp = path + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(obj, f, separators=(',', ':'))
+    os.replace(tmp, path)
+
+
+def load_full_verification(base_dir, previous=False):
+    """The latest full-verification run (or, with previous=True, the complete run before it), or None."""
+    path = os.path.join(base_dir, DATA_SUBDIR, FULL_VERIFY_PREV_FILE if previous else FULL_VERIFY_FILE)
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return d if isinstance(d, dict) and isinstance(d.get('meta'), dict) and isinstance(d.get('stocks'), dict) else None
+
+
+def save_full_verification(base_dir, payload):
+    _write_json_atomic(os.path.join(base_dir, DATA_SUBDIR, FULL_VERIFY_FILE), payload)
+
+
+def processed_data_stamp(base_dir):
+    """Identifies the processed-data snapshot a full run was made on (its file's modification time, in ms).
+    An interrupted run can only be resumed against the same snapshot: after a reprocess the prices, and so
+    the comparison, may be different."""
+    try:
+        return int(os.path.getmtime(os.path.join(base_dir, DATA_SUBDIR, PROCESSED_FILE)) * 1000)
+    except OSError:
+        return None
+
+
+def collect_verify_universe(data):
+    """Every stock in the dashboard data as {isin, symbol, series, turnover (Cr), close, dates, closes, events, sig},
+    most-traded first, plus the data's latest date. `events` are the stock's price adjustments as
+    (ex-date, factor) and `sig` the same as [[exDate, factor]] (the shape stored next to each result).
+    Kept compact (shared date objects, float arrays) because a full run holds this for as long as it takes,
+    while the ~100 MB parsed price history it was built from can be freed."""
+    cols = data.get('dailyCols') or []
+    date_i, close_i = cols.index('date'), cols.index('close')
+    latest = data.get('latestBySymbol') or {}
+    adjustments = defaultdict(list)
+    for a in data.get('adjustedCorpActions') or []:
+        adjustments[a['isin']].append(a)
+    dates = {}
+
+    def to_date(s):
+        d = dates.get(s)
+        if d is None:
+            d = dates[s] = parse_date_str(s).date()
+        return d
+
+    stocks = []
+    for isin, days in (data.get('dailyBySymbol') or {}).items():
+        info = latest.get(isin) or {}
+        symbol = info.get('symbol')
+        if not days or not symbol:
+            continue
+        adj = adjustments.get(isin, [])
+        stocks.append({
+            'isin': isin, 'symbol': symbol, 'series': info.get('series') or '',
+            'turnover': round((info.get('turnover') or 0) / 100, 2),   # bhavcopy turnover is in lakhs
+            'close': info.get('close'),
+            'dates': tuple(to_date(r[date_i]) for r in days), 'closes': array('d', (r[close_i] for r in days)),
+            'events': [(to_date(a['exDate']), a['factor']) for a in adj],
+            'sig': [[a['exDate'], a['factor']] for a in adj],
+        })
+    stocks.sort(key=lambda s: (-s['turnover'], s['symbol']))
+    return data.get('latestDate'), stocks
+
+
+def _count_statuses(stocks):
+    c = {'match': 0, 'minor': 0, 'major': 0, 'inconclusive': 0}
+    for r in stocks.values():
+        c[r.get('status') if r.get('status') in c else 'inconclusive'] += 1
+    return c
+
+
+def _calendar_from_counts(payload):
+    """Dates only one side has for at least half the compared stocks (see run_tv_verify); a small run says nothing."""
+    compared = sum(1 for r in payload['stocks'].values() if r.get('bars'))
+    if compared < 10:
+        return {'tvOnly': [], 'oursOnly': []}
+    cutoff = max(3, compared // 2)
+
+    def pick(by_date):
+        return sorted((d for d, n in by_date.items() if n >= cutoff), key=parse_date_str)
+    return {'tvOnly': pick(payload['tvOnlyByDate']), 'oursOnly': pick(payload['oursOnlyByDate'])}
+
+
+def summarize_full_verification(base_dir, payload):
+    """Small description of a saved run for the Data Quality tab: its meta, how many stocks fall in each
+    tv_report category, and whether it can still be resumed."""
+    if not payload:
+        return None
+    meta, stocks = payload['meta'], payload['stocks']
+    categories = defaultdict(int)
+    for r in stocks.values():
+        categories[tv_report.category(r)] += 1
+    universe = meta.get('universe') or len(stocks)
+    stamp = processed_data_stamp(base_dir)
+    return {**meta, 'verified': len(stocks), 'categories': dict(categories), 'remaining': max(0, universe - len(stocks)),
+            'resumable': (not meta.get('complete')) and len(stocks) < universe and stamp is not None
+                         and meta.get('dataStamp') == stamp}
+
+
+def load_corp_action_index(base_dir):
+    """{ISIN or SYMBOL: [(ex-date, 'DD-Mon-YYYY', subject)]} from the corporate-actions archive: lets the report say
+    which feed row (if any) is behind a difference like "TradingView adjusts for an action we have no event for"."""
+    path = os.path.join(base_dir, REFERENCE_SUBDIR, CORPACTIONS_FILE)
+    index = defaultdict(list)
+    if not os.path.exists(path):
+        return {}
+    for r in read_csv_file(path):
+        ex_str = (r.get('EXDATE') or '').strip()
+        d = parse_date_str(ex_str)
+        if not d:
+            continue
+        item = (d.date(), ex_str, (r.get('SUBJECT') or '').strip())
+        for key in ((r.get('ISIN') or '').strip(), (r.get('SYMBOL') or '').strip().upper()):
+            if key:
+                index[key].append(item)
+    return dict(index)
+
+
+def write_full_report(base_dir, payload):
+    """Write the run's Markdown report and CSV into NSE_DATA/verification-reports/ and record their names in the
+    payload's meta. A partial run's report is replaced once the same run is resumed and finishes."""
+    meta = payload['meta']
+    md, csv_text = tv_report.build_report(payload, load_full_verification(base_dir, previous=True),
+                                          load_corp_action_index(base_dir))
+    out_dir = os.path.join(base_dir, DATA_SUBDIR, REPORTS_SUBDIR)
+    os.makedirs(out_dir, exist_ok=True)
+    stem = 'TradingView-Verification_' + datetime.now().strftime('%Y-%m-%d_%H%M') + ('' if meta.get('complete') else '_partial')
+    names = {'md': stem + '.md', 'csv': stem + '.csv'}
+    with open(os.path.join(out_dir, names['md']), 'w', encoding='utf-8', newline='') as f:
+        f.write(md)
+    with open(os.path.join(out_dir, names['csv']), 'w', encoding='utf-8-sig', newline='') as f:
+        f.write(csv_text)
+    for old in (meta.get('report') or {}).values():
+        if old not in names.values():
+            try:
+                os.remove(os.path.join(out_dir, os.path.basename(old)))
+            except OSError:
+                pass
+    meta['report'] = names
+    return names
+
+
+def merge_full_run_into_queue(base_dir, payload, universe):
+    """A full run also verifies the price-adjusted stocks, so record those results in the file behind the
+    "Price Adjustments Applied" list (see run_tv_verify): a stock that matched leaves that list exactly as if the
+    list's own button had checked it. Only results for a stock's CURRENT adjustments are used."""
+    adj = {s['isin']: s['sig'] for s in universe if s['sig']}
+    fresh = {i: r for i, r in payload['stocks'].items() if i in adj and adjustments_match(r.get('events'), adj[i])}
+    if not fresh:
+        return
+    prev = load_verification(base_dir) or {}
+    kept = {i: r for i, r in (prev.get('stocks') or {}).items() if i in adj and adjustments_match(r.get('events'), adj[i])}
+    merged = {**kept, **fresh}
+    compared = sum(1 for r in payload['stocks'].values() if r.get('bars'))
+    save_verification(base_dir, {
+        'verifiedAt': payload['meta'].get('finishedAt'), 'total': len(adj), 'checked': len(fresh),
+        'complete': bool(payload['meta'].get('complete')),
+        'summary': {k: sum(1 for r in merged.values() if r['status'] == k) for k in ('match', 'minor', 'major', 'inconclusive')},
+        'calendar': (payload.get('calendar') if compared >= 10 else prev.get('calendar')) or {'tvOnly': [], 'oursOnly': []},
+        'stocks': merged})
+
+
+def run_tv_verify_full(base_dir, port, limit=None, resume=False):
+    """Background worker behind POST /api/tv-full/start: compare EVERY stock's stored daily closes with TradingView's
+    (the same comparison as run_tv_verify, which only covers the price-adjusted stocks), most-traded stocks first,
+    and finish with a report (Markdown + CSV, see tv_report). Read-only: no price is changed, nothing is reprocessed.
+
+    Progress is checkpointed to NSE_DATA/TradingViewFullVerification.json every 100 stocks, so a stopped
+    (Stop button), interrupted (TradingView closed, server restarted) or crashed run keeps its results and can be
+    resumed - but only against the same processed-data snapshot. `limit` restricts the run to the N most-traded
+    stocks (a quick sample). The user's chart symbol/resolution are restored afterwards."""
+    st = _tv_full_state
+    payload = None
+    finalized = False
+
+    def now():
+        return datetime.now().strftime('%Y-%m-%d %H:%M')
+
+    def save_progress(meta_extra=None):
+        if meta_extra:
+            payload['meta'].update(meta_extra)
+        save_full_verification(base_dir, payload)
+
+    try:
+        st['step'] = 'Reading dashboard data...'
+        with _cache_lock:
+            data = load_processed_data(base_dir)
+        if not data:
+            raise RuntimeError('No processed data available yet - reprocess first.')
+        data_date, universe = collect_verify_universe(data)
+        data = None  # only the compact per-stock copy is kept
+        if not universe:
+            raise RuntimeError('The dashboard data contains no stocks.')
+        stamp_now = processed_data_stamp(base_dir)
+
+        existing = load_full_verification(base_dir)
+        em = (existing or {}).get('meta') or {}
+        resumed = bool(resume and existing and not em.get('complete') and stamp_now is not None
+                       and em.get('dataStamp') == stamp_now)
+        if resume and not resumed:
+            st['warning'] = 'There was no interrupted run on the current data to resume, so a new run was started.'
+        if resumed:
+            payload = existing
+            limit = payload['meta'].get('limit')
+            payload['meta'].update(resumed=True, complete=False, stopped=False, finishedAt=None)
+        else:
+            if existing and em.get('complete'):
+                # Keep the last COMPLETE run, so the new report can say what changed since it.
+                _write_json_atomic(os.path.join(base_dir, DATA_SUBDIR, FULL_VERIFY_PREV_FILE), existing)
+            payload = {'meta': {'startedAt': now(), 'finishedAt': None, 'dataDate': data_date, 'dataStamp': stamp_now,
+                                'limit': limit, 'complete': False, 'stopped': False, 'resumed': False, 'durationSec': 0},
+                       'calendar': {'tvOnly': [], 'oursOnly': []}, 'tvOnlyByDate': {}, 'oursOnlyByDate': {}, 'stocks': {}}
+        existing = None
+        meta, done = payload['meta'], payload['stocks']
+        tv_by_date, ours_by_date = payload['tvOnlyByDate'], payload['oursOnlyByDate']
+
+        scope = universe[:limit] if limit else universe
+        meta['universe'] = len(scope)
+        todo = [s for s in scope if s['isin'] not in done]
+        counts = _count_statuses(done)
+        st.update(total=len(todo), current=0, counts=dict(counts))
+
+        stopped = False
+        stopped_early = None
+        processed = 0
+        base_seconds = meta.get('durationSec') or 0
+        t0 = time.time()
+        if todo:
+            with tv_adjust.TradingViewChart(port) as chart:
+                for i, s in enumerate(todo):
+                    if _tv_full_stop.is_set():
+                        stopped = True
+                        break
+                    st.update(step=f"Verifying {s['symbol']} against TradingView", current=i)
+                    try:
+                        res = _verify_stock(chart, s['symbol'], dict(zip(s['dates'], s['closes'])), s['events'])
+                    except tv_adjust.TradingViewConnectionError as e:
+                        stopped_early = str(e)
+                        break
+                    tv_dates, ours_dates = res.pop('tvOnlyDates'), res.pop('oursOnlyDates')
+                    for d in tv_dates:
+                        tv_by_date[d] = tv_by_date.get(d, 0) + 1
+                    for d in ours_dates:
+                        ours_by_date[d] = ours_by_date.get(d, 0) + 1
+                    res.update(symbol=s['symbol'], series=s['series'], turnover=s['turnover'], close=s['close'],
+                               events=s['sig'], tvOnlyN=len(tv_dates), oursOnlyN=len(ours_dates), verifiedAt=now())
+                    done[s['isin']] = res
+                    counts[res['status'] if res['status'] in counts else 'inconclusive'] += 1
+                    processed = i + 1
+                    st['counts'] = dict(counts)
+                    if processed % 100 == 0:
+                        save_progress({'durationSec': round(base_seconds + time.time() - t0), 'verified': len(done)})
+            st['current'] = processed
+
+        remaining = sum(1 for s in scope if s['isin'] not in done)
+        meta.update(complete=remaining == 0, stopped=stopped and remaining > 0, finishedAt=now(),
+                    durationSec=round(base_seconds + time.time() - t0), verified=len(done))
+        payload['calendar'] = _calendar_from_counts(payload)
+        save_progress()
+        finalized = True
+
+        if done:
+            # The results are safely saved; the report and the queue update are extras that must not undo that.
+            st['step'] = 'Writing the report...'
+            try:
+                write_full_report(base_dir, payload)
+                save_progress()
+            except Exception as e:
+                st['warning'] = f'The results were saved but writing the report failed: {e}'
+            try:
+                merge_full_run_into_queue(base_dir, payload, universe)
+            except Exception as e:
+                st['warning'] = (st['warning'] + ' ' if st['warning'] else '') + f'Updating the price-adjustments list failed: {e}'
+
+        flagged = counts['minor'] + counts['major']
+        summary = (f"{len(done):,} of {meta['universe']:,} stocks verified: {counts['match']:,} match, "
+                   f"{flagged:,} flagged ({counts['major']:,} major), {counts['inconclusive']:,} could not be compared")
+        if meta['complete']:
+            st['step'] = f'Done - {summary}. Report saved.'
+        elif stopped:
+            st['step'] = f'Stopped - {summary}. Progress is saved; Resume continues where it left off.'
+        elif stopped_early:
+            st['step'] = summary + '.'
+            st['warning'] = ((st['warning'] + ' ') if st['warning'] else '') +                 f'Stopped early: {stopped_early} Progress is saved; Resume continues where it left off.'
+        else:
+            st['step'] = summary + '.'
+        st['stopped'] = meta['stopped']
+        st['status'] = 'done'
+    except (tv_adjust.TradingViewError, RuntimeError, OSError, ValueError, KeyError) as e:
+        st['status'] = 'error'
+        st['error'] = str(e)
+    except Exception as e:  # never leave the UI stuck on "running"
+        st['status'] = 'error'
+        st['error'] = f'Unexpected error: {e}'
+    finally:
+        # Whatever ended the run, don't lose what it already verified (a fresh run that never got going
+        # has nothing to save and must not overwrite the previous run's file).
+        if not finalized and payload and payload['stocks']:
+            try:
+                save_progress({'stopped': False, 'finishedAt': None})
+            except (OSError, ValueError):
+                pass
+        st['stopping'] = False
+        st['finishedAt'] = time.time()
+
+
 # ─── HTTP Server ─────────────────────────────────────────────────────────────
 class NSEHandler(http.server.SimpleHTTPRequestHandler):
     """Custom handler for API endpoints + static file serving."""
@@ -1313,8 +1661,10 @@ class NSEHandler(http.server.SimpleHTTPRequestHandler):
         super().end_headers()
 
     def log_message(self, format, *args):
-        # Suppress noisy static file logs, show API calls
-        if '/api/' in str(args[0]) if args else False:
+        # Suppress noisy static file logs, show API calls - except the status polls (the Data Quality tab and the
+        # reprocess page poll every ~0.6 s for the whole of a run, which would bury everything else in the console)
+        line = str(args[0]) if args else ''
+        if '/api/' in line and '/status' not in line:
             super().log_message(format, *args)
 
     def do_GET(self):
@@ -1339,6 +1689,12 @@ class NSEHandler(http.server.SimpleHTTPRequestHandler):
             self._serve_tv_adjust_status()
         elif path == '/api/tv-verify/status':
             self._serve_tv_verify_status()
+        elif path == '/api/tv-full/status':
+            self._serve_tv_full_status()
+        elif path == '/api/tv-full/results':
+            self._serve_tv_full_results()
+        elif path == '/api/tv-full/report':
+            self._serve_tv_full_report()
         elif path == '/api/status':
             self._serve_status()
         elif path == '/api/files':
@@ -1354,6 +1710,10 @@ class NSEHandler(http.server.SimpleHTTPRequestHandler):
             self._handle_tv_adjust_start()
         elif parsed.path == '/api/tv-verify/start':
             self._handle_tv_verify_start()
+        elif parsed.path == '/api/tv-full/start':
+            self._handle_tv_full_start()
+        elif parsed.path == '/api/tv-full/stop':
+            self._handle_tv_full_stop()
         else:
             self.send_error(404)
 
@@ -1649,7 +2009,7 @@ class NSEHandler(http.server.SimpleHTTPRequestHandler):
             if _tv_state['status'] == 'running':
                 self._send_json({'ok': True, 'alreadyRunning': True})
                 return
-            if _tv_verify_state['status'] == 'running':
+            if _tv_verify_state['status'] == 'running' or _tv_full_state['status'] == 'running':
                 self._send_json({'ok': False, 'error': 'A TradingView verification is running - try again when it finishes.'}, 409)
                 return
             if _reprocess_state['status'] == 'running':
@@ -1689,6 +2049,9 @@ class NSEHandler(http.server.SimpleHTTPRequestHandler):
             if _tv_state['status'] == 'running':
                 self._send_json({'ok': False, 'error': 'A TradingView price correction is running - try again when it finishes.'}, 409)
                 return
+            if _tv_full_state['status'] == 'running':
+                self._send_json({'ok': False, 'error': 'A full TradingView verification is running - stop it or wait for it to finish.'}, 409)
+                return
             _tv_verify_state.update(status='running', step='Starting...', current=0, total=0,
                                     startedAt=time.time(), finishedAt=None, error=None, warning=None)
         verify_all = 'all' in parse_qs(urlparse(self.path).query)
@@ -1701,6 +2064,98 @@ class NSEHandler(http.server.SimpleHTTPRequestHandler):
         calendar differences), so flags survive page reloads and server restarts."""
         self._send_json({**_tv_verify_state, 'last': load_verification(self.server.base_dir),
                          'tvPort': self.server.tv_port})
+
+    def _handle_tv_full_start(self):
+        """POST /api/tv-full/start[?limit=N][&resume=1] - verify every stock against TradingView in a background
+        thread (read-only), then write the report. `limit` = only the N most-traded stocks; `resume` = continue an
+        interrupted run on the same data. Same same-origin header rule as the other TradingView endpoints; refused
+        while any other run is using the TradingView chart (or the data is being reprocessed)."""
+        if self.headers.get('X-Requested-With') != 'nse-dashboard':
+            self._send_json({'ok': False, 'error': 'Forbidden'}, 403)
+            return
+        query = parse_qs(urlparse(self.path).query)
+        try:
+            limit = int(query['limit'][0]) if 'limit' in query else None
+        except ValueError:
+            limit = None
+        if limit is not None and limit < 1:
+            limit = None
+        with _tv_lock:
+            if _tv_full_state['status'] == 'running':
+                self._send_json({'ok': True, 'alreadyRunning': True})
+                return
+            if _tv_state['status'] == 'running' or _tv_verify_state['status'] == 'running':
+                self._send_json({'ok': False, 'error': 'Another TradingView run is in progress - try again when it finishes.'}, 409)
+                return
+            if _reprocess_state['status'] == 'running':
+                self._send_json({'ok': False, 'error': 'A data refresh/reprocess is running - try again when it finishes.'}, 409)
+                return
+            _tv_full_stop.clear()
+            _tv_full_state.update(status='running', step='Starting...', current=0, total=0, startedAt=time.time(),
+                                  finishedAt=None, error=None, warning=None, stopping=False, stopped=False, counts={})
+        threading.Thread(target=run_tv_verify_full, args=(self.server.base_dir, self.server.tv_port, limit, 'resume' in query),
+                         daemon=True).start()
+        self._send_json({'ok': True, 'started': True})
+
+    def _handle_tv_full_stop(self):
+        """POST /api/tv-full/stop - ask a running full verification to finish the stock it is on, save its
+        progress and write a (partial) report."""
+        if self.headers.get('X-Requested-With') != 'nse-dashboard':
+            self._send_json({'ok': False, 'error': 'Forbidden'}, 403)
+            return
+        with _tv_lock:
+            running = _tv_full_state['status'] == 'running'
+            if running:
+                _tv_full_stop.set()
+                _tv_full_state['stopping'] = True
+        self._send_json({'ok': True, 'stopping': running})
+
+    def _serve_tv_full_status(self):
+        """Run state (live progress) plus a summary of the last saved run. The summary needs the saved file,
+        which is skipped while a run is in progress - the progress fields carry everything then."""
+        last = None
+        if _tv_full_state['status'] != 'running':
+            last = summarize_full_verification(self.server.base_dir, load_full_verification(self.server.base_dir))
+        self._send_json({**_tv_full_state, 'last': last, 'tvPort': self.server.tv_port})
+
+    def _serve_tv_full_results(self):
+        """The last full run's flagged stocks (minor + major), most serious and most-traded first, with its summary."""
+        payload = load_full_verification(self.server.base_dir)
+        flagged = []
+        corp_index = load_corp_action_index(self.server.base_dir)
+        for isin, r in ((payload or {}).get('stocks') or {}).items():
+            if r.get('status') in ('minor', 'major'):
+                flagged.append({'nse': tv_report.corp_action_hints(isin, r, corp_index),
+                    'isin': isin, 'symbol': r.get('symbol'), 'series': r.get('series'), 'turnover': r.get('turnover'),
+                    'status': r['status'], 'cause': tv_report.primary_cause(r), 'maxDevPct': r.get('maxDevPct'),
+                    'endDevPct': r.get('endDevPct'), 'worstDate': r.get('worstDate'), 'firstOff': r.get('firstOff'),
+                    'lastOff': r.get('lastOff'), 'bars': r.get('bars'), 'barsOff': r.get('barsOff'),
+                    'causes': r.get('causes') or [], 'note': r.get('note'), 'adjusted': bool(r.get('events'))})
+        flagged.sort(key=lambda x: (0 if x['status'] == 'major' else 1, -(x['turnover'] or 0), x['symbol'] or ''))
+        self._send_json({'summary': summarize_full_verification(self.server.base_dir, payload), 'flagged': flagged,
+                         'calendar': (payload or {}).get('calendar')})
+
+    def _serve_tv_full_report(self):
+        """GET /api/tv-full/report?format=md|csv - download the last run's report. Only the file recorded in the
+        run's own meta is ever served (never a caller-supplied path)."""
+        fmt = (parse_qs(urlparse(self.path).query).get('format') or ['md'])[0]
+        fmt = fmt if fmt in ('md', 'csv') else 'md'
+        payload = load_full_verification(self.server.base_dir)
+        name = (((payload or {}).get('meta') or {}).get('report') or {}).get(fmt)
+        path = os.path.join(self.server.base_dir, DATA_SUBDIR, REPORTS_SUBDIR, os.path.basename(name)) if name else None
+        if not path or not os.path.isfile(path):
+            self._send_json({'ok': False, 'error': 'No report has been written yet - run the full verification first.'}, 404)
+            return
+        with open(path, 'rb') as f:
+            body = f.read()
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/csv; charset=utf-8' if fmt == 'csv' else 'text/markdown; charset=utf-8')
+        self.send_header('Content-Disposition', f'attachment; filename="{os.path.basename(name)}"')
+        self.send_header('Content-Length', len(body))
+        self.send_header('Cache-Control', 'no-cache')
+        self._cors_headers()
+        self.end_headers()
+        self.wfile.write(body)
 
     def _serve_files(self):
         """Latest downloaded data files + dates (Data Files popup)."""
@@ -1832,9 +2287,32 @@ class ThreadingNSEServer(http.server.ThreadingHTTPServer):
         super().handle_error(request, client_address)
 
 
+def disable_console_quickedit():
+    """Windows: by default a click inside a console window starts a text selection ("QuickEdit"), and while
+    a selection is active every write to that console blocks until Enter/Esc is pressed. The server writes a log
+    line per API request BEFORE it sends the response, so one stray click in its window froze the whole
+    dashboard ("server is sticky") until the window was clicked again. Switch QuickEdit off for this console.
+    No-op on other platforms, or when there is no console (redirected/hidden)."""
+    if os.name != 'nt':
+        return
+    try:
+        import ctypes
+        from ctypes import wintypes
+        kernel32 = ctypes.windll.kernel32
+        kernel32.GetStdHandle.restype = wintypes.HANDLE
+        handle = kernel32.GetStdHandle(-10)  # STD_INPUT_HANDLE
+        mode = wintypes.DWORD()
+        if handle and handle != ctypes.c_void_p(-1).value and kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            ENABLE_QUICK_EDIT_MODE, ENABLE_EXTENDED_FLAGS = 0x0040, 0x0080
+            kernel32.SetConsoleMode(handle, (mode.value & ~ENABLE_QUICK_EDIT_MODE) | ENABLE_EXTENDED_FLAGS)
+    except Exception:
+        pass
+
+
 def run_server(port, base_dir, tv_port=tv_adjust.DEFAULT_CDP_PORT):
     """Start the HTTP server. `tv_port` is TradingView Desktop's DevTools port - only used
     when the Data Quality "Adjust prices from TradingView" button is clicked."""
+    disable_console_quickedit()
     os.chdir(base_dir)
 
     for old_rel, new_rel in LEGACY_LOCATIONS:
