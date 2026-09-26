@@ -38,6 +38,10 @@ $MergedFolder = Resolve-FolderCI -Parent $ScriptDir -Name "NSE_DATA"
 $BhavFolder   = Resolve-FolderCI -Parent $MergedFolder -Name "Bhavcopy"
 $BandFolder   = Resolve-FolderCI -Parent $MergedFolder -Name "PriceBand"
 
+# Git-tracked reference data (see reference-data\README.md). The corporate-actions feed is only a rolling
+# ~3-year window that this script overwrites on every run, so it is kept in the repo instead of NSE_DATA.
+$ReferenceFolder = Resolve-FolderCI -Parent $ScriptDir -Name "reference-data"
+
 # CM-UDiFF format (ZIP containing CSV with ISIN)
 $BhavBaseUrl = "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_{0}_F_0000.csv.zip"
 # Price band URL unchanged
@@ -91,7 +95,7 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 # -- Setup ---------------------------------------------------------------------
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-foreach ($dir in @($BhavFolder, $BandFolder, $MergedFolder)) {
+foreach ($dir in @($BhavFolder, $BandFolder, $MergedFolder, $ReferenceFolder)) {
     if (-not (Test-Path $dir)) {
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
     }
@@ -431,7 +435,7 @@ catch {
 # ratio parsing happens server-side (nse_server.py); this is just a size filter
 # so the CSV doesn't carry every dividend/AGM notice too.
 Write-Host "`nDownloading corporate actions (splits/bonuses)..." -ForegroundColor Cyan
-$CorpActionsFile = Join-Path $MergedFolder "CorporateActions.csv"
+$CorpActionsFile = Join-Path $ReferenceFolder "CorporateActions.csv"
 $CorpFromDate = (Get-Date).AddYears(-3).ToString("dd-MM-yyyy")
 $CorpToDate = (Get-Date).ToString("dd-MM-yyyy")
 $CorpActionsUrl = "$CorpActionsBaseUrl&from_date=$CorpFromDate&to_date=$CorpToDate"
@@ -446,6 +450,14 @@ try {
     $corpFiltered = $corpJson | Where-Object {
         $_.subject -match '(?i)bonus|split|sub-division|consolidation of equity shares|demerger'
     }
+    # NSE returns rows that share an ex-date in an arbitrary order that differs from call to call, which made
+    # every download look "changed" (file rewritten, reprocess triggered, noisy git diffs now that the file is
+    # tracked). Write them in a stable order instead: ex-date, then symbol, then subject.
+    $corpFiltered = @($corpFiltered | Sort-Object `
+        @{ Expression = { $d = [datetime]::MinValue
+                          if ([datetime]::TryParseExact($_.exDate, 'dd-MMM-yyyy', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$d)) { $d } else { [datetime]::MaxValue } } }, `
+        @{ Expression = { $_.symbol } }, `
+        @{ Expression = { $_.subject } })
     $corpLines = @("ISIN,SYMBOL,EXDATE,SUBJECT")
     foreach ($row in $corpFiltered) {
         $isin = ($row.isin -replace '"','""')

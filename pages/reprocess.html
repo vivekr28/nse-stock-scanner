@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Reprocessing — NSE EOD Dashboard</title>
-<link rel="stylesheet" href="css/styles.css">
+<link rel="stylesheet" href="../css/styles.css">
 <style>
   body { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
   .reprocess-box {
@@ -40,7 +40,7 @@
   <div class="reprocess-elapsed" id="elapsedEl"></div>
   <div id="errorBox" class="reprocess-error-box" style="display:none;"></div>
   <div class="reprocess-actions" id="actionsEl">
-    <button class="btn btn-primary" onclick="location.href='index.html'">Back to Dashboard</button>
+    <button class="btn btn-primary" onclick="location.href='../index.html'">Back to Dashboard</button>
     <button class="btn btn-secondary" id="retryBtn" onclick="startReprocess()" style="display:none;">Try Again</button>
   </div>
 </div>
@@ -70,7 +70,7 @@ function showDone(data) {
   document.getElementById('stepEl').textContent = `${data.stocks != null ? data.stocks : '?'} stocks processed.` +
     (REFRESH ? ' Reloading dashboard…' : '');
   document.getElementById('actionsEl').classList.add('show');
-  if (REFRESH) setTimeout(() => location.href = 'index.html', 1200);
+  if (REFRESH) setTimeout(() => location.href = '../index.html', 1200);
 }
 
 function showError(data) {

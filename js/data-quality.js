@@ -125,7 +125,7 @@ function renderDataQuality() {
 // actions that cause a real price discontinuity but aren't (or can't correctly be)
 // back-adjusted by a ratio - demergers, NCRPS bonuses, capital reductions, etc. (splits/
 // bonuses ARE adjusted server-side and don't appear here). Events already corrected from
-// TradingView data (NSE_DATA/DemergerAdjustments.csv) are dropped from it server-side.
+// TradingView data (reference-data/DemergerAdjustments.csv) are dropped from it server-side.
 // SMA/52W/ADR/change% may look distorted for the rest until the affected window rolls
 // past exDate. The server only contacts TradingView when the button below is clicked.
 let _dqTv = { corrections: [], appliedCount: 0, polling: false };
@@ -164,7 +164,7 @@ function dqSetTvStatus(text, kind) {
 // Idle summary shown next to the button: how many corrections are currently applied.
 function dqTvIdleText() {
   return _dqTv.appliedCount > 0
-    ? `${_dqTv.appliedCount} correction${_dqTv.appliedCount === 1 ? '' : 's'} applied from TradingView (NSE_DATA/DemergerAdjustments.csv)`
+    ? `${_dqTv.appliedCount} correction${_dqTv.appliedCount === 1 ? '' : 's'} applied from TradingView (reference-data/DemergerAdjustments.csv)`
     : '';
 }
 
