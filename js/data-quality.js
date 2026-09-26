@@ -112,19 +112,137 @@ function renderDataQuality() {
        <td>${s.lastTradeDate}</td><td>${s.tradingDays}</td>
        <td style="color:var(--orange)">Not traded since ${s.lastTradeDate}</td></tr>`).join('');
 
-  // Table: recent corporate actions that cause a real price discontinuity but
-  // aren't (or can't correctly be) back-adjusted by a ratio - demergers, NCRPS
-  // bonuses, capital reductions, etc. (splits/bonuses ARE adjusted server-side
-  // and don't appear here). SMA/52W/ADR/change% may look distorted for these
-  // stocks until the affected window rolls past exDate.
+  dqRenderCorpActions();
+  dqLoadTvState();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// RECENT CORPORATE ACTIONS NOT PRICE-ADJUSTED  +  "Adjust prices from TradingView"
+// ═══════════════════════════════════════════════════════════════════════════════
+// The list itself comes from the server (Store.unadjustedCorpActions): recent corporate
+// actions that cause a real price discontinuity but aren't (or can't correctly be)
+// back-adjusted by a ratio - demergers, NCRPS bonuses, capital reductions, etc. (splits/
+// bonuses ARE adjusted server-side and don't appear here). Events already corrected from
+// TradingView data (NSE_DATA/DemergerAdjustments.csv) are dropped from it server-side.
+// SMA/52W/ADR/change% may look distorted for the rest until the affected window rolls
+// past exDate. The server only contacts TradingView when the button below is clicked.
+let _dqTv = { corrections: [], appliedCount: 0, polling: false };
+
+const dqTvKey = (symbol, exDate) => normalizeSymbol(symbol) + '|' + exDate;
+
+function dqTvCell(row) {
+  if (!row) return '<span style="color:var(--text2)">Not checked</span>';
+  const when = row.checkedAt ? `<span style="color:var(--text2);font-size:11px"> · checked ${escapeHtml(row.checkedAt)}</span>` : '';
+  if (row.status === 'adjusted') return `<span class="positive">Corrected (×${row.factor})</span>${when}`;
+  return `<span style="color:var(--orange)">${escapeHtml(row.note || row.status)}</span>${when}`;
+}
+
+function dqRenderCorpActions() {
   const corpActions = Store.unadjustedCorpActions || [];
   document.getElementById('dqCorpActionCount').textContent = corpActions.length;
+  const byKey = new Map(_dqTv.corrections.map(c => [dqTvKey(c.symbol, c.exDate), c]));
   const t6 = document.getElementById('dqCorpActionTable');
-  t6.querySelector('thead tr').innerHTML = '<th>#</th><th>Symbol</th><th>Ex-Date</th><th>Event</th><th>Close</th>';
+  t6.querySelector('thead tr').innerHTML = '<th>#</th><th>Symbol</th><th>Ex-Date</th><th>Event</th><th>Close</th><th>TradingView check</th>';
   t6.querySelector('tbody').innerHTML = corpActions.length === 0
-    ? '<tr><td colspan="5" style="text-align:center;color:var(--text2)">None in the last ~370 days.</td></tr>'
+    ? '<tr><td colspan="6" style="text-align:center;color:var(--text2)">None in the last ~370 days.</td></tr>'
     : corpActions.map((c, i) =>
       `<tr><td>${i+1}</td><td>${escapeHtml(c.symbol)}</td><td>${c.exDate}</td>
        <td style="color:var(--orange)">${escapeHtml(c.subject)}</td>
-       <td>${c.close != null ? fmt2(c.close) : '-'}</td></tr>`).join('');
+       <td>${c.close != null ? fmt2(c.close) : '-'}</td>
+       <td>${dqTvCell(byKey.get(dqTvKey(c.symbol, c.exDate)))}</td></tr>`).join('');
+}
+
+function dqSetTvStatus(text, kind) {
+  const el = document.getElementById('dqTvAdjustStatus');
+  if (!el) return;
+  el.textContent = text;
+  el.style.color = kind === 'error' ? 'var(--red)' : kind === 'ok' ? 'var(--green)' : 'var(--text2)';
+}
+
+// Idle summary shown next to the button: how many corrections are currently applied.
+function dqTvIdleText() {
+  return _dqTv.appliedCount > 0
+    ? `${_dqTv.appliedCount} correction${_dqTv.appliedCount === 1 ? '' : 's'} applied from TradingView (NSE_DATA/DemergerAdjustments.csv)`
+    : '';
+}
+
+// One status fetch: the stored corrections (to label rows) + whether a run is in progress
+// (so a page reload mid-run picks the progress display back up). Silent when there is no
+// server (manual file-upload mode).
+async function dqLoadTvState() {
+  try {
+    const resp = await fetch('/api/tv-adjust/status', { cache: 'no-store' });
+    if (!resp.ok) return;
+    const s = await resp.json();
+    _dqTv.corrections = s.corrections || [];
+    _dqTv.appliedCount = s.appliedCount || 0;
+    const portEl = document.getElementById('dqTvPort');
+    if (portEl && s.tvPort) portEl.textContent = s.tvPort;
+    dqRenderCorpActions();
+    if (s.status === 'running') {
+      document.getElementById('dqTvAdjustBtn').disabled = true;
+      dqPollTvAdjust();
+    } else if (!_dqTv.polling) {
+      dqSetTvStatus(dqTvIdleText());
+    }
+  } catch (e) { /* no server - nothing to show */ }
+}
+
+async function dqRunTvAdjust() {
+  const btn = document.getElementById('dqTvAdjustBtn');
+  btn.disabled = true;
+  dqSetTvStatus('Starting…');
+  try {
+    const resp = await fetch('/api/tv-adjust/start', { method: 'POST', headers: { 'X-Requested-With': 'nse-dashboard' } });
+    const j = await resp.json().catch(() => ({}));
+    if (!resp.ok || j.ok === false) throw new Error(j.error || `Server returned HTTP ${resp.status}`);
+  } catch (e) {
+    dqSetTvStatus(e.message, 'error');
+    btn.disabled = false;
+    return;
+  }
+  dqPollTvAdjust();
+}
+
+async function dqPollTvAdjust() {
+  if (_dqTv.polling) return;
+  _dqTv.polling = true;
+  const btn = document.getElementById('dqTvAdjustBtn');
+  let reloading = false;
+  try {
+    for (;;) {
+      const s = await (await fetch('/api/tv-adjust/status', { cache: 'no-store' })).json();
+      _dqTv.corrections = s.corrections || [];
+      _dqTv.appliedCount = s.appliedCount || 0;
+      if (s.status === 'running') {
+        const counter = s.total && String(s.step).startsWith('Checking') ? ` (${Math.min(s.current + 1, s.total)}/${s.total})` : '';
+        dqSetTvStatus(s.step + counter);
+        await new Promise(r => setTimeout(r, 600));
+        continue;
+      }
+      if (s.status === 'error') {
+        dqSetTvStatus(s.error || 'TradingView correction failed.', 'error');
+      } else if (s.adjusted > 0) {
+        dqSetTvStatus(`Corrected ${s.adjusted} event${s.adjusted === 1 ? '' : 's'} — reloading the dashboard data…`, 'ok');
+        try {
+          sessionStorage.setItem('nseReopenTab', 'dataquality');
+          sessionStorage.setItem('nseReopenDqCorp', '1');
+        } catch (e) { /* storage blocked - the reload just lands on the default tab */ }
+        reloading = true;  // button stays disabled until the page reloads
+        setTimeout(() => location.reload(), 1200);
+        return;
+      } else {
+        const n = (s.results || []).length;
+        dqSetTvStatus(`Checked ${n} event${n === 1 ? '' : 's'}: none could be corrected from TradingView.` +
+                      (s.warning ? ' ' + s.warning : ''), s.warning ? 'error' : undefined);
+        dqRenderCorpActions();
+      }
+      break;
+    }
+  } catch (e) {
+    dqSetTvStatus('Lost contact with the server: ' + e.message, 'error');
+  } finally {
+    _dqTv.polling = false;
+    if (btn && !reloading) btn.disabled = false;
+  }
 }

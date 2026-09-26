@@ -21,6 +21,8 @@ from collections import defaultdict
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
+import tv_adjust  # TradingView-assisted corrections; does nothing until the Data Quality button is clicked
+
 # ─── Configuration ───────────────────────────────────────────────────────────
 DEFAULT_PORT = 8765
 DATA_SUBDIR = 'NSE_DATA'
@@ -31,6 +33,25 @@ PROCESSED_FILE = 'processed_data.json'
 PRESETS_FILE = 'presets.json'
 MIDSMALL400_FILE = 'MidSmallcap400_Constituents.csv'
 CORPACTIONS_FILE = 'CorporateActions.csv'
+CORRECTIONS_FILE = 'DemergerAdjustments.csv'  # TradingView-derived price corrections (see tv_adjust.py)
+CORRECTION_COLUMNS = ['ISIN', 'SYMBOL', 'EXDATE', 'FACTOR', 'STATUS', 'CHECKED_AT', 'NOTE']
+
+# ─── TradingView correction run state (polled by the Data Quality tab) ───────
+# Same pattern as the reprocess state below: the run happens in a background thread
+# so the request returns immediately and the tab can show live progress.
+_tv_lock = threading.Lock()
+_tv_state = {
+    'status': 'idle',   # 'idle' | 'running' | 'done' | 'error'
+    'step': '',
+    'current': 0,
+    'total': 0,
+    'startedAt': None,
+    'finishedAt': None,
+    'error': None,
+    'warning': None,
+    'adjusted': 0,      # events newly corrected by the last run
+    'results': [],      # [{symbol, exDate, status, factor, note}] for the last run
+}
 
 # ─── Reprocess progress state (for the /reprocess.html page) ─────────────────
 # Runs the actual reprocessing in a background thread so /api/reprocess
@@ -383,6 +404,83 @@ def apply_split_adjustments(daily_by_symbol, events_by_isin):
         print(f"    Split/bonus-adjusted {adjusted_isins} stock(s)")
 
 
+# ─── TradingView-derived demerger corrections ───────────────────────────────
+# Demergers (and similar) have no ratio in NSE's feed, so they land in the Data
+# Quality tab's "Not Price-Adjusted" list. The "Adjust prices from TradingView" button
+# (see run_tv_adjust) compares TradingView's already-adjusted history with ours and
+# stores one factor per event in NSE_DATA/DemergerAdjustments.csv. Every processing run
+# - including server start - then applies the stored factors through the SAME machinery
+# as splits/bonuses, with no TradingView access at all. Deleting a row from the CSV
+# undoes that correction on the next (re)process.
+#
+# STATUS: 'adjusted' (FACTOR applies), 'tv-unadjusted' (TradingView shows no
+# adjustment for the event either) or 'inconclusive' (prices didn't line up / stock
+# not found). Only 'adjusted' rows change any price; the others just record why an
+# event is still listed and are re-checked on the next button click.
+def correction_key(symbol, ex_date_str):
+    """Identity of one corporate action: (normalized symbol, ex-date). The ISIN in the feed
+    can be stale (see bridge_split_induced_isin_changes), so it is never part of the key."""
+    ex_dt = parse_date_str(ex_date_str)
+    return (normalize_symbol(symbol), ex_dt.date() if ex_dt else None)
+
+
+def load_demerger_corrections(base_dir):
+    """All rows of DemergerAdjustments.csv as dicts (missing file -> [])."""
+    rows = []
+    for r in read_csv_file(os.path.join(base_dir, DATA_SUBDIR, CORRECTIONS_FILE)):
+        symbol, ex_date = r.get('SYMBOL', ''), r.get('EXDATE', '')
+        if not symbol or not parse_date_str(ex_date):
+            continue
+        rows.append({
+            'isin': r.get('ISIN', ''),
+            'symbol': symbol,
+            'exDate': ex_date,
+            'factor': parse_num(r.get('FACTOR')),
+            'status': (r.get('STATUS') or '').strip().lower(),
+            'checkedAt': r.get('CHECKED_AT', ''),
+            'note': r.get('NOTE', ''),
+        })
+    return rows
+
+
+def save_demerger_corrections(base_dir, rows):
+    """Write the corrections CSV atomically (newest ex-date first)."""
+    path = os.path.join(base_dir, DATA_SUBDIR, CORRECTIONS_FILE)
+    tmp = path + '.tmp'
+    ordered = sorted(rows, key=lambda r: parse_date_str(r['exDate']) or datetime.min, reverse=True)
+    with open(tmp, 'w', encoding='utf-8', newline='') as f:
+        w = csv.writer(f)
+        w.writerow(CORRECTION_COLUMNS)
+        for r in ordered:
+            w.writerow([r['isin'], r['symbol'], r['exDate'],
+                        '' if r['factor'] is None else f"{r['factor']:.6f}",
+                        r['status'], r['checkedAt'], r['note']])
+    os.replace(tmp, path)
+
+
+def add_demerger_corrections(events_by_isin, corrections, latest_date_str):
+    """Fold every 'adjusted' correction into `events_by_isin` (same shape
+    load_split_bonus_events returns) so bridge_split_induced_isin_changes and
+    apply_split_adjustments treat it exactly like a split. A factor F means
+    "multiply pre-ex-date prices by F", i.e. the split convention's ratio is 1/F.
+    Returns the set of correction_keys applied, so the caller can drop those events
+    from the Data Quality list."""
+    latest_dt = parse_date_str(latest_date_str) if latest_date_str else None
+    applied = set()
+    for c in corrections:
+        if c['status'] != 'adjusted' or not c['factor'] or c['factor'] <= 0 or abs(c['factor'] - 1) < 1e-9:
+            continue
+        ex_dt = parse_date_str(c['exDate'])
+        if not ex_dt or (latest_dt and ex_dt > latest_dt):
+            continue
+        events_by_isin.setdefault(c['isin'], []).append((ex_dt, 1.0 / c['factor'], c['symbol']))
+        events_by_isin[c['isin']].sort(key=lambda e: e[0])
+        applied.add(correction_key(c['symbol'], c['exDate']))
+    if applied:
+        print(f"    Applying {len(applied)} TradingView demerger correction(s) from {CORRECTIONS_FILE}")
+    return applied
+
+
 def process_data(base_dir, progress_cb=None):
     """Process raw CSVs into pre-computed JSON. Mirrors JS processData().
     `progress_cb`, if given, is called with a short human-readable phase
@@ -491,6 +589,7 @@ def process_data(base_dir, progress_cb=None):
     t1b = time.time()
     report(f"  Applying split/bonus price adjustments...")
     corp_events, unhandled_corp_events = load_split_bonus_events(base_dir, latest_date)
+    corrected_keys = add_demerger_corrections(corp_events, load_demerger_corrections(base_dir), latest_date)
     corp_events = bridge_split_induced_isin_changes(daily_by_symbol, symbol_to_isin, corp_events)
     apply_split_adjustments(daily_by_symbol, corp_events)
     print(f"    Done in {time.time()-t1b:.1f}s")
@@ -597,6 +696,8 @@ def process_data(base_dir, progress_cb=None):
             ex_dt = parse_date_str(ev['exDate'])
             if not ex_dt or (latest_dt_for_filter and (latest_dt_for_filter - ex_dt).days > 370):
                 continue
+            if correction_key(ev['symbol'], ev['exDate']) in corrected_keys:
+                continue  # already price-corrected from TradingView data - nothing left to report
             resolved_isin = symbol_to_isin.get(normalize_symbol(ev['symbol'])) or ev['isin']
             current = latest_by_symbol.get(resolved_isin)
             unadjusted_corp_actions.append({
@@ -795,7 +896,7 @@ def needs_processing(base_dir):
         return True
 
     json_mtime = os.path.getmtime(json_path)
-    for csv_file in [BHAV_FILE, BAND_FILE, SECTOR_FILE, MIDSMALL400_FILE, CORPACTIONS_FILE]:
+    for csv_file in [BHAV_FILE, BAND_FILE, SECTOR_FILE, MIDSMALL400_FILE, CORPACTIONS_FILE, CORRECTIONS_FILE]:
         csv_path = os.path.join(data_dir, csv_file)
         if os.path.exists(csv_path) and os.path.getmtime(csv_path) > json_mtime:
             return True
@@ -843,6 +944,114 @@ def save_presets(base_dir, presets):
         json.dump(presets, f, indent=2, ensure_ascii=False)
 
 
+# ─── TradingView correction run (the Data Quality "Adjust prices" button) ────
+def run_tv_adjust(base_dir, port):
+    """Background worker behind POST /api/tv-adjust/start. For every event currently in the
+    Data Quality "Not Price-Adjusted" list: read TradingView's daily bars, derive the
+    correction factor (tv_adjust.derive_correction), record the outcome in
+    DemergerAdjustments.csv, and - if any price was newly corrected - reprocess so the
+    corrected prices (and the shrunken list) are live. TradingView is only ever touched
+    here, never at server start; the user's chart symbol/resolution are restored after."""
+    st = _tv_state
+    try:
+        st['step'] = 'Reading dashboard data...'
+        with _cache_lock:
+            data = load_processed_data(base_dir)
+        if not data:
+            raise RuntimeError('No processed data available yet - reprocess first.')
+
+        cols = data.get('dailyCols') or []
+        date_i, close_i = cols.index('date'), cols.index('close')
+        daily = data.get('dailyBySymbol') or {}
+        pending, seen = [], set()
+        for ev in data.get('unadjustedCorpActions') or []:
+            key = correction_key(ev['symbol'], ev['exDate'])
+            if key in seen:
+                continue
+            seen.add(key)
+            days = daily.get(ev['isin'])
+            pending.append({
+                'ev': ev, 'key': key,
+                'ours': {parse_date_str(r[date_i]).date(): r[close_i] for r in days} if days else None,
+            })
+        data = daily = None  # the full price history is big - only the small per-event slices are kept
+
+        st.update(total=len(pending), current=0)
+        if not pending:
+            st['step'] = 'Nothing to check - no unadjusted corporate actions are listed.'
+            st['status'] = 'done'
+            return
+
+        rows = {correction_key(r['symbol'], r['exDate']): r for r in load_demerger_corrections(base_dir)}
+        checked_at = datetime.now().strftime('%Y-%m-%d %H:%M')
+        newly_adjusted = 0
+        stopped_early = None
+
+        with tv_adjust.TradingViewChart(port) as chart:
+            for i, item in enumerate(pending):
+                ev = item['ev']
+                st.update(step=f"Checking {ev['symbol']} on TradingView", current=i)
+                if item['ours'] is None:
+                    res = {'status': 'inconclusive', 'factor': None,
+                           'note': 'No price history for this stock in the dashboard data'}
+                else:
+                    try:
+                        res = tv_adjust.derive_correction(
+                            chart.daily_closes(ev['symbol']), item['ours'], item['key'][1])
+                    except tv_adjust.TradingViewConnectionError as e:
+                        stopped_early = str(e)
+                        break
+                    except tv_adjust.TradingViewError as e:
+                        res = {'status': 'inconclusive', 'factor': None, 'note': str(e)}
+
+                rows[item['key']] = {
+                    'isin': ev['isin'], 'symbol': ev['symbol'], 'exDate': ev['exDate'],
+                    'factor': res['factor'], 'status': res['status'],
+                    'checkedAt': checked_at, 'note': res['note'],
+                }
+                if res['status'] == 'adjusted':
+                    newly_adjusted += 1
+                st['results'].append({'symbol': ev['symbol'], 'exDate': ev['exDate'],
+                                      'status': res['status'], 'factor': res['factor'], 'note': res['note']})
+            st['current'] = len(st['results'])
+
+        if st['results']:
+            was_current = not needs_processing(base_dir)
+            save_demerger_corrections(base_dir, list(rows.values()))
+            if was_current and not newly_adjusted:
+                # Only "checked" notes/timestamps changed - no price is affected, so the
+                # processed data is still current. Touch it so the next server start
+                # doesn't reprocess (~1 min) just because the corrections CSV is newer.
+                os.utime(os.path.join(base_dir, DATA_SUBDIR, PROCESSED_FILE))
+
+        if newly_adjusted:
+            st['step'] = 'Applying corrections...'
+            with _cache_lock:
+                new_data = process_data(base_dir, progress_cb=lambda s: st.__setitem__('step', s))
+                if not new_data:
+                    raise RuntimeError('Corrections were saved but reprocessing failed - reprocess manually.')
+                st['step'] = 'Saving processed_data.json...'
+                save_processed_data(base_dir, new_data)
+                NSEHandler._gzipped_data = None
+                NSEHandler._gzipped_lite = None
+                NSEHandler._gzipped_daily = None
+                st['step'] = 'Preparing dashboard data...'
+                NSEHandler._build_cache(base_dir)
+
+        st['adjusted'] = newly_adjusted
+        if stopped_early:
+            st['warning'] = f'Stopped early: {stopped_early}'
+        st['status'] = 'done'
+    except (tv_adjust.TradingViewError, RuntimeError, OSError, ValueError, KeyError) as e:
+        st['status'] = 'error'
+        st['error'] = str(e)
+    except Exception as e:  # never leave the UI stuck on "running"
+        st['status'] = 'error'
+        st['error'] = f'Unexpected error: {e}'
+    finally:
+        st['finishedAt'] = time.time()
+
+
 # ─── HTTP Server ─────────────────────────────────────────────────────────────
 class NSEHandler(http.server.SimpleHTTPRequestHandler):
     """Custom handler for API endpoints + static file serving."""
@@ -885,6 +1094,8 @@ class NSEHandler(http.server.SimpleHTTPRequestHandler):
             self._handle_reprocess_start()
         elif path == '/api/reprocess/status':
             self._serve_reprocess_status()
+        elif path == '/api/tv-adjust/status':
+            self._serve_tv_adjust_status()
         elif path == '/api/status':
             self._serve_status()
         elif path == '/api/files':
@@ -896,6 +1107,8 @@ class NSEHandler(http.server.SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == '/api/presets':
             self._save_presets()
+        elif parsed.path == '/api/tv-adjust/start':
+            self._handle_tv_adjust_start()
         else:
             self.send_error(404)
 
@@ -1167,6 +1380,51 @@ class NSEHandler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_json(self, obj, status=200):
+        body = json.dumps(obj).encode('utf-8')
+        self.send_response(status)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', len(body))
+        self.send_header('Cache-Control', 'no-cache')
+        self._cors_headers()
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _handle_tv_adjust_start(self):
+        """POST /api/tv-adjust/start - kick off the TradingView price-correction run in a
+        background thread and return immediately; the Data Quality tab polls
+        /api/tv-adjust/status. The only place the server ever contacts TradingView."""
+        # Custom header = same-origin only: cross-site pages can't send it without a
+        # CORS preflight, which this server doesn't approve. Keeps a random web page
+        # from making the dashboard drive TradingView / rewrite the corrections file.
+        if self.headers.get('X-Requested-With') != 'nse-dashboard':
+            self._send_json({'ok': False, 'error': 'Forbidden'}, 403)
+            return
+        with _tv_lock:
+            if _tv_state['status'] == 'running':
+                self._send_json({'ok': True, 'alreadyRunning': True})
+                return
+            if _reprocess_state['status'] == 'running':
+                self._send_json({'ok': False, 'error': 'A data refresh/reprocess is running - try again when it finishes.'}, 409)
+                return
+            _tv_state.update(status='running', step='Starting...', current=0, total=0,
+                             startedAt=time.time(), finishedAt=None, error=None,
+                             warning=None, adjusted=0, results=[])
+        threading.Thread(target=run_tv_adjust, args=(self.server.base_dir, self.server.tv_port),
+                         daemon=True).start()
+        self._send_json({'ok': True, 'started': True})
+
+    def _serve_tv_adjust_status(self):
+        """Run state plus every stored correction row (so the Data Quality table can show
+        why an event is still listed) and the count of corrections currently applied."""
+        rows = load_demerger_corrections(self.server.base_dir)
+        self._send_json({
+            **_tv_state,
+            'corrections': rows,
+            'appliedCount': sum(1 for r in rows if r['status'] == 'adjusted'),
+            'tvPort': self.server.tv_port,
+        })
+
     def _serve_files(self):
         """Latest downloaded data files + dates (Data Files popup)."""
         body = json.dumps(get_data_files_info(self.server.base_dir)).encode('utf-8')
@@ -1267,8 +1525,9 @@ class ThreadingNSEServer(http.server.ThreadingHTTPServer):
         super().handle_error(request, client_address)
 
 
-def run_server(port, base_dir):
-    """Start the HTTP server."""
+def run_server(port, base_dir, tv_port=tv_adjust.DEFAULT_CDP_PORT):
+    """Start the HTTP server. `tv_port` is TradingView Desktop's DevTools port - only used
+    when the Data Quality "Adjust prices from TradingView" button is clicked."""
     os.chdir(base_dir)
 
     # Pre-process data on startup if needed
@@ -1286,6 +1545,7 @@ def run_server(port, base_dir):
 
     server = ThreadingNSEServer(('', port), NSEHandler)
     server.base_dir = base_dir
+    server.tv_port = tv_port
 
     def warm_cache():
         # Build the gzipped response caches now so the first page load doesn't
@@ -1312,6 +1572,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='NSE Dashboard Server')
     parser.add_argument('--port', type=int, default=DEFAULT_PORT, help=f'Port (default {DEFAULT_PORT})')
     parser.add_argument('--dir', type=str, default=None, help='Base directory (default: script directory)')
+    parser.add_argument('--tv-port', type=int, default=tv_adjust.DEFAULT_CDP_PORT,
+                        help=f'TradingView Desktop DevTools port, used only by the Data Quality '
+                             f'"Adjust prices from TradingView" button (default {tv_adjust.DEFAULT_CDP_PORT})')
     args = parser.parse_args()
 
     base_dir = args.dir or os.path.dirname(os.path.abspath(__file__))
@@ -1319,4 +1582,4 @@ if __name__ == '__main__':
         print(f"Error: {base_dir} is not a directory")
         sys.exit(1)
 
-    run_server(args.port, base_dir)
+    run_server(args.port, base_dir, args.tv_port)

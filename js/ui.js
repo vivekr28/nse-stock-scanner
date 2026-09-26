@@ -24,6 +24,21 @@ function showDashboard() {
 
   // Auto-run screener since Stock Scanner is the default tab
   if (typeof runScreener === 'function') runScreener();
+
+  // Come back to the tab we were on if the page was reloaded by an in-app action (the
+  // Data Quality "Adjust prices from TradingView" button reloads after correcting prices).
+  try {
+    const reopen = sessionStorage.getItem('nseReopenTab');
+    if (reopen) {
+      sessionStorage.removeItem('nseReopenTab');
+      const tabEl = document.querySelector(`.tab[data-tab="${reopen}"]`);
+      if (tabEl) tabEl.click();
+      if (sessionStorage.getItem('nseReopenDqCorp')) {
+        sessionStorage.removeItem('nseReopenDqCorp');
+        if (typeof dqToggleSection === 'function') dqToggleSection('dqCorpAction');
+      }
+    }
+  } catch (e) { /* sessionStorage unavailable - stay on the default tab */ }
 }
 
 function populateFilters() {
