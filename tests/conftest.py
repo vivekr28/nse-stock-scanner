@@ -25,6 +25,11 @@ BHAV_COLS = ['SYMBOL', 'SERIES', 'DATE1', 'PREV_CLOSE', 'OPEN_PRICE', 'HIGH_PRIC
              'NO_OF_TRADES', 'DELIV_QTY', 'DELIV_PER', 'ISIN', 'COMPANY_NAME']
 CORP_ACTION_COLS = ['ISIN', 'SYMBOL', 'EXDATE', 'SUBJECT', 'FACEVAL', 'FV_ASOF']
 TV_ADJUSTMENT_COLS = ['ISIN', 'SYMBOL', 'EXDATE', 'FACTOR', 'STATUS', 'CHECKED_AT', 'NOTE']
+# Matches the real NSE_PriceBand_Combined.csv shape after Download-NSE-Bhavcopy.ps1's fix
+# that carries each row's trading date through the merge (see AGENT.md's price-band
+# staleness bug note) - Symbol/Series/Band/Date are what process_data() actually reads;
+# Security Name/Remarks are passengers, never read, kept only for shape realism.
+PRICE_BAND_COLS = ['Symbol', 'Series', 'Security Name', 'Band', 'Remarks', 'Date']
 
 
 def business_days(start, n):
@@ -67,6 +72,15 @@ def tv_adjustment_row(isin, symbol, exdate, factor, status='adjusted', checked_a
             'STATUS': status, 'CHECKED_AT': checked_at, 'NOTE': note}
 
 
+def price_band_row(symbol, series, band, d=None, remarks='-'):
+    """One NSE_PriceBand_Combined.csv row. `d=None` omits the Date field entirely (for
+    testing the pre-fix/legacy dateless shape) rather than writing an empty one."""
+    row = {'Symbol': symbol, 'Series': series, 'Security Name': '', 'Band': band, 'Remarks': remarks}
+    if d is not None:
+        row['Date'] = fmt_date(d)
+    return row
+
+
 def _write_csv(path, cols, rows):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     buf = io.StringIO()
@@ -105,6 +119,9 @@ def project(tmp_path):
 
         def write_tv_adjustments(self, rows):
             _write_csv(os.path.join(base_dir, 'reference-data', 'TradingViewAdjustments.csv'), TV_ADJUSTMENT_COLS, rows)
+
+        def write_price_band(self, rows, cols=None):
+            _write_csv(os.path.join(base_dir, 'NSE_DATA', 'NSE_PriceBand_Combined.csv'), cols or PRICE_BAND_COLS, rows)
 
         @property
         def base_dir(self):

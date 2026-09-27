@@ -993,6 +993,15 @@ def process_data(base_dir, progress_cb=None):
     if os.path.exists(band_path):
         report(f"  Processing price band...")
         band_rows = read_csv_file(band_path)
+        # Per-ISIN latest date actually applied so far. NSE_PriceBand_Combined.csv's rows
+        # aren't guaranteed to be in strict chronological order for every symbol (see
+        # Download-NSE-Bhavcopy.ps1's price-band merge comment - a bulk restore/recovery of
+        # NSE_DATA can leave per-day files merged out of order), so a row must lose to
+        # whatever newer date has already been applied for that symbol, rather than
+        # unconditionally overwriting just for appearing later in the file. A row with no
+        # parseable Date (only possible on data merged before this column existed) always
+        # applies, matching the previous unconditional-overwrite behavior for it.
+        band_latest_date = {}
         for r in band_rows:
             sym = (r.get('Symbol') or r.get('SYMBOL') or '').strip()
             series = (r.get('Series') or r.get('SERIES') or '').strip()
@@ -1001,6 +1010,13 @@ def process_data(base_dir, progress_cb=None):
             isin_key = symbol_to_isin.get(normalize_symbol(sym))
             if not isin_key:
                 continue
+
+            row_date = parse_date_str(r.get('Date') or r.get('DATE') or '')
+            if row_date is not None:
+                prev_date = band_latest_date.get(isin_key)
+                if prev_date is not None and row_date < prev_date:
+                    continue  # older than a row already applied for this symbol - skip it
+                band_latest_date[isin_key] = row_date
 
             band_pct_str = (r.get('Band') or r.get('Price Band') or r.get('Applicable Price Band') or '').strip()
             upper_val = parse_num(r.get('Upper_Band') or r.get('High Price Band') or r.get('HighPriceBand') or '')

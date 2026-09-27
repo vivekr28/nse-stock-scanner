@@ -181,22 +181,18 @@ test('processData: sector/industry/marketCap come from Store.sectorMap by normal
 
 // ─── processBandData ─────────────────────────────────────────────────────────────
 
-test('processBandData: only the latest band date is applied, band merged onto latestBySymbol, circuit hits computed', () => {
-  // NOTE: the "latest date" pick (processBandData, js/data-processor.js) sorts the date
-  // column with a plain Array.sort() - lexicographic string order, not chronological - so
-  // this only picks the calendar-latest row when the date strings are themselves
-  // lexicographically sortable (e.g. ISO YYYY-MM-DD, used here). A non-ISO format like
-  // "31-Dec-2024" vs "1-Jan-2025" would sort backwards; the real combined price-band CSV
-  // this app downloads has no date column at all (single latest-snapshot file), so that
-  // mismatch is currently latent rather than live - not fixed here, just documented.
+test('processBandData: only the latest band date is applied (non-ISO dd-Mon-yyyy dates, correctly parsed not string-sorted)', () => {
   resetStore();
   Store.loaded.band = true;
   Store.bhavData = [
     bhavRow({ symbol: 'AAA', date: '1-Jan-2025', open: 100, high: 110, low: 95, close: 105, prev: 100, isin: 'INAAA' }),
   ];
+  // "31-Dec-2024" sorts AFTER "1-Jan-2025" lexicographically (string compare: '3'>'1'), which
+  // is exactly the case that broke the old plain Array.sort() on raw date strings - this
+  // fixture would have picked the wrong (older) row under that bug.
   Store.bandData = [
-    bandRow({ symbol: 'AAA', upper: 90, lower: 80, bandPct: '10', date: '2024-12-31' }),   // stale date - ignored
-    bandRow({ symbol: 'AAA', upper: 115.5, lower: 94.5, bandPct: '10', date: '2025-01-01' }), // latest date - applied
+    bandRow({ symbol: 'AAA', upper: 90, lower: 80, bandPct: '10', date: '31-Dec-2024' }),     // older - ignored
+    bandRow({ symbol: 'AAA', upper: 115.5, lower: 94.5, bandPct: '10', date: '1-Jan-2025' }), // latest - applied
   ];
   processData();
 
@@ -207,6 +203,33 @@ test('processBandData: only the latest band date is applied, band merged onto la
   assert.equal(latest.hitUC, false);
   // low=95 vs lower*1.001=94.5945 -> 95 > 94.5945, not a LC hit either
   assert.equal(latest.hitLC, false);
+});
+
+test('processBandData: a stale row appearing AFTER a newer one in the array does not overwrite it (per-symbol, out-of-order rows)', () => {
+  // Reproduces the real bug found live: NSE_PriceBand_Combined.csv's rows aren't guaranteed
+  // to be in chronological order for every symbol (a bulk restore/recovery of NSE_DATA can
+  // merge per-day files out of order - see Download-NSE-Bhavcopy.ps1's price-band merge
+  // comment). Two symbols, each with their genuinely-latest row placed BEFORE an older,
+  // stale row for the same symbol later in the array - the old "last row wins" behavior
+  // would have picked the stale one for both.
+  resetStore();
+  Store.loaded.band = true;
+  Store.bhavData = [
+    bhavRow({ symbol: 'AAA', date: '25-Sep-2026', open: 100, high: 105, low: 95, close: 100, prev: 100, isin: 'INAAA' }),
+    bhavRow({ symbol: 'BBB', date: '25-Sep-2026', open: 50, high: 52, low: 48, close: 50, prev: 50, isin: 'INBBB' }),
+  ];
+  Store.bandData = [
+    bandRow({ symbol: 'AAA', upper: 105, lower: 95, bandPct: '5', date: '25-Sep-2026' }),   // AAA's real latest
+    bandRow({ symbol: 'BBB', upper: 60, lower: 40, bandPct: '20', date: '25-Sep-2026' }),   // BBB's real latest
+    bandRow({ symbol: 'AAA', upper: 120, lower: 80, bandPct: '20', date: '1-Sep-2026' }),   // stale AAA, appears later
+    bandRow({ symbol: 'BBB', upper: 55, lower: 45, bandPct: '10', date: '1-Sep-2026' }),    // stale BBB, appears later
+  ];
+  processData();
+
+  assert.equal(Store.latestBySymbol.INAAA.bandPct, '5');
+  assert.equal(Store.latestBySymbol.INAAA.upperBand, 105);
+  assert.equal(Store.latestBySymbol.INBBB.bandPct, '20');
+  assert.equal(Store.latestBySymbol.INBBB.upperBand, 60);
 });
 
 test('processBandData: hitUC/hitLC trip at the 0.1% tolerance boundary', () => {
