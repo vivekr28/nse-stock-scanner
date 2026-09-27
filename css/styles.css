@@ -137,6 +137,16 @@ body {
   gap: 12px;
   margin-bottom: 16px;
 }
+/* Data Quality summary cards — fixed 4 columns (7 cards -> 2 rows), unlike
+   .stats-row's auto-fit elsewhere: was undefined until now (index.html used
+   this class name but no rule existed for it, so the cards fell back to
+   plain block layout - one per row). */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
 .stat-card {
   background: var(--bg2);
   border: 1px solid var(--border);
