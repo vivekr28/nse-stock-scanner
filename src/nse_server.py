@@ -822,6 +822,16 @@ def process_data(base_dir, progress_cb=None):
         })
 
     print(f"    Grouped {len(daily_by_symbol):,} ISINs in {time.time()-t1:.1f}s")
+    if bhav_rows and not daily_by_symbol:
+        # Confirmed live 27-Sep-2026: a stale/malformed NSE_Bhavcopy_Combined.csv (header
+        # missing ISIN/COMPANY_NAME, from a Recycle Bin restore of an old snapshot predating
+        # the CM-UDiFF migration) made every single row fail the `if not isin: continue`
+        # check above - 1.29M rows read, 0 stocks grouped, no error anywhere until someone
+        # happened to inspect the file by hand. This can't fix the file, but it turns that
+        # silence into a loud, specific signal instead - see AGENT.md "Completed: Test Suite".
+        print(f"    [!] WARNING: read {len(bhav_rows):,} bhavcopy row(s) but grouped 0 stocks - "
+              f"check the CSV header for SYMBOL/SERIES/CLOSE_PRICE/ISIN columns (a stale or "
+              f"malformed combined CSV silently produces exactly this)")
 
     # Sort dates
     def date_sort_key(s):

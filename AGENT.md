@@ -27,8 +27,9 @@ NSE-StockScanner/
 ├── Download-NSE-Bhavcopy.ps1     # Standalone data downloader (no browser launch)
 ├── Sector-Stock-Mapping.csv      # Manual sector/industry mapping file
 ├── tests/                        # pytest suite for src/ (dev-only; see "Completed: Test Suite" below) — never touches NSE_DATA/ or reference-data/
-│   ├── conftest.py               # Adds src/ to sys.path (no src/__init__.py — flat script layout, not a package)
-│   └── test_parsing.py           # Phase 1: pure parsing/factor functions (rights, splits/bonus, face-value roll-back, etc.) — no I/O
+│   ├── conftest.py               # Adds src/ to sys.path (no src/__init__.py — flat script layout, not a package); Phase 2+: fixture-building helpers + the `project`/`data` fixtures
+│   ├── test_parsing.py           # Phase 1: pure parsing/factor functions (rights, splits/bonus, face-value roll-back, etc.) — no I/O
+│   └── test_process_data.py      # Phase 2: small-fixture end-to-end process_data() tests (9 synthetic symbols, 15 days) — the tier that would have caught the 27-Sep-2026 zero-stocks incident
 ├── pytest.ini                    # testpaths=tests; declares the `slow` marker for future real-data smoke tests
 ├── requirements-dev.txt          # pytest only — dev tooling, never imported by the runtime (which stays stdlib-only)
 ├── scanner-presets/              # GIT-TRACKED
@@ -982,10 +983,10 @@ Migrated from the old `sec_bhavdata_full_DDMMYYYY.csv` bhavcopy format to the ne
 
 **Motivation:** the project had zero test infrastructure. The immediate trigger was the 27-Sep-2026 data-loss incident (a `git worktree remove --force` followed a Windows junction into the real `NSE_DATA/` folder and deleted it - see the "TradingView-Derived Corrections"/verification sections above for the recovery); the recovered-then-recorrupted `NSE_Bhavcopy_Combined.csv` briefly had zero stocks processed with no error surfaced anywhere. That specific class of bug (`process_data()` silently skipping every row when a required column is missing) is a Phase 2 test target; Phase 1 (this section) covers the pure parsing/factor functions the rights-issue and split/bonus adjustment logic is built on, since those already had a history of subtle real-world bugs this session (the face-value roll-back trap, the demerger-label mismatch, etc.).
 
-**Planned phases** (see the full plan in this session's transcript; only Phase 1 exists so far):
+**Planned phases** (see the full plan in this session's transcript; Phases 1-2 exist so far):
 1. **Pure-function unit tests** (`tests/test_parsing.py`, done) — no I/O.
-2. Small-fixture end-to-end `process_data()` tests, including a sanity check for the "zero stocks, no error" failure class.
-3. Adjustment-application tests with synthetic in-memory `daily_by_symbol`/`events_by_isin`.
+2. **Small-fixture end-to-end `process_data()` tests** (`tests/test_process_data.py`, done) — including the sanity check for the "zero stocks, no error" failure class, plus the matching code fix.
+3. Adjustment-application tests with synthetic in-memory `daily_by_symbol`/`events_by_isin` (finer-grained cases than Phase 2's full-pipeline scenario needs).
 4. `tv_adjust.py`/`tv_report.py` pure-logic tests (grading thresholds, level-change classification).
 5. Optional: GitHub Actions CI running the suite on every PR (none exists yet).
 6. Optional: one `slow`-marked smoke test against the real `NSE_DATA` on disk (read-only).
@@ -993,6 +994,11 @@ Migrated from the old `sec_bhavdata_full_DDMMYYYY.csv` bhavcopy format to the ne
 **Setup:** `pip install -r requirements-dev.txt` (pytest only - dev tooling, never imported by the runtime, which stays stdlib-only per the project's own convention), then `pytest` from the repo root. `tests/conftest.py` puts `src/` on `sys.path` since it has no `__init__.py` (flat script layout, not a package) - tests `import nse_server` etc. directly, the same pattern used ad hoc in this session's own scratchpad verification scripts.
 
 **Phase 1 coverage (`tests/test_parsing.py`, 77 tests):** `parse_num`, `parse_date_str`, `normalize_symbol`, `find_col`, `parse_corp_action_ratio` (bonus/FVS/consolidation, including a synthetic case exercising the ratio-multiplication path for a combined subject - real combined pre-2022 subjects use different wording and are deliberately NOT matched, per the function's own comment), `parse_rights_terms` (all 11 real subject shapes seen live + 7 rejected shapes), `parse_face_value_ratio`, `rights_price_factor` (including the real ADANIENT case, checked against TradingView's own factor within the same 0.5% tolerance the verification report uses), `fv_at_ex_date` (all 4 split-timing cases: before/after/spanning `FV_ASOF`, two compounding splits), `correction_key`. All pure functions, no synthetic files, runs in ~0.1s.
+
+**Phase 2 coverage (`tests/test_process_data.py`, 16 tests):** a 9-symbol, 15-trading-day synthetic `NSE_Bhavcopy_Combined.csv` + `CorporateActions.csv` + `TradingViewAdjustments.csv`, built via helpers in `conftest.py` (`business_days()`, `bhav_row()`, `corp_action_row()`, `tv_adjustment_row()`, the `project` fixture) and run through the real `process_data()`. Every expected value was hand-derived (see the PR/commit for the derivation) and, for the rights-issue cases, cross-checked against `rights_price_factor()`/`fv_at_ex_date()` directly rather than hardcoded - Phase 1 already covers those formulas' own correctness; Phase 2 is about `process_data()` correctly *wiring them up* end-to-end, a different, integration-level class of bug.
+
+- **The regression test that started this phase:** a fixture reproducing the 27-Sep-2026 bug exactly (bhavcopy header missing `ISIN`/`COMPANY_NAME`) - confirmed it silently produces `dailyBySymbol == {}` with zero output signal, then confirmed (by temporarily reverting the fix via `git stash`) that the **new warning** (`process_data()`, right after the grouping loop: `if bhav_rows and not daily_by_symbol: print(...)`) is what actually catches it now. A second test confirms the warning does NOT fire on a valid fixture (no false positives).
+- **Per-scenario stocks**, each isolating one mechanism: `PLAINCO` (no event, untouched baseline), `BONUSCO`/`SPLITCO` (Bonus vs. FVS paths, both checking the ex-date row's own `prev` boundary - the exact "prev-field boundary fix" bug class), `RIGHTSCO` (plain rights factor), `RIGHTSFVCO` (rights ex-date BEFORE a later face-value-changing split - exercises `fv_at_ex_date`'s roll-back for real, composes to an exactly-flat 15-day series when correct), `DEMERGERCO` (a `TradingViewAdjustments.csv` correction, including that its `NOTE` field flows through as the `adjustedCorpActions` `detail`, and that it's removed from `unadjustedCorpActions` once corrected), `UNHANDLEDCO` ("Capital Reduction" - confirmed untouched and correctly listed as unadjusted), `ISINCHANGECO` (a split-induced ISIN change sharing an issuer prefix like the real KAMDHENU case - confirms bridging merges the old ISIN's history in, the old ISIN itself is excluded from the final output as stale, and the adjustment applies correctly across the bridged boundary), `STALECO` (confirms a stock last traded before the global latest date is excluded from both `latestBySymbol` and the final `dailyBySymbol` output, not just hidden from the UI).
 
 ---
 
