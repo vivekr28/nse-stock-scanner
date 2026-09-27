@@ -156,22 +156,36 @@ function processBandData() {
   const colLower = findCol(sample, ['Lower_Band', 'LOWER_BAND', 'Low Price Band', 'LowPriceBand', 'Lower Band']);
   const colBandPct = findCol(sample, ['Price Band', 'PRICE_BAND', 'PriceBand', 'Band', 'Applicable Price Band']);
   const colDate = findCol(sample, ['Date', 'DATE', 'DATE1']);
+  // findCol always returns *some* candidate name even on no match (its own documented
+  // fallback), so a real hit is confirmed by checking the sample row actually has that key.
+  const hasDateCol = sample.hasOwnProperty(colDate);
 
-  // Get latest date's band data
-  let latestBandDate = null;
-  if (colDate) {
-    const bandDates = [...new Set(bd.map(r => r[colDate]).filter(Boolean))].sort();
-    latestBandDate = bandDates[bandDates.length - 1];
-  }
+  // Per-ISIN latest date actually applied so far, mirroring src/nse_server.py's equivalent
+  // guard - rows in the combined price-band file aren't guaranteed to be in strict
+  // chronological order for every symbol (a bulk restore/recovery of NSE_DATA can leave
+  // per-day files merged out of order - see Download-NSE-Bhavcopy.ps1's price-band merge
+  // comment), so a row loses to whatever newer date has already been applied for that
+  // symbol instead of unconditionally overwriting just for appearing later in the array.
+  // Compares parsed timestamps (parseDate), not raw strings, so this is correct regardless
+  // of the date format/row ordering in the source file - previously this sorted the raw
+  // date strings directly, which broke for any non-lexicographically-sortable format.
+  const latestDateTs = {};
 
   for (const row of bd) {
-    if (latestBandDate && colDate && row[colDate] !== latestBandDate) continue;
-
     const sym = (row[colSym] || '').trim();
     const series = (row[colSeries] || '').trim();
     if (!sym || (series !== 'EQ' && series !== 'BE')) continue; // Only EQ and BE series
     const isinKey = Store.symbolToISIN[normalizeSymbol(sym)];
     if (!isinKey) continue; // skip if symbol not in bhavcopy
+
+    if (hasDateCol) {
+      const rowTs = parseDate((row[colDate] || '').trim());
+      if (rowTs) {
+        const prevTs = latestDateTs[isinKey];
+        if (prevTs !== undefined && rowTs < prevTs) continue; // older than a row already applied
+        latestDateTs[isinKey] = rowTs;
+      }
+    }
 
     const upper = parseNum(row[colUpper]);
     const lower = parseNum(row[colLower]);

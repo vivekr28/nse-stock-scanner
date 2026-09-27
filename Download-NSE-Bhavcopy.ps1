@@ -692,60 +692,107 @@ if ($AllBhav.Count -gt 0) {
 # -- Merge Price Band files (incremental) --------------------------------------
 Write-Host "Merging price band files..." -ForegroundColor Cyan
 
+# Extract the trading date from a "sec_list_ddMMyyyy.csv" filename - mirrors Get-BhavFileDate.
+function Get-BandFileDate {
+    param([string]$BaseName)
+    if ($BaseName -match '^sec_list_(\d{8})$') {
+        try { return [DateTime]::ParseExact($Matches[1], "ddMMyyyy", $null) } catch { return $null }
+    }
+    return $null
+}
+
 $AllBand = Get-ChildItem -Path $BandFolder -Filter "sec_list_*.csv" -ErrorAction SilentlyContinue |
-           Sort-Object { $d = $_.BaseName -replace 'sec_list_',''; try { [DateTime]::ParseExact($d,'ddMMyyyy',$null) } catch { [DateTime]::MinValue } }
+           ForEach-Object {
+               $dt = Get-BandFileDate $_.BaseName
+               [PSCustomObject]@{ File = $_; Date = $dt }
+           } |
+           Where-Object { $_.Date -ne $null } |
+           Sort-Object Date
+
 if ($AllBand.Count -gt 0) {
     $MergedBand = Join-Path $MergedFolder "NSE_PriceBand_Combined.csv"
 
-    # Incremental: only process files newer than the combined file
+    # Incremental: read the last Date actually recorded IN the combined file's own content,
+    # not filesystem mtime - a bulk restore/recovery of NSE_DATA can leave per-day file
+    # timestamps completely out of sync with the trading dates they represent, which silently
+    # froze this merge on stale data before (confirmed live: TBZ's band sat on a stale
+    # pre-Sep-2026 value for weeks while every day's correct per-day file sat unmerged on
+    # disk, because every file's mtime happened to be older than the combined file's). The
+    # bhavcopy merge above already avoids this by reading its own tail instead of trusting
+    # mtimes; this mirrors that same, more robust approach. It also doubles as a one-time
+    # migration off the old dateless format: a tail with no readable Date column falls
+    # through to a full rebuild below, which is exactly what's needed to backfill dates onto
+    # every existing row.
     $bandToProcess = $AllBand
     $bandAppend = $false
-    $bandSeriesIdx = -1
     if (Test-Path $MergedBand) {
-        $mergedBandMtime = (Get-Item $MergedBand).LastWriteTime
-        $newBandFiles = @($AllBand | Where-Object { $_.LastWriteTime -gt $mergedBandMtime })
-        if ($newBandFiles.Count -eq 0) {
-            $bandToProcess = @()
-            $sz = [math]::Round((Get-Item $MergedBand).Length / 1MB, 2)
-            Write-Host "  Price band up to date ($sz MB)" -ForegroundColor Green
-        } else {
-            $bandToProcess = $newBandFiles
-            $bandAppend = $true
-            $existingHeader = Get-Content $MergedBand -TotalCount 1
-            $headerCols = $existingHeader -split ','
-            for ($i = 0; $i -lt $headerCols.Count; $i++) {
-                if ($headerCols[$i].Trim() -ieq 'Series' -or $headerCols[$i].Trim() -ieq 'SERIES') {
-                    $bandSeriesIdx = $i; break
-                }
+        $existingHeader = Get-Content $MergedBand -TotalCount 1
+        $headerCols = $existingHeader -split ','
+        $bandDateIdx = -1
+        for ($i = 0; $i -lt $headerCols.Count; $i++) {
+            if ($headerCols[$i].Trim() -ieq 'Date' -or $headerCols[$i].Trim() -ieq 'DATE') { $bandDateIdx = $i; break }
+        }
+        $lastMergedBandDate = $null
+        if ($bandDateIdx -ge 0) {
+            $tailLines = Get-Content $MergedBand -Tail 10 | Where-Object { $_.Trim() -ne '' }
+            for ($t = $tailLines.Count - 1; $t -ge 0; $t--) {
+                try {
+                    $dateField = ($tailLines[$t] -split ',')[$bandDateIdx].Trim()
+                    $lastMergedBandDate = [DateTime]::ParseExact($dateField, "dd-MMM-yyyy", $null)
+                    break
+                } catch { }
             }
-            Write-Host "  Incremental: $($AllBand.Count - $newBandFiles.Count) cached, $($newBandFiles.Count) new" -ForegroundColor Cyan
+        }
+        if ($lastMergedBandDate) {
+            $newBandFiles = @($AllBand | Where-Object { $_.Date -gt $lastMergedBandDate })
+            if ($newBandFiles.Count -eq 0) {
+                $bandToProcess = @()
+                $sz = [math]::Round((Get-Item $MergedBand).Length / 1MB, 2)
+                Write-Host "  Price band up to date ($sz MB)" -ForegroundColor Green
+            } else {
+                $bandToProcess = $newBandFiles
+                $bandAppend = $true
+                Write-Host "  Incremental: $($AllBand.Count - $newBandFiles.Count) cached, $($newBandFiles.Count) new" -ForegroundColor Cyan
+            }
+        } else {
+            Write-Host "  Existing price band file predates the Date column - rebuilding fully so every row carries its trading date" -ForegroundColor Yellow
         }
     }
 
     if ($bandToProcess.Count -gt 0) {
     $allBandLines = [System.Collections.Generic.List[string]]::new()
     $bandHeaderDone = $bandAppend
-    foreach ($f in $bandToProcess) {
+    foreach ($entry in $bandToProcess) {
+        $f = $entry.File
+        $dateOut = $entry.Date.ToString("dd-MMM-yyyy")
         $lines = Get-Content $f.FullName
-        if (-not $bandHeaderDone) {
-            $allBandLines.Add($lines[0])
-            $headerCols = $lines[0] -split ','
-            for ($i = 0; $i -lt $headerCols.Count; $i++) {
-                if ($headerCols[$i].Trim() -ieq 'Series' -or $headerCols[$i].Trim() -ieq 'SERIES') {
-                    $bandSeriesIdx = $i; break
-                }
+        if ($lines.Count -lt 2) { continue }
+
+        # Series column position is read from each file's own header (not assumed/reused
+        # across files) - cheap, and avoids silently mis-filtering if the source format ever
+        # shifts columns.
+        $fileSeriesIdx = -1
+        $headerCols = $lines[0] -split ','
+        for ($i = 0; $i -lt $headerCols.Count; $i++) {
+            if ($headerCols[$i].Trim() -ieq 'Series' -or $headerCols[$i].Trim() -ieq 'SERIES') {
+                $fileSeriesIdx = $i; break
             }
+        }
+
+        if (-not $bandHeaderDone) {
+            $allBandLines.Add(($lines[0].TrimEnd() + ',Date'))
             $bandHeaderDone = $true
         }
         for ($j = 1; $j -lt $lines.Count; $j++) {
-            if ($bandSeriesIdx -ge 0) {
+            if ([string]::IsNullOrWhiteSpace($lines[$j])) { continue }
+            if ($fileSeriesIdx -ge 0) {
                 $cols = $lines[$j] -split ','
-                $ser = $cols[$bandSeriesIdx].Trim()
-                if ($cols.Count -gt $bandSeriesIdx -and ($ser -ieq 'EQ' -or $ser -ieq 'BE')) {
-                    $allBandLines.Add($lines[$j])
+                $ser = $cols[$fileSeriesIdx].Trim()
+                if ($cols.Count -gt $fileSeriesIdx -and ($ser -ieq 'EQ' -or $ser -ieq 'BE')) {
+                    $allBandLines.Add($lines[$j].TrimEnd() + ",$dateOut")
                 }
             } else {
-                $allBandLines.Add($lines[$j])
+                $allBandLines.Add($lines[$j].TrimEnd() + ",$dateOut")
             }
         }
     }
