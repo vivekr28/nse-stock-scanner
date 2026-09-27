@@ -35,7 +35,7 @@ function showDashboard() {
       if (tabEl) tabEl.click();
       if (sessionStorage.getItem('nseReopenDqCorp')) {
         sessionStorage.removeItem('nseReopenDqCorp');
-        if (typeof dqToggleSection === 'function') dqToggleSection('dqCorpAction');
+        if (typeof dqSwitchTab === 'function') dqSwitchTab('dqCorpAction');
       }
     }
   } catch (e) { /* sessionStorage unavailable - stay on the default tab */ }

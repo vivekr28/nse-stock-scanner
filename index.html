@@ -710,132 +710,94 @@
       <div class="stat-card"><div class="label">Price Adjustments Applied</div><div class="value" id="dqAdjustedCount">-</div></div>
     </div>
   </div>
-  <div class="card dq-section" style="margin-bottom:16px;">
-    <div class="dq-section-header" onclick="dqToggleSection('dqNoSector')">
-      <h4 style="margin:0;">In Bhavcopy but NOT in Sector Mapping</h4>
-      <span class="dq-section-arrow" id="dqNoSectorArrow">&#9650;</span>
-    </div>
-    <div class="dq-section-body" id="dqNoSectorBody" style="display:none;">
-      <p style="color:var(--text2);font-size:12px;margin:8px 0;">These stocks are assigned to "Undefined-Diversified" sector/industry.</p>
-      <div class="table-wrap"><table id="dqNoSectorTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
-    </div>
+  <div class="dq-tabbar" id="dqTabbar">
+    <button class="dq-tab active" data-tab="dqNoSector" onclick="dqSwitchTab('dqNoSector')">In Bhavcopy but NOT in Sector Mapping</button>
+    <button class="dq-tab" data-tab="dqNoBand" onclick="dqSwitchTab('dqNoBand')">In Bhavcopy but NOT in Price Band</button>
+    <button class="dq-tab" data-tab="dqNoTrade" onclick="dqSwitchTab('dqNoTrade')">In Sector Mapping but NOT in Bhavcopy</button>
+    <button class="dq-tab" data-tab="dqStale" onclick="dqSwitchTab('dqStale')">In Bhavcopy but NOT traded on latest day</button>
+    <button class="dq-tab" data-tab="dqNoBhav" onclick="dqSwitchTab('dqNoBhav')">In Price Band but NOT in Bhavcopy</button>
+    <button class="dq-tab" data-tab="dqCorpAction" onclick="dqSwitchTab('dqCorpAction')">Recent Corporate Actions Not Price-Adjusted</button>
+    <button class="dq-tab" data-tab="dqAdjusted" onclick="dqSwitchTab('dqAdjusted')">Price Adjustments Applied</button>
+    <button class="dq-tab" data-tab="dqFull" onclick="dqSwitchTab('dqFull')">Full Price Verification (all stocks vs TradingView) <span id="dqFullBadge" style="font-size:12px;margin-left:6px;"></span></button>
   </div>
-  <div class="card dq-section" style="margin-bottom:16px;">
-    <div class="dq-section-header" onclick="dqToggleSection('dqNoBand')">
-      <h4 style="margin:0;">In Bhavcopy but NOT in Price Band</h4>
-      <span class="dq-section-arrow" id="dqNoBandArrow">&#9650;</span>
-    </div>
-    <div class="dq-section-body" id="dqNoBandBody" style="display:none;">
-      <p style="color:var(--text2);font-size:12px;margin:8px 0;">These stocks have no circuit limit info (treated as no circuit limit).</p>
-      <div class="table-wrap"><table id="dqNoBandTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
-    </div>
+  <div class="card dq-section-body" id="dqNoSectorBody">
+    <p style="color:var(--text2);font-size:12px;margin:8px 0;">These stocks are assigned to "Undefined-Diversified" sector/industry.</p>
+    <div class="table-wrap"><table id="dqNoSectorTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
   </div>
-  <div class="card dq-section" style="margin-bottom:16px;">
-    <div class="dq-section-header" onclick="dqToggleSection('dqNoTrade')">
-      <h4 style="margin:0;">In Sector Mapping but NOT in Bhavcopy</h4>
-      <span class="dq-section-arrow" id="dqNoTradeArrow">&#9650;</span>
-    </div>
-    <div class="dq-section-body" id="dqNoTradeBody" style="display:none;">
-      <p style="color:var(--text2);font-size:12px;margin:8px 0;">These stocks exist in the mapping file but have no trading data.</p>
-      <div class="table-wrap"><table id="dqNoTradeTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
-    </div>
+  <div class="card dq-section-body" id="dqNoBandBody" style="display:none;">
+    <p style="color:var(--text2);font-size:12px;margin:8px 0;">These stocks have no circuit limit info (treated as no circuit limit).</p>
+    <div class="table-wrap"><table id="dqNoBandTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
   </div>
-  <div class="card dq-section" style="margin-bottom:16px;">
-    <div class="dq-section-header" onclick="dqToggleSection('dqStale')">
-      <h4 style="margin:0;">In Bhavcopy but NOT traded on latest day</h4>
-      <span class="dq-section-arrow" id="dqStaleArrow">&#9650;</span>
-    </div>
-    <div class="dq-section-body" id="dqStaleBody" style="display:none;">
-      <p style="color:var(--text2);font-size:12px;margin:8px 0;">These stocks have historical data but didn't trade on the most recent trading day. They are excluded from the scanner and analysis.</p>
-      <div class="table-wrap"><table id="dqStaleTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
-    </div>
+  <div class="card dq-section-body" id="dqNoTradeBody" style="display:none;">
+    <p style="color:var(--text2);font-size:12px;margin:8px 0;">These stocks exist in the mapping file but have no trading data.</p>
+    <div class="table-wrap"><table id="dqNoTradeTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
   </div>
-  <div class="card dq-section" style="margin-bottom:16px;">
-    <div class="dq-section-header" onclick="dqToggleSection('dqNoBhav')">
-      <h4 style="margin:0;">In Price Band but NOT in Bhavcopy</h4>
-      <span class="dq-section-arrow" id="dqNoBhavArrow">&#9650;</span>
-    </div>
-    <div class="dq-section-body" id="dqNoBhavBody" style="display:none;">
-      <p style="color:var(--text2);font-size:12px;margin:8px 0;">These stocks have band data but no trading data.</p>
-      <div class="table-wrap"><table id="dqNoBhavTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
-    </div>
+  <div class="card dq-section-body" id="dqStaleBody" style="display:none;">
+    <p style="color:var(--text2);font-size:12px;margin:8px 0;">These stocks have historical data but didn't trade on the most recent trading day. They are excluded from the scanner and analysis.</p>
+    <div class="table-wrap"><table id="dqStaleTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
   </div>
-  <div class="card dq-section" style="margin-bottom:16px;">
-    <div class="dq-section-header" onclick="dqToggleSection('dqCorpAction')">
-      <h4 style="margin:0;">Recent Corporate Actions Not Price-Adjusted</h4>
-      <span class="dq-section-arrow" id="dqCorpActionArrow">&#9650;</span>
-    </div>
-    <div class="dq-section-body" id="dqCorpActionBody" style="display:none;">
-      <p style="color:var(--text2);font-size:12px;margin:8px 0;">Splits and bonuses ARE back-adjusted automatically and don't appear here. These are other corporate actions (demergers, NCRPS bonuses, capital reductions, etc.) inside the ~510-day price history the dashboard keeps that cause a real price discontinuity NSE doesn't publish a clean adjustment ratio for — SMA, 52W high/low, ADR, and change% may look distorted for these stocks until the affected window rolls past the ex-date.</p>
-      <p style="color:var(--text2);font-size:12px;margin:8px 0;">Use the button to correct these prices from TradingView's already-adjusted history. Corrected events are saved to <code>reference-data/TradingViewAdjustments.csv</code>, re-applied on every server start and removed from this list; anything TradingView can't confirm stays listed. TradingView is only contacted when you click — it must be running with <code>--remote-debugging-port=<span id="dqTvPort">9222</span></code> and have a chart open (your chart's symbol is restored afterwards).</p>
-      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:10px 0;">
-        <button id="dqTvAdjustBtn" class="btn btn-primary" onclick="dqRunTvAdjust()">Adjust prices from TradingView</button>
-        <span id="dqTvAdjustStatus" style="font-size:12px;color:var(--text2);"></span>
-      </div>
-      <div class="table-wrap"><table id="dqCorpActionTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
-    </div>
+  <div class="card dq-section-body" id="dqNoBhavBody" style="display:none;">
+    <p style="color:var(--text2);font-size:12px;margin:8px 0;">These stocks have band data but no trading data.</p>
+    <div class="table-wrap"><table id="dqNoBhavTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
   </div>
-  <div class="card dq-section" style="margin-bottom:16px;">
-    <div class="dq-section-header" onclick="dqToggleSection('dqAdjusted')">
-      <h4 style="margin:0;">Price Adjustments Applied</h4>
-      <span class="dq-section-arrow" id="dqAdjustedArrow">&#9650;</span>
+  <div class="card dq-section-body" id="dqCorpActionBody" style="display:none;">
+    <p style="color:var(--text2);font-size:12px;margin:8px 0;">Splits and bonuses ARE back-adjusted automatically and don't appear here. These are other corporate actions (demergers, NCRPS bonuses, capital reductions, etc.) inside the ~510-day price history the dashboard keeps that cause a real price discontinuity NSE doesn't publish a clean adjustment ratio for — SMA, 52W high/low, ADR, and change% may look distorted for these stocks until the affected window rolls past the ex-date.</p>
+    <p style="color:var(--text2);font-size:12px;margin:8px 0;">Use the button to correct these prices from TradingView's already-adjusted history. Corrected events are saved to <code>reference-data/TradingViewAdjustments.csv</code>, re-applied on every server start and removed from this list; anything TradingView can't confirm stays listed. TradingView is only contacted when you click — it must be running with <code>--remote-debugging-port=<span id="dqTvPort">9222</span></code> and have a chart open (your chart's symbol is restored afterwards).</p>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:10px 0;">
+      <button id="dqTvAdjustBtn" class="btn btn-primary" onclick="dqRunTvAdjust()">Adjust prices from TradingView</button>
+      <span id="dqTvAdjustStatus" style="font-size:12px;color:var(--text2);"></span>
     </div>
-    <div class="dq-section-body" id="dqAdjustedBody" style="display:none;">
-      <p style="color:var(--text2);font-size:12px;margin:8px 0;">Every stock whose historical prices were adjusted so an ex-date doesn't show up as a fake crash: splits and bonuses (ratio from NSE's corporate-actions feed), rights issues (theoretical ex-rights price from NSE's terms and the cum-rights close) and demergers (factor derived from TradingView — see the section above). <b>Factor</b> is what prices before the ex-date were multiplied by. Dividends are not adjusted. Stocks no longer trading, and events older than the price history the dashboard keeps, aren't listed.</p>
-      <p style="color:var(--text2);font-size:12px;margin:8px 0;">Use the button to check these against what TradingView shows: our daily closes are compared with TradingView's over their whole shared history, and any stock that differs is flagged. Read-only — no price is changed. TradingView Desktop must be running with <code>--remote-debugging-port=<span id="dqTvVerifyPort">9222</span></code> and have a chart open (your chart's symbol is restored afterwards). The first run takes about five minutes for ~200 stocks (it loads about two years of TradingView history for each); later runs only check what is still listed. Differences are explained where possible, e.g. TradingView adjusting for a rights issue that isn't in the corporate-actions data. If TradingView's own "adjust for dividends" setting is on, it shows up as small steady differences.</p>
-      <p style="color:var(--text2);font-size:12px;margin:8px 0;">This list is a to-do queue: a stock that matches TradingView is removed from it and only returns when it gets a new or changed adjustment. Stocks with a difference stay until they match, and the button re-checks only the stocks still listed.</p>
-      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:10px 0;">
-        <button id="dqTvVerifyBtn" class="btn btn-primary" onclick="dqRunTvVerify()">Verify against TradingView</button>
-        <span id="dqTvVerifyStatus" style="font-size:12px;color:var(--text2);"></span>
-      </div>
-      <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin:0 0 6px;font-size:12px;color:var(--text2);">
-        <label style="display:flex;align-items:center;gap:6px;font-weight:400;cursor:pointer;">
-          <input type="checkbox" id="dqTvShowVerified" onchange="dqToggleShowVerified(this.checked)"> Show verified stocks (<span id="dqTvVerifiedCount">0</span>)
-        </label>
-        <label style="display:flex;align-items:center;gap:6px;font-weight:400;cursor:pointer;">
-          <input type="checkbox" id="dqTvVerifyAll"> Re-check verified stocks too (slower)
-        </label>
-      </div>
-      <div id="dqTvVerifySummary" style="font-size:12px;margin:8px 0 12px;"></div>
-      <div class="table-wrap"><table id="dqAdjustedTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
-    </div>
+    <div class="table-wrap"><table id="dqCorpActionTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
   </div>
-  <div class="card dq-section">
-    <div class="dq-section-header" onclick="dqToggleSection('dqFull')">
-      <h4 style="margin:0;">Full Price Verification (all stocks vs TradingView) <span id="dqFullBadge" style="font-size:12px;margin-left:8px;"></span></h4>
-      <span class="dq-section-arrow" id="dqFullArrow">&#9650;</span>
+  <div class="card dq-section-body" id="dqAdjustedBody" style="display:none;">
+    <p style="color:var(--text2);font-size:12px;margin:8px 0;">Every stock whose historical prices were adjusted so an ex-date doesn't show up as a fake crash: splits and bonuses (ratio from NSE's corporate-actions feed), rights issues (theoretical ex-rights price from NSE's terms and the cum-rights close) and demergers (factor derived from TradingView — see the section above). <b>Factor</b> is what prices before the ex-date were multiplied by. Dividends are not adjusted. Stocks no longer trading, and events older than the price history the dashboard keeps, aren't listed.</p>
+    <p style="color:var(--text2);font-size:12px;margin:8px 0;">Use the button to check these against what TradingView shows: our daily closes are compared with TradingView's over their whole shared history, and any stock that differs is flagged. Read-only — no price is changed. TradingView Desktop must be running with <code>--remote-debugging-port=<span id="dqTvVerifyPort">9222</span></code> and have a chart open (your chart's symbol is restored afterwards). The first run takes about five minutes for ~200 stocks (it loads about two years of TradingView history for each); later runs only check what is still listed. Differences are explained where possible, e.g. TradingView adjusting for a rights issue that isn't in the corporate-actions data. If TradingView's own "adjust for dividends" setting is on, it shows up as small steady differences.</p>
+    <p style="color:var(--text2);font-size:12px;margin:8px 0;">This list is a to-do queue: a stock that matches TradingView is removed from it and only returns when it gets a new or changed adjustment. Stocks with a difference stay until they match, and the button re-checks only the stocks still listed.</p>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:10px 0;">
+      <button id="dqTvVerifyBtn" class="btn btn-primary" onclick="dqRunTvVerify()">Verify against TradingView</button>
+      <span id="dqTvVerifyStatus" style="font-size:12px;color:var(--text2);"></span>
     </div>
-    <div class="dq-section-body" id="dqFullBody" style="display:none;">
-      <p style="color:var(--text2);font-size:12px;margin:8px 0;">Checks <b>every stock</b> the dashboard holds &mdash; not only the price-adjusted ones above &mdash; against TradingView: each stock's daily closes are compared with TradingView's over their whole shared history (about 2 years) and graded match / minor / major. Run it now and then to make sure our prices haven't drifted from what you see on TradingView. Read-only &mdash; no price is changed. When it finishes it writes a <b>report</b> (a Markdown summary plus a CSV with one row per stock) to <code>NSE_DATA/verification-reports/</code> for analysis, including what changed since the previous full run.</p>
-      <p style="color:var(--text2);font-size:12px;margin:8px 0;">TradingView Desktop must be running with <code>--remote-debugging-port=<span id="dqFullPort">9222</span></code> and a chart open. <span id="dqFullEta"></span> While it runs the chart flips through every stock, so leave TradingView alone, keep its window open and the PC awake. You can <b>Stop</b> at any time (progress is saved) and <b>Resume</b> later, as long as the data hasn't been refreshed in between.</p>
-      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:10px 0;">
-        <button id="dqFullBtn" class="btn btn-primary" onclick="dqRunTvFull(false)">Verify all stocks</button>
-        <button id="dqFullResumeBtn" class="btn btn-secondary" style="display:none;" onclick="dqRunTvFull(true)">Resume</button>
-        <button id="dqFullStopBtn" class="btn btn-secondary" style="display:none;" onclick="dqStopTvFull()">Stop</button>
-        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);font-weight:400;">Scope
-          <select id="dqFullScope" class="dq-select">
-            <option value="">All stocks</option>
-            <option value="500">Top 500 by turnover</option>
-            <option value="100">Top 100 by turnover (quick check)</option>
-          </select>
-        </label>
-        <span id="dqFullStatus" style="font-size:12px;color:var(--text2);"></span>
-      </div>
-      <div id="dqFullProgress" style="display:none;margin:6px 0 10px;">
-        <div class="progress-track"><div class="progress-fill" id="dqFullFill"></div></div>
-        <div class="progress-detail" id="dqFullDetail"></div>
-      </div>
-      <div id="dqFullSummary" style="font-size:12px;margin:8px 0 12px;"></div>
-      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 6px;font-size:12px;color:var(--text2);">
-        <label style="display:flex;align-items:center;gap:6px;font-weight:400;">Show
-          <select id="dqFullFilter" class="dq-select" onchange="dqFullFilterChange(this.value)">
-            <option value="all">Major + minor differences</option>
-            <option value="major">Major differences only</option>
-          </select>
-        </label>
-      </div>
-      <div class="table-wrap"><table id="dqFullTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
+    <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin:0 0 6px;font-size:12px;color:var(--text2);">
+      <label style="display:flex;align-items:center;gap:6px;font-weight:400;cursor:pointer;">
+        <input type="checkbox" id="dqTvShowVerified" onchange="dqToggleShowVerified(this.checked)"> Show verified stocks (<span id="dqTvVerifiedCount">0</span>)
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;font-weight:400;cursor:pointer;">
+        <input type="checkbox" id="dqTvVerifyAll"> Re-check verified stocks too (slower)
+      </label>
     </div>
+    <div id="dqTvVerifySummary" style="font-size:12px;margin:8px 0 12px;"></div>
+    <div class="table-wrap"><table id="dqAdjustedTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
+  </div>
+  <div class="card dq-section-body" id="dqFullBody" style="display:none;">
+    <p style="color:var(--text2);font-size:12px;margin:8px 0;">Checks <b>every stock</b> the dashboard holds &mdash; not only the price-adjusted ones above &mdash; against TradingView: each stock's daily closes are compared with TradingView's over their whole shared history (about 2 years) and graded match / minor / major. Run it now and then to make sure our prices haven't drifted from what you see on TradingView. Read-only &mdash; no price is changed. When it finishes it writes a <b>report</b> (a Markdown summary plus a CSV with one row per stock) to <code>NSE_DATA/verification-reports/</code> for analysis, including what changed since the previous full run.</p>
+    <p style="color:var(--text2);font-size:12px;margin:8px 0;">TradingView Desktop must be running with <code>--remote-debugging-port=<span id="dqFullPort">9222</span></code> and a chart open. <span id="dqFullEta"></span> While it runs the chart flips through every stock, so leave TradingView alone, keep its window open and the PC awake. You can <b>Stop</b> at any time (progress is saved) and <b>Resume</b> later, as long as the data hasn't been refreshed in between.</p>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:10px 0;">
+      <button id="dqFullBtn" class="btn btn-primary" onclick="dqRunTvFull(false)">Verify all stocks</button>
+      <button id="dqFullResumeBtn" class="btn btn-secondary" style="display:none;" onclick="dqRunTvFull(true)">Resume</button>
+      <button id="dqFullStopBtn" class="btn btn-secondary" style="display:none;" onclick="dqStopTvFull()">Stop</button>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);font-weight:400;">Scope
+        <select id="dqFullScope" class="dq-select">
+          <option value="">All stocks</option>
+          <option value="500">Top 500 by turnover</option>
+          <option value="100">Top 100 by turnover (quick check)</option>
+        </select>
+      </label>
+      <span id="dqFullStatus" style="font-size:12px;color:var(--text2);"></span>
+    </div>
+    <div id="dqFullProgress" style="display:none;margin:6px 0 10px;">
+      <div class="progress-track"><div class="progress-fill" id="dqFullFill"></div></div>
+      <div class="progress-detail" id="dqFullDetail"></div>
+    </div>
+    <div id="dqFullSummary" style="font-size:12px;margin:8px 0 12px;"></div>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 6px;font-size:12px;color:var(--text2);">
+      <label style="display:flex;align-items:center;gap:6px;font-weight:400;">Show
+        <select id="dqFullFilter" class="dq-select" onchange="dqFullFilterChange(this.value)">
+          <option value="all">Major + minor differences</option>
+          <option value="major">Major differences only</option>
+        </select>
+      </label>
+    </div>
+    <div class="table-wrap"><table id="dqFullTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
   </div>
 </div>
 
@@ -852,9 +814,9 @@
 <script src="js/lib/lightweight-charts.standalone.production.js"></script>
 <script src="js/ew-index.js?v=1"></script>
 <script src="js/industry-charts.js?v=17"></script>
-<script src="js/data-quality.js?v=10"></script>
+<script src="js/data-quality.js?v=11"></script>
 <script src="js/presets.js?v=8"></script>
-<script src="js/ui.js?v=8"></script>
+<script src="js/ui.js?v=9"></script>
 <script src="js/nse-download.js?v=4"></script>
 
 </body>
