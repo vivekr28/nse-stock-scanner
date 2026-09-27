@@ -113,6 +113,23 @@ def project(tmp_path):
     return Project()
 
 
+def make_day(d, close, isin, symbol='SYM', series='EQ', prev=None, **overrides):
+    """One in-memory daily-bar dict, matching the shape process_data()'s own grouping
+    loop builds (see nse_server.py: daily_by_symbol[isin].append({...})) - for Phase 3's
+    direct, no-CSV tests of apply_split_adjustments/add_rights_events/etc. open/high/low/
+    last default to `close`; `prev` defaults to `close` too unless given explicitly
+    (Phase 3's boundary tests always pass it explicitly when it matters)."""
+    p = close if prev is None else prev
+    day = {
+        'symbol': symbol, 'series': series, 'date': fmt_date(d),
+        'open': close, 'high': close, 'low': close, 'close': close, 'last': close,
+        'prev': p, 'vol': 1000, 'turnover': 10, 'trades': 50,
+        'delivQty': 0, 'delivPer': 0, 'isin': isin, 'companyName': '',
+    }
+    day.update(overrides)
+    return day
+
+
 def decode_daily(data, isin):
     """compact_daily rows are plain lists in DAILY_COLS order (see nse_server.py's
     DAILY_COLS/compact_daily) - decode data['dailyBySymbol'][isin] into a list of
