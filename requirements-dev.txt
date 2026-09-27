@@ -1,0 +1,3 @@
+# Dev-only tooling for the test suite (tests/). The runtime server itself stays
+# stdlib-only (see AGENT.md) - nothing here is imported by src/nse_server.py.
+pytest>=8
