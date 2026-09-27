@@ -350,7 +350,7 @@ function dqRenderAdjusted() {
     : rows.map(({ a, v, st }, i) =>
       `<tr${st === 'major' ? ' style="background:rgba(248,113,113,.08)"' : ''}>
        <td>${i+1}</td><td>${escapeHtml(a.symbol)}</td><td>${a.exDate}</td>
-       <td>${a.kind === 'demerger' ? 'Demerger (TradingView)' : 'Split / bonus (NSE)'}</td>
+       <td>${{ demerger: 'Demerger (TradingView)', rights: 'Rights issue (NSE)' }[a.kind] || 'Split / bonus (NSE)'}</td>
        <td style="color:var(--text2)">${escapeHtml(a.detail)}</td>
        <td>×${a.factor}</td>
        <td>${dqVerifyCell(v, st === 'pending' && hadResult(a.isin))}</td></tr>`).join('');

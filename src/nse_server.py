@@ -260,11 +260,78 @@ def parse_corp_action_ratio(subject):
     return ratio
 
 
-def load_split_bonus_events(base_dir, latest_date_str, recognized=None, earliest_date_str=None):
+# ─── Rights-issue Price Adjustment ─────────────────────────────────────────
+# A rights issue offers existing holders X new shares per Y held at a subscription
+# price below the market, so the price falls on the ex-date by the dilution. Charting
+# platforms (TradingView) back-adjust for it with the theoretical ex-rights price (TERP):
+#     TERP   = (P + r * S) / (1 + r)          r = X / Y,  P = last close before the ex-date
+#     factor = TERP / P                       pre-ex-date prices are MULTIPLIED by this
+# S is the issue price = premium + the FACE VALUE THAT WAS IN FORCE ON THE EX-DATE.
+# NSE's feed reports today's face value on every row, so a later split (10 -> 1) would
+# understate S by 10x; the archive therefore stores FACEVAL together with FV_ASOF (the
+# date it was read) and fv_at_ex_date() rolls it back through the splits in between.
+# When S >= P the offer is at or above the market: no dilution, so (like TradingView)
+# nothing is adjusted. Checked against TradingView's own factors on 84 events: 78 agree
+# within 0.5% (the rest are explained in AGENT.md "Rights-Issue Price Adjustment").
+# Subject shapes seen live: "Rights 3:25 @ Premium Rs 1799/-", "Rights 10:121@ Premium Rs 38/-",
+# "Rights 11: 50 @ Premium Rs 0/-", "... @ Prm Rs 102/-", "... @ Premium Re. 0.63/-",
+# "... @ Premium 91", "Rights 1:19.07 @ Premium Rs 0". Anything else that says "rights"
+# (e.g. "Rights - 7 Ccps And 7 Warrants:40") is NOT guessed at: it goes to the unhandled list.
+RIGHTS_RE = re.compile(
+    r'^\s*Rights\s+(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)\s*@\s*Pre?m(?:ium)?\.?\s*(?:R[se]\.?)?\s*(\d+(?:\.\d+)?)\s*/?-?\s*$',
+    re.IGNORECASE
+)
+ISSUER_PREFIX_LEN = 10  # Indian ISINs share a 10-character issuer code; only the last 2 digits change on a split
+RIGHTS_MAX_CUM_GAP_DAYS = 10  # a cum-rights close older than this (suspended stock) is too stale to price the adjustment
+
+
+def parse_rights_terms(subject):
+    """(new_shares, held_shares, premium) for a "Rights X:Y @ Premium Rs P" subject, else None."""
+    m = RIGHTS_RE.match((subject or '').strip())
+    if not m:
+        return None
+    x, y, premium = float(m.group(1)), float(m.group(2)), float(m.group(3))
+    return (x, y, premium) if x > 0 and y > 0 else None
+
+
+def parse_face_value_ratio(subject):
+    """old face value / new face value for a split or consolidation subject (10 -> 1 gives 10), else None."""
+    m = FVS_RE.search((subject or '').strip())
+    if m and float(m.group(2)) > 0 and float(m.group(1)) > 0:
+        return float(m.group(1)) / float(m.group(2))
+    return None
+
+
+def rights_price_factor(cum_close, new_shares, held_shares, issue_price):
+    """TERP / cum-rights close, or None when the issue price is not below the market (nothing to adjust)."""
+    if not cum_close or cum_close <= 0 or issue_price >= cum_close:
+        return None
+    r = new_shares / held_shares
+    factor = (cum_close + r * issue_price) / (cum_close * (1 + r))
+    return factor if 0 < factor < 1 else None
+
+
+def fv_at_ex_date(face_value, fv_asof_dt, ex_dt, split_ratios):
+    """Face value in force on the rights ex-date. `face_value` was read on `fv_asof_dt` and so already
+    reflects every split up to then; each split in (ex_dt, fv_asof_dt] must be undone (a 10 -> 1 split
+    means the face value was 10x higher before it). `split_ratios` is [(exDate_dt, old_fv / new_fv)]."""
+    fv = face_value
+    for dt, ratio in split_ratios:
+        if ex_dt < dt <= fv_asof_dt:
+            fv *= ratio
+    return fv
+
+
+def load_split_bonus_events(base_dir, latest_date_str, recognized=None, earliest_date_str=None, rights=None):
     """Read CorporateActions.csv and return (events, unhandled). If a list is passed as
     `recognized`, every row that parsed to a ratio is also appended to it as
     {isin, symbol, exDate, subject, ratio} (used for the Data Quality "Price Adjustments
-    Applied" list; the return value is unaffected). `earliest_date_str` is the first date of
+    Applied" list; the return value is unaffected). If a list is passed as `rights`, every
+    parsed rights issue is appended to it as {isin, symbol, exDate, exDt, subject, newShares,
+    heldShares, premium, faceValue} (faceValue = the face value in force on the ex-date, see
+    fv_at_ex_date) - a rights adjustment needs the stock's price history, so it is computed
+    later by add_rights_events, not here. Rights rows that cannot be parsed, or that lack a
+    face value, go to `unhandled` like any other unrecognized row. `earliest_date_str` is the first date of
     the price history we hold: recognized split/bonus events with an earlier exDate are
     ignored. CorporateActions.csv is a permanent, ever-growing archive, and such an event
     cannot change any stored price (every day is on the post-event scale already) - its only
@@ -295,6 +362,16 @@ def load_split_bonus_events(base_dir, latest_date_str, recognized=None, earliest
     events = defaultdict(list)
     unhandled = []
     skipped_subjects = []
+    seen_rights = set()
+
+    # Face-value changes per issuer (needed to roll a rights row's face value back to its ex-date)
+    splits_by_issuer = defaultdict(list)
+    for r in rows:
+        ratio = parse_face_value_ratio(r.get('SUBJECT'))
+        ex_dt = parse_date_str((r.get('EXDATE') or '').strip())
+        isin = (r.get('ISIN') or '').strip()
+        if ratio and ex_dt and isin:
+            splits_by_issuer[isin[:ISSUER_PREFIX_LEN]].append((ex_dt, ratio))
 
     for r in rows:
         isin = (r.get('ISIN') or '').strip()
@@ -309,6 +386,28 @@ def load_split_bonus_events(base_dir, latest_date_str, recognized=None, earliest
             continue
         if latest_dt and ex_dt > latest_dt:
             continue  # announced but not yet effective in our downloaded data
+
+        if re.search(r'\brights?\b', subject, re.IGNORECASE):
+            terms = parse_rights_terms(subject)
+            face_value = parse_num(r.get('FACEVAL'))
+            fv_asof = parse_date_str((r.get('FV_ASOF') or '').strip())
+            if not terms or not face_value or face_value <= 0 or not fv_asof:
+                skipped_subjects.append(subject)
+                unhandled.append({'isin': isin, 'symbol': symbol, 'exDate': ex_date_str, 'subject': subject})
+                continue
+            if earliest_dt and ex_dt < earliest_dt:
+                continue  # predates all price history we hold - cannot change a price
+            key = (normalize_symbol(symbol), ex_dt, terms)
+            if key in seen_rights:
+                continue  # the feed can list one rights issue twice (e.g. under an old and a new ISIN)
+            seen_rights.add(key)
+            if rights is not None:
+                rights.append({'isin': isin, 'symbol': symbol, 'exDate': ex_date_str, 'exDt': ex_dt,
+                               'subject': subject, 'newShares': terms[0], 'heldShares': terms[1],
+                               'premium': terms[2],
+                               'faceValue': fv_at_ex_date(face_value, fv_asof, ex_dt,
+                                                          splits_by_issuer.get(isin[:ISSUER_PREFIX_LEN], ()))})
+            continue
 
         ratio = parse_corp_action_ratio(subject)
         if ratio is None:
@@ -335,7 +434,7 @@ def load_split_bonus_events(base_dir, latest_date_str, recognized=None, earliest
     return dict(events), unhandled
 
 
-def bridge_split_induced_isin_changes(daily_by_symbol, symbol_to_isin, events_by_isin):
+def bridge_split_induced_isin_changes(daily_by_symbol, symbol_to_isin, events_by_isin, extra_symbols=()):
     """Re-key every event onto the CURRENT ISIN for its symbol (via
     symbol_to_isin) rather than trusting whatever ISIN the corp-actions feed
     happens to list, and best-effort merge older-ISIN price history forward
@@ -374,14 +473,13 @@ def bridge_split_induced_isin_changes(daily_by_symbol, symbol_to_isin, events_by
           needs no symbol match at all, so a simultaneous rename can't break
           it, and still only merges ISINs verified to share an issuer code -
           never an unrelated symbol that happens to reuse a similar name."""
-    ISIN_PREFIX_LEN = 10
     isins_by_prefix = defaultdict(list)
     for isin, days in daily_by_symbol.items():
-        if days and len(isin) >= ISIN_PREFIX_LEN:
-            isins_by_prefix[isin[:ISIN_PREFIX_LEN]].append(isin)
+        if days and len(isin) >= ISSUER_PREFIX_LEN:
+            isins_by_prefix[isin[:ISSUER_PREFIX_LEN]].append(isin)
 
     resolved = defaultdict(list)
-    touched_symbols = set()
+    touched_symbols = {normalize_symbol(sym) for sym in extra_symbols}  # e.g. rights-issue symbols: bridged too
     for old_isin, events in events_by_isin.items():
         for ex_dt, ratio, symbol in events:
             norm_symbol = normalize_symbol(symbol)
@@ -393,11 +491,11 @@ def bridge_split_induced_isin_changes(daily_by_symbol, symbol_to_isin, events_by
     for norm_symbol in touched_symbols:
         current_isin = symbol_to_isin.get(norm_symbol)
         current_days = daily_by_symbol.get(current_isin) if current_isin else None
-        if not current_days or len(current_isin) < ISIN_PREFIX_LEN:
+        if not current_days or len(current_isin) < ISSUER_PREFIX_LEN:
             continue
 
         candidates = []
-        for other_isin in isins_by_prefix.get(current_isin[:ISIN_PREFIX_LEN], ()):
+        for other_isin in isins_by_prefix.get(current_isin[:ISSUER_PREFIX_LEN], ()):
             if other_isin == current_isin or other_isin in bridged:
                 continue
             other_days = daily_by_symbol.get(other_isin)
@@ -470,6 +568,56 @@ def apply_split_adjustments(daily_by_symbol, events_by_isin):
 
     if adjusted_isins:
         print(f"    Split/bonus-adjusted {adjusted_isins} stock(s)")
+
+
+def add_rights_events(events_by_isin, rights, daily_by_symbol, symbol_to_isin, recognized=None, unhandled=None):
+    """Turn every parsed rights issue into a price-adjustment event. Runs on the RAW (still
+    unadjusted) closes, after bridge_split_induced_isin_changes has merged split-induced ISIN
+    history: the factor needs the raw close on the last trading day before the ex-date, on the
+    same price scale as the issue price. The event is stored like a split (ratio = 1 / factor,
+    so apply_split_adjustments divides pre-ex-date prices by it) and, being a pure multiplier,
+    composes with any other event on either side of it.
+
+    The stock is found through its SYMBOL (the feed's ISIN can be stale). Silently ignored: no
+    price history before the ex-date, and an issue price at or above the market (no dilution;
+    TradingView does not adjust either). Appended to `unhandled` (shown in the Data Quality
+    tab): a stock we cannot find, or one whose last close before the ex-date is more than
+    RIGHTS_MAX_CUM_GAP_DAYS old - too stale to trust as the cum-rights price. Appended to
+    `recognized`: each applied event, with its ratio, kind 'rights' and a detail line.
+    Returns the number of events applied."""
+    applied = 0
+    for ev in rights:
+        isin = symbol_to_isin.get(normalize_symbol(ev['symbol']))
+        days = daily_by_symbol.get(isin) if isin else None
+        if not days:
+            continue  # delisted / not in our EQ+BE data: nothing to adjust
+        cum = None
+        for day in days:
+            d_dt = parse_date_str(day['date'])
+            if d_dt and d_dt < ev['exDt']:
+                cum = (d_dt, day['close'])
+            elif d_dt and d_dt >= ev['exDt']:
+                break
+        if cum is None:
+            continue  # ex-date is at or before the start of our history
+        if (ev['exDt'] - cum[0]).days > RIGHTS_MAX_CUM_GAP_DAYS:
+            if unhandled is not None:
+                unhandled.append({'isin': isin, 'symbol': ev['symbol'], 'exDate': ev['exDate'], 'subject': ev['subject']})
+            continue
+        issue_price = ev['premium'] + ev['faceValue']
+        factor = rights_price_factor(cum[1], ev['newShares'], ev['heldShares'], issue_price)
+        if factor is None:
+            continue
+        events_by_isin.setdefault(isin, []).append((ev['exDt'], 1.0 / factor))
+        events_by_isin[isin].sort(key=lambda e: e[0])
+        applied += 1
+        if recognized is not None:
+            recognized.append({'isin': isin, 'symbol': ev['symbol'], 'exDate': ev['exDate'], 'kind': 'rights',
+                               'subject': ev['subject'], 'ratio': 1.0 / factor,
+                               'detail': f"{ev['subject']} - issue price Rs {issue_price:g}, cum-rights close Rs {cum[1]:g}"})
+    if applied:
+        print(f"    Applying {applied} rights-issue adjustment(s)")
+    return applied
 
 
 # ─── TradingView-derived demerger corrections ───────────────────────────────
@@ -552,7 +700,7 @@ def add_demerger_corrections(events_by_isin, corrections, latest_date_str):
 
 def build_adjusted_corp_actions(recognized, corrections, corrected_keys, latest_by_symbol,
                                 daily_by_symbol, symbol_to_isin, max_days):
-    """The Data Quality "Price Adjustments Applied" list: every split/bonus and every
+    """The Data Quality "Price Adjustments Applied" list: every split/bonus/rights event and every
     TradingView demerger correction that actually changed prices the dashboard keeps
     (stock still trading, ex-date inside its retained window - an older event has no
     visible price effect). `factor` is what pre-ex-date prices were multiplied by
@@ -575,7 +723,7 @@ def build_adjusted_corp_actions(recognized, corrections, corrected_keys, latest_
                     'kind': kind, 'detail': detail, 'factor': round(factor, 6)})
 
     for ev in recognized:
-        add(ev['isin'], ev['symbol'], ev['exDate'], 'split-bonus', ev['subject'], 1.0 / ev['ratio'])
+        add(ev['isin'], ev['symbol'], ev['exDate'], ev.get('kind', 'split-bonus'), ev.get('detail', ev['subject']), 1.0 / ev['ratio'])
     for c in corrections:
         if correction_key(c['symbol'], c['exDate']) in corrected_keys:
             add(c['isin'], c['symbol'], c['exDate'], 'demerger', 'Demerger (factor derived from TradingView)', c['factor'])
@@ -689,13 +837,17 @@ def process_data(base_dir, progress_cb=None):
     # in place for dates before each event's exDate) - must run before any
     # indicator below is computed from these prices.
     t1b = time.time()
-    report(f"  Applying split/bonus price adjustments...")
+    report(f"  Applying split/bonus/rights price adjustments...")
     recognized_corp_events = []
+    rights_issues = []
     corp_events, unhandled_corp_events = load_split_bonus_events(
-        base_dir, latest_date, recognized_corp_events, dates[0] if dates else None)
+        base_dir, latest_date, recognized_corp_events, dates[0] if dates else None, rights_issues)
     demerger_corrections = load_demerger_corrections(base_dir)
     corrected_keys = add_demerger_corrections(corp_events, demerger_corrections, latest_date)
-    corp_events = bridge_split_induced_isin_changes(daily_by_symbol, symbol_to_isin, corp_events)
+    corp_events = bridge_split_induced_isin_changes(
+        daily_by_symbol, symbol_to_isin, corp_events, extra_symbols=[r['symbol'] for r in rights_issues])
+    add_rights_events(corp_events, rights_issues, daily_by_symbol, symbol_to_isin,
+                      recognized_corp_events, unhandled_corp_events)  # needs the still-raw closes
     apply_split_adjustments(daily_by_symbol, corp_events)
     print(f"    Done in {time.time()-t1b:.1f}s")
 
@@ -1220,7 +1372,7 @@ def _verify_stock(chart, symbol, ours, events):
 
 def run_tv_verify(base_dir, port, verify_all=False):
     """Background worker behind POST /api/tv-verify/start. For the stocks in the Data Quality
-    "Price Adjustments Applied" list (splits, bonuses and TradingView demerger corrections),
+    "Price Adjustments Applied" list (splits, bonuses, rights and TradingView demerger corrections),
     compare our adjusted daily closes with TradingView's over their whole shared history
     (tv_adjust.compare_series) and grade each stock match / minor / major / inconclusive.
 

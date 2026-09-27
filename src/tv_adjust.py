@@ -345,7 +345,7 @@ def _explain_level_changes(common, ratios, our_closes, events, tolerance):
         adjusted for it (ours moved by F, theirs didn't);
       - next to one of our events but a different size              -> the two adjustments differ;
       - nowhere near any event of ours                              -> TradingView adjusts for an
-        action our corporate-actions data doesn't contain (e.g. a rights issue).
+        action our corporate-actions data doesn't contain.
     A step immediately undone on the next bar is a one-bar blip, not a level change.
 
     Returns up to 3 dicts {kind, date, ourFactor, tvFactor, text}: `kind` is 'tv-no-adjustment',
@@ -379,7 +379,7 @@ def _explain_level_changes(common, ratios, our_closes, events, tolerance):
         else:
             causes.append({'kind': 'tv-extra-adjustment', 'date': format_date(d), 'ourFactor': None, 'tvFactor': round(1 / s, 6),
                            'text': f'TradingView also scales prices before {format_date(d)} by x{1 / s:.4g}, which the dashboard '
-                                   f'has no event for (a rights issue or other action missing from the corporate-actions data?)'})
+                                   f'has no event for (an action missing from the corporate-actions data?)'})
     return causes[:3]
 
 

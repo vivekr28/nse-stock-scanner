@@ -434,7 +434,7 @@ catch {
     Write-Host "  Warning: Could not download MidSmallcap 400 list - $($_.Exception.Message)" -ForegroundColor Yellow
 }
 
-# -- Download Corporate Actions (splits/bonuses, for price adjustment) ---------
+# -- Download Corporate Actions (splits/bonuses/rights, for price adjustment) ---------
 # reference-data\CorporateActions.csv is an ARCHIVE, not a mirror of NSE's feed. NSE is asked for a window
 # (default: the last 3 years) and:
 #   * rows INSIDE that window are REPLACED by NSE's fresh copy, so a revised ex-date or a withdrawn event
@@ -446,7 +446,7 @@ catch {
 # notice too. Rows are written sorted (ex-date, symbol, subject, ISIN) because NSE returns rows that share an
 # ex-date in an arbitrary order, which would otherwise make every download look "changed" (file rewritten,
 # noisy git diffs, and a pointless reprocess on every launch).
-Write-Host "`nDownloading corporate actions (splits/bonuses)..." -ForegroundColor Cyan
+Write-Host "`nDownloading corporate actions (splits/bonuses/rights)..." -ForegroundColor Cyan
 $CorpActionsFile = Join-Path $ReferenceFolder "CorporateActions.csv"
 
 function ConvertTo-ExDate([string]$Text) {
@@ -476,13 +476,20 @@ try {
         -ErrorAction Stop
     $corpJson = $corpResponse.Content | ConvertFrom-Json
     $corpFiltered = $corpJson | Where-Object {
-        $_.subject -match '(?i)bonus|split|sub-division|consolidation of equity shares|demerger'
+        $_.subject -match '(?i)bonus|split|sub-division|consolidation of equity shares|demerger|\brights?\b'
     }
+    # NSE reports the face value as of TODAY on every row. A rights issue's subscription price is premium + the face
+    # value in force at its ex-date, so the server needs to know WHEN this value was read to roll it back through any
+    # later split (see fv_at_ex_date in nse_server.py): FACEVAL + FV_ASOF are stored on every row.
+    $fvAsOf = (Get-Date).ToString('dd-MMM-yyyy', [Globalization.CultureInfo]::InvariantCulture)
     $freshRows = @()
     foreach ($row in $corpFiltered) {
         $subj = ([string]$row.subject).Trim()
         if ($row.isin -and $row.exDate -and $subj) {
-            $freshRows += [pscustomobject]@{ ISIN = [string]$row.isin; SYMBOL = [string]$row.symbol; EXDATE = [string]$row.exDate; SUBJECT = $subj }
+            $fv = ([string]$row.faceVal).Trim()
+            $fvNum = 0.0
+            if (-not [double]::TryParse($fv, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$fvNum)) { $fv = '' }
+            $freshRows += [pscustomobject]@{ ISIN = [string]$row.isin; SYMBOL = [string]$row.symbol; EXDATE = [string]$row.exDate; SUBJECT = $subj; FACEVAL = $fv; FV_ASOF = $(if ($fv) { $fvAsOf } else { '' }) }
         }
     }
 
@@ -499,6 +506,16 @@ try {
             # Replacing the window with a much smaller list would silently delete good rows if NSE's answer was truncated.
             Write-Host "  Warning: NSE returned only $($freshRows.Count) rows for the window but $($storedInWindow.Count) are stored - looks incomplete, keeping the existing file" -ForegroundColor Yellow
         } else {
+            # A face value that is unchanged since it was last read keeps its old FV_ASOF (no split has touched it since),
+            # so an unchanged feed still leaves the file byte-identical instead of being rewritten with today's date.
+            $storedAsOf = @{}
+            foreach ($r in $stored) {
+                if ($r.FACEVAL -and $r.FV_ASOF) { $storedAsOf[('{0}|{1}|{2}|{3}|{4}' -f $r.ISIN, $r.SYMBOL, $r.EXDATE, $r.SUBJECT, $r.FACEVAL)] = $r.FV_ASOF }
+            }
+            foreach ($r in $freshRows) {
+                $k = '{0}|{1}|{2}|{3}|{4}' -f $r.ISIN, $r.SYMBOL, $r.EXDATE, $r.SUBJECT, $r.FACEVAL
+                if ($storedAsOf.ContainsKey($k)) { $r.FV_ASOF = $storedAsOf[$k] }
+            }
             $seen = New-Object 'System.Collections.Generic.HashSet[string]'
             $unique = @(foreach ($r in (@($freshRows) + @($retained))) {
                 if ($seen.Add(('{0}|{1}|{2}|{3}' -f $r.ISIN, $r.SYMBOL, $r.EXDATE, $r.SUBJECT))) { $r }
@@ -508,9 +525,10 @@ try {
                 @{ Expression = { $_.SYMBOL } }, `
                 @{ Expression = { $_.SUBJECT } }, `
                 @{ Expression = { $_.ISIN } })
-            $corpLines = @("ISIN,SYMBOL,EXDATE,SUBJECT")
+            # FACEVAL/FV_ASOF are blank on rows archived before those columns existed (only rights issues need them)
+            $corpLines = @("ISIN,SYMBOL,EXDATE,SUBJECT,FACEVAL,FV_ASOF")
             foreach ($r in $sorted) {
-                $corpLines += ('"{0}","{1}","{2}","{3}"' -f ($r.ISIN -replace '"','""'), ($r.SYMBOL -replace '"','""'), ($r.EXDATE -replace '"','""'), ($r.SUBJECT -replace '"','""'))
+                $corpLines += ('"{0}","{1}","{2}","{3}","{4}","{5}"' -f ($r.ISIN -replace '"','""'), ($r.SYMBOL -replace '"','""'), ($r.EXDATE -replace '"','""'), ($r.SUBJECT -replace '"','""'), ([string]$r.FACEVAL -replace '"','""'), ([string]$r.FV_ASOF -replace '"','""'))
             }
             $corpChanged = Save-IfChanged $CorpActionsFile ($corpLines -join "`n")
             Write-Host "  Corporate actions: $($sorted.Count) rows ($($freshRows.Count) from NSE, $($retained.Count) kept from the archive) $(if ($corpChanged) { 'updated' } else { 'unchanged' }) ($CorpFromDate to $CorpToDate)" -ForegroundColor Green
