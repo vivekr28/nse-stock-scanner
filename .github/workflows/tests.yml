@@ -1,10 +1,11 @@
 name: Tests
 
-# Runs the pytest suite (tests/, see AGENT.md "Completed: Test Suite") on every push to
-# main and every pull request into it. ubuntu-latest is fine here even though the project
+# Runs both test suites (see AGENT.md "Completed: Test Suite") on every push to main and
+# every pull request into it. ubuntu-latest is fine for both jobs even though the project
 # itself runs on Windows - nothing under test touches the filesystem in an OS-specific way
-# (tests build their own tiny synthetic CSVs under pytest's tmp_path; the real NSE_DATA/ is
-# never touched), and it's the faster/cheaper default GitHub Actions runner.
+# (the Python tests build their own tiny synthetic CSVs under pytest's tmp_path, and the
+# real NSE_DATA/ is never touched by either suite, on any OS), and it's the faster/cheaper
+# default GitHub Actions runner.
 on:
   push:
     branches: [main]
@@ -21,3 +22,14 @@ jobs:
           python-version: '3.13'
       - run: pip install -r requirements-dev.txt
       - run: pytest -v
+
+  node-tests:
+    # tests-js/ - a separate track from tests/, different language/runtime (see AGENT.md
+    # Phase 7+). Node's built-in test runner, no extra dependency, no package.json needed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+      - run: node --test
