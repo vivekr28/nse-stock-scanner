@@ -44,8 +44,8 @@ NSE-StockScanner/
 ├── pytest.ini                    # testpaths=tests; declares the `slow` marker for future real-data smoke tests
 ├── requirements-dev.txt          # pytest only — dev tooling, never imported by the runtime (which stays stdlib-only)
 ├── scanner-presets/              # GIT-TRACKED
-│   ├── presets.json              # Screener presets saved by the server API (/api/presets)
-│   └── screener-presets.json     # A manual export bundle of presets (not read by any code)
+│   ├── presets.json              # LIVE: screener presets saved/loaded by the server API (/api/presets, PRESETS_FILE in nse_server.py) - this is what the Filters modal's Save/Rename/Delete buttons actually read and write
+│   └── screener-presets.json     # DEAD FILE (confirmed 2026-09-28): a one-time manual export snapshot - `{"_format":"NSE-StockScanner-Presets","_version":1,"_exportedAt":"2026-09-15T15:12:04.597Z","presets":[...]}`, e.g. a "DeepDive-VolumeBased" preset. Present since the repo's initial commit. Grepped every .js/.py/.ps1/.html file for "screener-presets" - zero references anywhere, including js/presets.js (whose own docstring claims "export/import via IndexedDB" but that code path isn't wired to this file either). Safe to delete whenever; left in place for now at the user's choice. If auditing for other dead files later, this is the confirmed example of what one looks like here: present on disk, git-tracked, but with no live code path reading or writing it.
 ├── reference-data/               # GIT-TRACKED (unlike NSE_DATA/): data that may not be obtainable from NSE again — see reference-data/README.md
 │   ├── CorporateActions.csv      # Split/bonus/demerger/rights corporate actions (ISIN, SYMBOL, EXDATE, SUBJECT, FACEVAL, FV_ASOF). A permanent ARCHIVE: NSE serves only a rolling window, so the downloader replaces the rows inside that window with NSE's fresh copy and KEEPS rows that have aged out of it (see "Corporate-actions archive"). Written by Download-NSE-Bhavcopy.ps1 — see "Stock Split/Bonus Price Adjustment"
 │   └── TradingViewAdjustments.csv # TradingView-derived price corrections for corp actions NSE gives no ratio for (ISIN, SYMBOL, EXDATE, FACTOR, STATUS, CHECKED_AT, NOTE), written by the Data Quality "Adjust prices from TradingView" button, applied on every processing run — see "TradingView-Derived Corrections". Delete a row to undo that correction
@@ -802,6 +802,26 @@ If `S >= P` (offer at or above the market: no dilution) nothing is adjusted - Tr
 - Dashboard loads it alongside other data files
 - New filter checkbox in screener: "Exclude F&O stocks" / "F&O stocks only"
 - Simple set lookup: if stock symbol is in F&O set, include/exclude based on filter
+
+---
+
+## Planned: Historical Filter Pass/Fail Overlay on Stock Charts (Sizing Done, Not Started)
+
+**Goal:** In the Stock Scanner tab, when opening a stock's chart (both from the "Passed" and "Failed" results), visually mark on the chart which historical days the stock *would have* satisfied the currently-active filter set vs. which days it wouldn't have — a backtesting/"how do these filters actually behave over time" view, not just today's pass/fail.
+
+**The core challenge:** every filter in `js/screener.js` only ever evaluates "as of the latest day." To mark pass/fail per historical day, each filter needs to be re-run as if *that day* were "today," using only data up to that point. The 17 filters split into three tiers of difficulty:
+
+- **Cheap (single-day, no window):** F3 (turnover value), F11 (sector), F16 (date-range %).
+- **Moderate (per-stock rolling window):** F1, F2, F4, F5, F6, F8, F10, F15 — need a rolling SMA/ADR/52W-high/co-occurrence recomputed at every historical day, but only for the one stock being charted (O(days × window), fine performance-wise).
+- **Expensive (industry/market-wide):** F9 (Industry RS - ranks *all industries* against each other), F12 (Industry Money Flow), F13/F14 (industry size/mcap), F17 (Industry Money Flow Rate of Change). Doing these for one historical day means replaying the whole market as of that day; doing it for every day in a stock's history means replaying the whole market hundreds of times over. Needs a precomputed/cached daily industry-aggregate table, not a per-chart-open computation, or opening a chart gets noticeably slow.
+
+Also: F7 (circuit exclusion) needs historical band data per day, which today only exists for the latest day (see the price-band staleness fix above) - extending that is its own small piece of work.
+
+**Effort estimate (given to the user 2026-09-28, not yet approved to start):**
+- **Medium (~1-2 days):** cover the 10 single-stock filters (everything except F9/F12/F13/F14/F17). Overlay pass/fail as colored markers on the chart, reusing the existing MF-Dots marker-plugin pattern (`icComputeMFDotMarkers`/`markersPlugin`, `js/industry-charts.js`) rather than inventing new chart primitives. Industry-based filters get skipped/noted as "not shown historically."
+- **Large (~3-5+ days):** also cover the industry-aggregate filters - requires a genuine caching layer that precomputes industry RS/money-flow for every trading day once, not per chart open.
+
+**Recommended scope to start with:** Medium - covers the filters people actually toggle most (turnover/ADR/SMA/performance-based); the industry ones can follow later once there's a cache layer worth building for other things too.
 
 ---
 
