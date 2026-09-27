@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NSE EOD Dashboard</title>
-<link rel="stylesheet" href="css/styles.css?v=10">
+<link rel="stylesheet" href="css/styles.css?v=11">
 </head>
 <body>
 
@@ -417,6 +417,22 @@
               </div>
             </div>
 
+            <!-- F17: Industry Money Flow Rate of Change filter -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF17On">
+              <span class="scr-label" title="Compares the industry's Money Flow Chg% now to the same reading one window-length ago, so a still-negative industry that's improving passes, and a still-positive industry that's fading does not.">Industry MF Rate of Change:</span>
+              <div class="scr-inputs">
+                <select id="scrF17Period" style="min-width:80px;">
+                  <option value="3m" selected>3 Months</option>
+                  <option value="6m">6 Months</option>
+                  <option value="1y">12 Months</option>
+                </select>
+                <span class="scr-unit">&gt;</span>
+                <input type="number" id="scrF17Val" value="0" step="5" style="width:60px;">
+                <span class="scr-unit">pp</span>
+              </div>
+            </div>
+
           </div>
         </div>
 
@@ -518,7 +534,16 @@
             <button class="btn btn-secondary ic-layout-btn" data-period="6m" onclick="icSetMfPeriod('6m')">6M</button>
           </div>
         </div>
-        <div id="icMoneyFlowChartContainer" class="ic-industry-chart-container"></div>
+        <div class="ic-mf-charts-row">
+          <div class="ic-mf-chart-col">
+            <div class="ic-mf-chart-heading">Money Flow</div>
+            <div id="icMoneyFlowChartContainer" class="ic-industry-chart-container"></div>
+          </div>
+          <div class="ic-mf-chart-col">
+            <div class="ic-mf-chart-heading" title="Change in the Money Flow line itself, comparing now to one window-length ago. Positive = the reading is improving even if still negative; negative = it's fading even if still positive.">Rate of Change</div>
+            <div id="icMfRocChartContainer" class="ic-industry-chart-container"></div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -594,6 +619,7 @@
         <option value="avg_dist52h">Avg Dist from 52W High</option>
         <option value="stocks">Stock Count</option>
         <option value="money_flow">Money Flow</option>
+        <option value="money_flow_roc">Money Flow Rate of Change</option>
       </select>
     </div>
     <div class="filter-group" id="mfPeriodGroup" style="display:none;">
@@ -610,6 +636,14 @@
       <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);font-weight:400;cursor:pointer;white-space:nowrap;">
         <input type="checkbox" id="mfAllPeriodsToggle" onchange="renderIndustryAnalysis()"> All-periods table
       </label>
+    </div>
+    <div class="filter-group" id="mfRocPeriodGroup" style="display:none;">
+      <label title="Compares today's Money Flow Chg% reading to the same reading exactly one window-length ago, so a still-negative industry that's improving scores positive, and a still-positive industry that's fading scores negative.">Money Flow Window</label>
+      <select id="mfRocPeriod" onchange="renderIndustryAnalysis()">
+        <option value="3m" selected>Last 3 Months</option>
+        <option value="6m">Last 6 Months</option>
+        <option value="1y">Last 1 Year</option>
+      </select>
     </div>
   </div>
 
@@ -807,15 +841,15 @@
 <script src="js/cache.js?v=2"></script>
 <script src="js/data-processor.js?v=2"></script>
 <script src="js/scanner.js?v=2"></script>
-<script src="js/screener.js?v=13"></script>
+<script src="js/screener.js?v=14"></script>
 <script src="js/breadth.js?v=4"></script>
 <script src="js/sector.js?v=2"></script>
-<script src="js/industry.js?v=9"></script>
+<script src="js/industry.js?v=10"></script>
 <script src="js/lib/lightweight-charts.standalone.production.js"></script>
 <script src="js/ew-index.js?v=1"></script>
-<script src="js/industry-charts.js?v=17"></script>
+<script src="js/industry-charts.js?v=19"></script>
 <script src="js/data-quality.js?v=11"></script>
-<script src="js/presets.js?v=8"></script>
+<script src="js/presets.js?v=9"></script>
 <script src="js/ui.js?v=9"></script>
 <script src="js/nse-download.js?v=4"></script>
 

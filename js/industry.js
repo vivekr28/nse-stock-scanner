@@ -2,13 +2,19 @@
 // INDUSTRY — industry-level analysis, RS scoring, and charts
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// ── Compute industry money flow for current and previous period ──
-function computeIndustryMoneyFlow(period) {
-  const numDays = { '1w': 5, '1m': 21, '3m': 63, '6m': 126, '1y': 250 }[period] || 126;
-  const totalAvail = Store.dates.length;
+const MF_PERIOD_DAYS = { '1w': 5, '1m': 21, '3m': 63, '6m': 126, '1y': 250 };
 
-  // Current period = last numDays trading days
-  const currentDates = Store.dates.slice(-Math.min(numDays, totalAvail));
+// ── Compute industry money flow for current and previous period ──
+// endOffsetDays > 0 shifts the "current" anchor back that many trading days,
+// so the same window/previous-window comparison can be replayed as of a past
+// date - used for the Money Flow Rate of Change filter (see renderIndustryAnalysis).
+function computeIndustryMoneyFlow(period, endOffsetDays = 0) {
+  const numDays = MF_PERIOD_DAYS[period] || 126;
+  const totalAvail = Store.dates.length - endOffsetDays;
+  if (totalAvail <= 0) return { current: {}, previous: {}, currentDays: 0, prevDays: 0 };
+
+  // Current period = last numDays trading days as of the (possibly shifted) anchor
+  const currentDates = Store.dates.slice(Math.max(0, totalAvail - numDays), totalAvail);
   const currentSet = new Set(currentDates);
 
   // Previous period = the numDays before the current period
@@ -45,12 +51,17 @@ function renderIndustryAnalysis() {
   const minMcap = parseNum(document.getElementById('indMinMcap').value) || 0;
   const sortBy = document.getElementById('industrySort').value;
   const mfPeriod = document.getElementById('moneyFlowPeriod').value;
+  const isRoc = sortBy === 'money_flow_roc';
+  const mfRocPeriod = document.getElementById('mfRocPeriod').value;
+  const effectivePeriod = isRoc ? mfRocPeriod : mfPeriod;
 
   // Show/hide money flow period dropdown + all-periods toggle
   const mfGroup = document.getElementById('mfPeriodGroup');
   if (mfGroup) mfGroup.style.display = sortBy === 'money_flow' ? '' : 'none';
   const mfAllGroup = document.getElementById('mfAllPeriodsGroup');
   if (mfAllGroup) mfAllGroup.style.display = sortBy === 'money_flow' ? '' : 'none';
+  const mfRocGroup = document.getElementById('mfRocPeriodGroup');
+  if (mfRocGroup) mfRocGroup.style.display = isRoc ? '' : 'none';
 
   // Show/hide + populate the all-periods money flow comparison table
   // (respects the same Min Stocks / Min Market Cap filters as the main table)
@@ -68,8 +79,11 @@ function renderIndustryAnalysis() {
   }
   if (allPeriodsOn) renderMoneyFlowAllPeriodsTable(computeAllPeriodsMoneyFlow(minStocks, minMcap));
 
-  // Compute money flow per symbol for current and previous period
-  const mfData = computeIndustryMoneyFlow(mfPeriod);
+  // Compute money flow per symbol for current and previous period. In ROC mode,
+  // also replay the same window/previous-window comparison as of one window-length
+  // ago, so we can compare "MF Chg% now" against "MF Chg% back then" per industry.
+  const mfData = computeIndustryMoneyFlow(effectivePeriod);
+  const mfPastData = isRoc ? computeIndustryMoneyFlow(effectivePeriod, MF_PERIOD_DAYS[effectivePeriod] || 126) : null;
 
   // Group stocks by industry
   const industries = {};
@@ -81,6 +95,7 @@ function renderIndustryAnalysis() {
       above: 0, below: 0, totalMcap: 0,
       totalDistFrom52H: 0, totalDistFromSMA: 0,
       moneyFlowCurrent: 0, moneyFlowPrev: 0,
+      moneyFlowPastCurrent: 0, moneyFlowPastPrev: 0,
       sector: s.sector || '-'
     };
     industries[ind].stocks.push(s);
@@ -93,6 +108,10 @@ function renderIndustryAnalysis() {
     else industries[ind].below++;
     industries[ind].moneyFlowCurrent += (mfData.current[key] || 0);
     industries[ind].moneyFlowPrev += (mfData.previous[key] || 0);
+    if (isRoc) {
+      industries[ind].moneyFlowPastCurrent += (mfPastData.current[key] || 0);
+      industries[ind].moneyFlowPastPrev += (mfPastData.previous[key] || 0);
+    }
   }
 
   // Build industry list with computed metrics
@@ -104,12 +123,13 @@ function renderIndustryAnalysis() {
     const avgDistSMA = data.totalDistFromSMA / n;
 
     // Money flow % change: (current - previous) / previous * 100
-    let moneyFlowChg = 0;
-    if (data.moneyFlowPrev > 0) {
-      moneyFlowChg = ((data.moneyFlowCurrent - data.moneyFlowPrev) / data.moneyFlowPrev) * 100;
-    } else if (data.moneyFlowCurrent > 0) {
-      moneyFlowChg = 100; // went from 0 to something
-    }
+    const moneyFlowChg = mfPctChange(data.moneyFlowCurrent, data.moneyFlowPrev);
+
+    // Rate of change: the same MF Chg% reading, one window-length ago, vs now.
+    // Positive = the reading has been climbing (improving) even if still negative;
+    // negative = it's been sliding (fading) even if still positive.
+    const moneyFlowChgPast = isRoc ? mfPctChange(data.moneyFlowPastCurrent, data.moneyFlowPastPrev) : 0;
+    const moneyFlowRoc = isRoc ? (moneyFlowChg - moneyFlowChgPast) : 0;
 
     return {
       name,
@@ -126,6 +146,8 @@ function renderIndustryAnalysis() {
       moneyFlow: data.moneyFlowCurrent,
       moneyFlowPrev: data.moneyFlowPrev,
       moneyFlowChg,
+      moneyFlowChgPast,
+      moneyFlowRoc,
       topGainer: data.stocks.sort((a, b) => b.monthlyChangePct - a.monthlyChangePct)[0],
       topLoser: data.stocks.sort((a, b) => a.monthlyChangePct - b.monthlyChangePct)[0],
       stocks: data.stocks
@@ -149,6 +171,7 @@ function renderIndustryAnalysis() {
     case 'avg_dist52h': indList.sort((a, b) => a.avgDist52H - b.avgDist52H); break;
     case 'stocks': indList.sort((a, b) => b.stockCount - a.stockCount); break;
     case 'money_flow': indList.sort((a, b) => b.moneyFlowChg - a.moneyFlowChg); break;
+    case 'money_flow_roc': indList.sort((a, b) => b.moneyFlowRoc - a.moneyFlowRoc); break;
   }
 
   // Save for popup lookups
@@ -169,21 +192,24 @@ function renderIndustryAnalysis() {
   // ── Horizontal Bar Chart (replaced by the all-periods table when that's shown) ──
   const rsChartSection = document.getElementById('rsChartSection');
   if (rsChartSection) rsChartSection.style.display = allPeriodsOn ? 'none' : '';
-  if (!allPeriodsOn) renderMetricChart(indList.slice(0, 40), sortBy, mfPeriod, mfData);
+  if (!allPeriodsOn) renderMetricChart(indList.slice(0, 40), sortBy, effectivePeriod, mfData);
 
   // ── Industry Table (all filtered industries; manual header sort layered on the filter order) ──
   // A manual column sort only lasts until the Sort By metric / MF period changes, so picking a
   // new Sort By always brings the table back in step with the chart.
-  const sortTrack = sortBy === 'money_flow' ? sortBy + '|' + mfPeriod : sortBy;
+  const sortTrack = (sortBy === 'money_flow' || sortBy === 'money_flow_roc') ? sortBy + '|' + effectivePeriod : sortBy;
   if (sortTrack !== _indSortTrack) {
     _indSortTrack = sortTrack;
     indSortCol = null;
   }
+  const periodLabels = { '1w': '1W', '1m': '1M', '3m': '3M', '6m': '6M', '1y': '1Y' };
   _indBreakdown = {
     list: indList,
     sortBy,
     sortLabel: document.getElementById('industrySort').selectedOptions[0].textContent,
-    mfLabel: { '1w': '1W', '1m': '1M', '3m': '3M', '6m': '6M', '1y': '1Y' }[mfPeriod] || '6M'
+    mfLabel: periodLabels[effectivePeriod] || '6M',
+    isRoc,
+    rocPeriodLabel: periodLabels[mfRocPeriod] || '3M'
   };
   renderIndustryBreakdownTable();
 
@@ -197,6 +223,9 @@ function renderIndustryAnalysis() {
     const scoreColor = ind.rsScore >= 70 ? 'var(--green)' : ind.rsScore >= 40 ? 'var(--orange)' : 'var(--red)';
     const mfChgColor2 = ind.moneyFlowChg >= 0 ? 'var(--green)' : 'var(--red)';
     const mfSign = ind.moneyFlowChg >= 0 ? '+' : '';
+    const rocRow = isRoc
+      ? `<tr><td style="color:var(--text2)">MF RoC</td><td style="text-align:right;color:${ind.moneyFlowRoc >= 0 ? 'var(--green)' : 'var(--red)'}">${ind.moneyFlowRoc >= 0 ? '+' : ''}${ind.moneyFlowRoc.toFixed(1)}pp</td></tr>`
+      : '';
     return `
       <div class="sector-card" style="background:${bg};border-color:${border};cursor:pointer;" onclick="openIndustryCharts('${ind.name.replace(/'/g, "\\'")}')">
         <h4>
@@ -209,6 +238,7 @@ function renderIndustryAnalysis() {
           <tr><td style="color:var(--text2)">1M Chg%</td><td style="text-align:right" class="${ind.avgMonthlyChange >= 0 ? 'positive' : 'negative'}">${ind.avgMonthlyChange.toFixed(2)}%</td></tr>
           <tr><td style="color:var(--text2)">Breadth</td><td style="text-align:right">${ind.breadth.toFixed(0)}%</td></tr>
           <tr><td style="color:var(--text2)">MF Chg</td><td style="text-align:right;color:${mfChgColor2}">${mfSign}${ind.moneyFlowChg.toFixed(1)}%</td></tr>
+          ${rocRow}
         </table>
       </div>
     `;
@@ -230,8 +260,8 @@ let _indBreakdown = { list: [], sortBy: 'rs_score', sortLabel: '', mfLabel: '6M'
 const IND_ASC_COLS = new Set(['name', 'sector', 'avgDist52H', 'topLoser']);
 const indColDir = key => IND_ASC_COLS.has(key) ? 1 : -1;
 
-function indBreakdownCols(mfLabel) {
-  return [
+function indBreakdownCols(mfLabel, isRoc, rocPeriodLabel) {
+  const cols = [
     { key: 'name', label: 'Industry' },
     { key: 'sector', label: 'Sector' },
     { key: 'rsScore', label: 'RS Score' },
@@ -243,10 +273,19 @@ function indBreakdownCols(mfLabel) {
     { key: 'totalTurnover', label: 'Turnover (Cr)' },
     { key: 'moneyFlow', label: `MF ${mfLabel} (Cr)` },
     { key: 'moneyFlowPrev', label: `Prev ${mfLabel} (Cr)` },
-    { key: 'moneyFlowChg', label: 'MF Chg%' },
+    { key: 'moneyFlowChg', label: 'MF Chg%' }
+  ];
+  if (isRoc) {
+    cols.push(
+      { key: 'moneyFlowChgPast', label: `MF Chg% (${rocPeriodLabel} ago)` },
+      { key: 'moneyFlowRoc', label: 'MF Rate of Change' }
+    );
+  }
+  cols.push(
     { key: 'topGainer', label: 'Top 1M Gainer', get: i => i.topGainer ? i.topGainer.monthlyChangePct : null },
     { key: 'topLoser', label: 'Top 1M Loser', get: i => i.topLoser ? i.topLoser.monthlyChangePct : null }
-  ];
+  );
+  return cols;
 }
 
 function indDefaultSort() {
@@ -277,8 +316,8 @@ function resetIndustryBreakdownSort() {
 }
 
 function renderIndustryBreakdownTable() {
-  const { list, sortLabel, mfLabel } = _indBreakdown;
-  const cols = indBreakdownCols(mfLabel);
+  const { list, sortLabel, mfLabel, isRoc, rocPeriodLabel } = _indBreakdown;
+  const cols = indBreakdownCols(mfLabel, isRoc, rocPeriodLabel);
   const eff = indEffectiveSort();
 
   let sorted = list; // already in filter order
@@ -312,6 +351,9 @@ function renderIndustryBreakdownTable() {
     const rsColor = ind.rsScore >= 70 ? 'var(--green)' : ind.rsScore >= 40 ? 'var(--orange)' : 'var(--red)';
     const mfChgColor = ind.moneyFlowChg >= 0 ? 'var(--green)' : 'var(--red)';
     const mfChgSign = ind.moneyFlowChg >= 0 ? '+' : '';
+    const rocCells = isRoc ? `
+      <td style="color:var(--text2)">${ind.moneyFlowChgPast >= 0 ? '+' : ''}${ind.moneyFlowChgPast.toFixed(1)}%</td>
+      <td style="color:${ind.moneyFlowRoc >= 0 ? 'var(--green)' : 'var(--red)'};font-weight:600">${ind.moneyFlowRoc >= 0 ? '+' : ''}${ind.moneyFlowRoc.toFixed(1)}pp</td>` : '';
     return `
     <tr style="cursor:pointer" onclick="openIndustryCharts('${ind.name.replace(/'/g, "\\'")}')">
       <td>${idx + 1}</td>
@@ -340,7 +382,7 @@ function renderIndustryBreakdownTable() {
       <td>${fmtTurnoverCr(ind.totalTurnover)}</td>
       <td>${fmtCr(ind.moneyFlow)}</td>
       <td style="color:var(--text2)">${fmtCr(ind.moneyFlowPrev)}</td>
-      <td style="color:${mfChgColor};font-weight:600">${mfChgSign}${ind.moneyFlowChg.toFixed(1)}%</td>
+      <td style="color:${mfChgColor};font-weight:600">${mfChgSign}${ind.moneyFlowChg.toFixed(1)}%</td>${rocCells}
       <td class="positive">${ind.topGainer ? ind.topGainer.symbol + ' (' + fmtPct(ind.topGainer.monthlyChangePct) + ')' : '-'}</td>
       <td class="negative">${ind.topLoser ? ind.topLoser.symbol + ' (' + fmtPct(ind.topLoser.monthlyChangePct) + ')' : '-'}</td>
     </tr>`;
@@ -372,7 +414,10 @@ const METRIC_CONFIG = {
                  tip: 'Number of listed stocks in the industry that pass the current filters.' },
   money_flow:  { key: 'moneyFlowChg',     unit: '%',   dec: 1, maxVal: null,
                  title: 'Industry by Money Flow Change',
-                 tip: 'Percentage change in cumulative turnover vs the prior equivalent period. Positive = more money flowing in than before; negative = declining interest.' }
+                 tip: 'Percentage change in cumulative turnover vs the prior equivalent period. Positive = more money flowing in than before; negative = declining interest.' },
+  money_flow_roc: { key: 'moneyFlowRoc',  unit: 'pp',  dec: 1, maxVal: null,
+                 title: 'Industry by Money Flow Rate of Change',
+                 tip: 'Change in the MF Chg% reading itself, comparing now to the same window one window-length ago (in percentage points). Positive = the flow reading is improving even if still negative; negative = it is fading even if still positive.' }
 };
 
 // ── Horizontal Bar Chart (adapts to selected metric) ──
@@ -380,10 +425,10 @@ function renderMetricChart(data, sortBy, mfPeriod, mfData) {
   const cfg = { ...METRIC_CONFIG[sortBy] || METRIC_CONFIG.rs_score };
 
   // Append period to money_flow title
-  if (sortBy === 'money_flow') {
+  if (sortBy === 'money_flow' || sortBy === 'money_flow_roc') {
     const periodLabel = { '1w': 'Last 1 Week', '1m': 'Last 1 Month', '3m': 'Last 3 Months', '6m': 'Last 6 Months', '1y': 'Last 1 Year' }[mfPeriod] || 'Last 6 Months';
     const daysInfo = mfData ? ' (' + mfData.currentDays + ' vs ' + mfData.prevDays + ' trading days)' : '';
-    cfg.title = 'Money Flow Change — ' + periodLabel + daysInfo;
+    cfg.title = (sortBy === 'money_flow' ? 'Money Flow Change — ' : 'Money Flow Rate of Change — ') + periodLabel + daysInfo;
   }
 
   // Update chart heading and tooltip
@@ -434,7 +479,7 @@ function renderMetricChart(data, sortBy, mfPeriod, mfData) {
     let color;
     if (sortBy === 'rs_score') {
       color = val >= 70 ? '#05df72' : val >= 40 ? '#ffb900' : '#f87171';
-    } else if (sortBy === 'avg_change' || sortBy === 'money_flow') {
+    } else if (sortBy === 'avg_change' || sortBy === 'money_flow' || sortBy === 'money_flow_roc') {
       color = val >= 0 ? '#05df72' : '#f87171';
     } else if (sortBy === 'breadth') {
       color = val >= 50 ? '#05df72' : val >= 30 ? '#ffb900' : '#f87171';
@@ -465,6 +510,11 @@ function renderMetricChart(data, sortBy, mfPeriod, mfData) {
     if (sortBy === 'money_flow') {
       const sign = val >= 0 ? '+' : '';
       dispVal = sign + val.toFixed(1) + '%  (' + fmtCr(ind.moneyFlow) + ' vs ' + fmtCr(ind.moneyFlowPrev) + ')';
+    } else if (sortBy === 'money_flow_roc') {
+      const sign = val >= 0 ? '+' : '';
+      const pastSign = ind.moneyFlowChgPast >= 0 ? '+' : '';
+      const nowSign = ind.moneyFlowChg >= 0 ? '+' : '';
+      dispVal = sign + val.toFixed(1) + 'pp  (' + pastSign + ind.moneyFlowChgPast.toFixed(1) + '% → ' + nowSign + ind.moneyFlowChg.toFixed(1) + '%)';
     } else if (sortBy === 'mcap' || sortBy === 'turnover') {
       dispVal = fmtCr(val);
     } else {
@@ -493,7 +543,7 @@ function renderMetricChart(data, sortBy, mfPeriod, mfData) {
       gridLabel = fmtCr(frac * maxAbs);
     } else {
       gridLabel = (frac * maxAbs).toFixed(cfg.maxVal !== null ? 0 : cfg.dec);
-      if (cfg.unit === '%') gridLabel += '%';
+      if (cfg.unit === '%' || cfg.unit === 'pp') gridLabel += cfg.unit;
     }
     ctx.fillStyle = '#94a3b8';
     ctx.font = '9px sans-serif';
