@@ -7,8 +7,12 @@
 // document/Store/window are stubbed as harmless empty-ish objects: none of the PURE
 // computational functions these tests target (computeDynSMA, checkCoOccurrence, etc.)
 // touch them, and function BODIES aren't executed at load time regardless - only actual
-// top-level statements are, and none of the loaded files have any (verified: no top-level
-// `document.`/`Store.`/`window.`/`*.addEventListener` outside a function body).
+// top-level statements are. js/industry.js is the one file so far that genuinely has
+// some: a top-level IIFE registers real event listeners immediately on load (confirmed
+// live - it crashed with "document.addEventListener is not a function" until the stub
+// below grew that method), so document needs a no-op addEventListener/removeEventListener,
+// not just an empty object. The registered callbacks themselves never fire in these tests
+// (nothing simulates a mousemove/click), so a no-op is all that's needed.
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
@@ -18,7 +22,10 @@ const REPO_ROOT = path.dirname(__dirname);
 function loadScripts(relPaths) {
   const sandbox = {
     console,
-    document: { getElementById: () => null, querySelector: () => null, querySelectorAll: () => [] },
+    document: {
+      getElementById: () => null, querySelector: () => null, querySelectorAll: () => [],
+      addEventListener: () => {}, removeEventListener: () => {},
+    },
     window: {},
     Store: {},
   };
