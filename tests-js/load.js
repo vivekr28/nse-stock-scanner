@@ -13,6 +13,10 @@
 // below grew that method), so document needs a no-op addEventListener/removeEventListener,
 // not just an empty object. The registered callbacks themselves never fire in these tests
 // (nothing simulates a mousemove/click), so a no-op is all that's needed.
+// js/industry-charts.js grew this further: several top-level statements do
+// `document.getElementById('...').addEventListener(...)` directly (wiring up its toggle
+// checkboxes), so getElementById can't return null here - it needs a fake element with at
+// least a no-op addEventListener. Same idea: those listeners never fire in these tests.
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
@@ -20,10 +24,15 @@ const vm = require('vm');
 const REPO_ROOT = path.dirname(__dirname);
 
 function loadScripts(relPaths) {
+  const fakeElement = () => ({
+    addEventListener: () => {}, removeEventListener: () => {},
+    classList: { toggle: () => {}, contains: () => false, add: () => {}, remove: () => {} },
+    style: {},
+  });
   const sandbox = {
     console,
     document: {
-      getElementById: () => null, querySelector: () => null, querySelectorAll: () => [],
+      getElementById: fakeElement, querySelector: () => null, querySelectorAll: () => [],
       addEventListener: () => {}, removeEventListener: () => {},
     },
     window: {},

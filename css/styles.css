@@ -650,6 +650,10 @@ canvas { max-width: 100%; display: block; }
 .ic-mf-toolbar { display: flex; align-items: center; gap: 12px; padding: 0 4px 10px; flex-shrink: 0; }
 .ic-mf-toolbar-label { color: var(--text2); font-size: 13px; }
 .ic-mf-empty { color: var(--text2); font-size: 14px; padding: 24px; }
+/* Money Flow chart + its Rate of Change chart, side by side */
+.ic-mf-charts-row { flex: 1; min-height: 0; display: flex; gap: 14px; }
+.ic-mf-chart-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ic-mf-chart-heading { color: var(--text2); font-size: 12px; margin-bottom: 4px; flex-shrink: 0; }
 .ic-mf-active .ic-header-controls { display: none; }
 .ic-grid {
   display: grid;

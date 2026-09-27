@@ -310,6 +310,10 @@ function runScreener() {
   const f12Period = document.getElementById('scrF12Period').value;
   const f12Val = parseFloat(document.getElementById('scrF12Val').value) || 0;
 
+  const f17On = document.getElementById('scrF17On').checked;
+  const f17Period = document.getElementById('scrF17Period').value;
+  const f17Val = parseFloat(document.getElementById('scrF17Val').value) || 0;
+
   const f13On = document.getElementById('scrF13On').checked;
   const f13Val = parseInt(document.getElementById('scrF13Val').value) || 1;
 
@@ -358,6 +362,31 @@ function runScreener() {
       } else {
         indMFMap[ind] = 0;
       }
+    }
+  }
+
+  // Pre-compute industry money-flow rate-of-change map if needed (F17): the
+  // industry's MF Chg% reading now, minus that same reading one window-length
+  // ago - see computeIndustryMoneyFlow's endOffsetDays and mfPctChange in industry.js.
+  let indMFRocMap = {};
+  if (f17On) {
+    const mfNow = computeIndustryMoneyFlow(f17Period);
+    const mfPast = computeIndustryMoneyFlow(f17Period, MF_PERIOD_DAYS[f17Period] || 126);
+    const indFlowsNow = {}, indFlowsPast = {};
+    for (const key in Store.latestBySymbol) {
+      const s = Store.latestBySymbol[key];
+      const ind = s.industry || 'Undefined-Diversified';
+      if (!indFlowsNow[ind]) indFlowsNow[ind] = { current: 0, prev: 0 };
+      if (!indFlowsPast[ind]) indFlowsPast[ind] = { current: 0, prev: 0 };
+      indFlowsNow[ind].current += (mfNow.current[key] || 0);
+      indFlowsNow[ind].prev += (mfNow.previous[key] || 0);
+      indFlowsPast[ind].current += (mfPast.current[key] || 0);
+      indFlowsPast[ind].prev += (mfPast.previous[key] || 0);
+    }
+    for (const ind in indFlowsNow) {
+      const nowChg = mfPctChange(indFlowsNow[ind].current, indFlowsNow[ind].prev);
+      const pastChg = mfPctChange(indFlowsPast[ind].current, indFlowsPast[ind].prev);
+      indMFRocMap[ind] = nowChg - pastChg;
     }
   }
 
@@ -540,6 +569,19 @@ function runScreener() {
       s._indMF = NaN;
     }
 
+    // F17: Industry Money Flow Rate of Change
+    if (f17On) {
+      const ind = s.industry || 'Undefined-Diversified';
+      const rocPct = indMFRocMap[ind] !== undefined ? indMFRocMap[ind] : 0;
+      s._indMFRoc = rocPct;
+      s._indMFRocPeriod = f17Period;
+      if (rocPct < f17Val) {
+        failReasons.push(`F17: Industry MF RoC ${rocPct.toFixed(1)}pp < ${f17Val}pp (${f17Period})`);
+      }
+    } else {
+      s._indMFRoc = NaN;
+    }
+
     // F13: Min stocks in industry (standalone)
     if (f13On) {
       const ind = s.industry || 'Undefined-Diversified';
@@ -595,7 +637,7 @@ function runScreener() {
   scrSortCol = null;
 
   // Count active filters
-  const activeCount = [f1On, f2On, f3On, f4On, f5On, f6On, f7On, f8On, f9On, f10On, f11On, f12On, f13On, f14On, f15On, f16On].filter(Boolean).length;
+  const activeCount = [f1On, f2On, f3On, f4On, f5On, f6On, f7On, f8On, f9On, f10On, f11On, f12On, f13On, f14On, f15On, f16On, f17On].filter(Boolean).length;
 
   // Stats
   const advancing = passed.filter(s => s.changePct > 0).length;
@@ -630,6 +672,7 @@ function renderScreenerTable() {
   const f12On = document.getElementById('scrF12On').checked;
   const f15On = document.getElementById('scrF15On').checked;
   const f16On = document.getElementById('scrF16On').checked;
+  const f17On = document.getElementById('scrF17On').checked;
 
   const cols = [
     { key: 'symbol', label: 'Symbol', fmt: (v, row) => `<a href="#" class="stock-link" data-isin="${escapeHtml(row.isin)}">${escapeHtml(v)}</a>` },
@@ -689,6 +732,10 @@ function renderScreenerTable() {
   if (f12On) {
     const periodLabel = { '1w': '1W', '1m': '1M', '3m': '3M', '6m': '6M', '1y': '1Y' }[document.getElementById('scrF12Period').value] || '6M';
     cols.push({ key: '_indMF', label: `Ind MF% (${periodLabel})`, fmt: v => isNaN(v) ? '-' : v.toFixed(1) + '%', cls: v => v >= 0 ? 'positive' : 'negative' });
+  }
+  if (f17On) {
+    const rocPeriodLabel = { '3m': '3M', '6m': '6M', '1y': '1Y' }[document.getElementById('scrF17Period').value] || '3M';
+    cols.push({ key: '_indMFRoc', label: `Ind MF RoC (${rocPeriodLabel})`, fmt: v => isNaN(v) ? '-' : (v >= 0 ? '+' : '') + v.toFixed(1) + 'pp', cls: v => v >= 0 ? 'positive' : 'negative' });
   }
   if (f15On) {
     const perfPeriodLabel = { '1d': '1D', '1w': '1W', '1m': '1M', '3m': '3M', '6m': '6M', '1y': '1Y' }[document.getElementById('scrF15Period').value] || '1M';
@@ -786,6 +833,9 @@ function resetScreener() {
   document.getElementById('scrF12On').checked = false;
   document.getElementById('scrF12Period').value = '6m';
   document.getElementById('scrF12Val').value = '0';
+  document.getElementById('scrF17On').checked = false;
+  document.getElementById('scrF17Period').value = '3m';
+  document.getElementById('scrF17Val').value = '0';
   document.getElementById('scrF13On').checked = false;
   document.getElementById('scrF13Val').value = '3';
   document.getElementById('scrF14On').checked = false;
@@ -842,10 +892,10 @@ function exportScreenerCSV() {
   if (screenerResults.length === 0) return;
   const keys = ['symbol','series','sector','industry','close','changePct','vol','turnover',
     'adr','_dynADR','_dynTurnoverSMA_f1','_dynTurnoverSMA_f2','_turnoverToSMA','_f4Hits','_dynCloseSMA','_dynPriceRatio',
-    'high52w','low52w','distFrom52H','distFrom52L','bandPct','marketCap','_indRS','_indMF','_perf','_dateChg','_f10MAs'];
+    'high52w','low52w','distFrom52H','distFrom52L','bandPct','marketCap','_indRS','_indMF','_indMFRoc','_perf','_dateChg','_f10MAs'];
   const labels = ['Symbol','Series','Sector','Industry','Close','Change%','Volume','Turnover',
     'ADR%','DynADR%','F1_SMA_Turnover','F2_SMA_Turnover','Turnover_x_SMA','CoOccur_Hits','SMA_Close','Price_SMA_Ratio',
-    '52W_High','52W_Low','From_52H%','From_52L%','Band','MarketCap_Cr','Industry_RS','Ind_MoneyFlow%','Performance%','DateRange_Chg%','MA_Status'];
+    '52W_High','52W_Low','From_52H%','From_52L%','Band','MarketCap_Cr','Industry_RS','Ind_MoneyFlow%','Ind_MoneyFlow_RoC_pp','Performance%','DateRange_Chg%','MA_Status'];
   let csv = labels.join(',') + '\n';
   screenerResults.forEach(r => {
     csv += keys.map(k => {
@@ -1014,7 +1064,7 @@ function updateApplyBtn() {
 
 function updateFilterBadge() {
   const techIds = ['scrF1On','scrF2On','scrF3On','scrF4On','scrF5On','scrF6On','scrF7On','scrF8On','scrF10On','scrF15On','scrF16On'];
-  const indIds  = ['scrF9On','scrF11On','scrF12On','scrF13On','scrF14On'];
+  const indIds  = ['scrF9On','scrF11On','scrF12On','scrF13On','scrF14On','scrF17On'];
   const countChecked = ids => ids.filter(id => { const el = document.getElementById(id); return el && el.checked; }).length;
 
   const techCount = countChecked(techIds);

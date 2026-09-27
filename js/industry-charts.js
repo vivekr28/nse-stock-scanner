@@ -11,6 +11,7 @@ let icPage = 0;
 let icMode = 'industry'; // 'industry' (tabs + grid + pagination) | 'single' (one stock, no tabs/pagination)
 let icActiveTab = 'stocks'; // 'stocks' | 'industry' | 'moneyflow' — only meaningful in 'industry' mode
 let icMfChartInst = null;   // Industry Money Flow Chart tab: {chart, series, sizeWatcher}
+let icMfRocChartInst = null; // Industry Money Flow Rate of Change chart, shown next to the above: {chart, series, sizeWatcher}
 let icMfPeriod = '1m';      // '1w' | '1m' | '3m' | '6m'
 let icChartInstances = []; // stock-tab chart instances: [{chart, candleSeries, volumeSeries, smaSeries, closes, candleData}]
 let icIndustryChartInst = null; // single big-chart instance (industry index OR single-stock mode)
@@ -210,6 +211,7 @@ function closeIndustryCharts() {
   icDisposeCharts();
   icDisposeIndustryChart();
   icDisposeMoneyFlowChart();
+  icDisposeMfRocChart();
 }
 
 // ── Header control visibility (tabs / grid / pagination / single-stock nav) ──
@@ -267,15 +269,19 @@ function icSwitchTab(tab) {
   if (tab === 'stocks') {
     icDisposeIndustryChart();
     icDisposeMoneyFlowChart();
+    icDisposeMfRocChart();
     icRenderPage();
   } else if (tab === 'industry') {
     icDisposeCharts();
     icDisposeMoneyFlowChart();
+    icDisposeMfRocChart();
     icBuildIndustryChart();
   } else {
     icDisposeCharts();
     icDisposeIndustryChart();
     icBuildMoneyFlowChart();
+    icBuildMfRocChart();
+    icWireMfCrosshairSync();
   }
 }
 
@@ -758,6 +764,21 @@ function icComputeIndustryMoneyFlowSeries(stocks, numDays) {
   return { data, dateByTime };
 }
 
+// Rate-of-change reading of the same money-flow line: at each trading day,
+// today's MF Chg% reading minus that same reading exactly one window-length
+// (numDays) earlier - i.e. the derivative of icComputeIndustryMoneyFlowSeries's
+// line, so a still-negative reading that's climbing shows positive here, and a
+// still-positive reading that's fading shows negative. Mirrors the Industry
+// Analysis tab's Money Flow Rate of Change filter (js/industry.js).
+function icComputeMoneyFlowRocSeries(stocks, numDays) {
+  const { data, dateByTime } = icComputeIndustryMoneyFlowSeries(stocks, numDays);
+  const rocData = [];
+  for (let j = numDays; j < data.length; j++) {
+    rocData.push({ time: data[j].time, value: data[j].value - data[j - numDays].value });
+  }
+  return { data: rocData, dateByTime };
+}
+
 function icBuildMoneyFlowChart() {
   const container = document.getElementById('icMoneyFlowChartContainer');
   if (!container || typeof LightweightCharts === 'undefined') return;
@@ -830,7 +851,7 @@ function icBuildMoneyFlowChart() {
     updateLegend(point && point.value !== undefined ? { time: param.time, value: point.value } : null);
   });
 
-  icMfChartInst = { chart, series, sizeWatcher };
+  icMfChartInst = { chart, series, sizeWatcher, data, updateLegend };
 }
 
 function icDisposeMoneyFlowChart() {
@@ -841,6 +862,118 @@ function icDisposeMoneyFlowChart() {
   icMfChartInst = null;
 }
 
+// ── Industry Money Flow Rate of Change chart (shown alongside the Money Flow chart) ──
+function icBuildMfRocChart() {
+  const container = document.getElementById('icMfRocChartContainer');
+  if (!container || typeof LightweightCharts === 'undefined') return;
+  icDisposeMfRocChart();
+  container.innerHTML = '';
+
+  const numDays = IC_MF_PERIOD_DAYS[icMfPeriod];
+  const { data, dateByTime } = icComputeMoneyFlowRocSeries(icStocks, numDays);
+  if (data.length === 0) {
+    container.innerHTML = `<div class="ic-mf-empty">Not enough history for a ${icMfPeriod.toUpperCase()} rate-of-change line (needs ${numDays * 3} trading days).</div>`;
+    return;
+  }
+
+  const styles = getComputedStyle(document.documentElement);
+  const textColor = (styles.getPropertyValue('--text2') || '#94a3b8').trim();
+  const gridColor = (styles.getPropertyValue('--border') || '#334155').trim();
+
+  const chart = LightweightCharts.createChart(container, {
+    layout: { background: { color: IC_CHART_BG }, textColor },
+    grid: { vertLines: { visible: false }, horzLines: { color: gridColor, style: LightweightCharts.LineStyle.Dotted } },
+    rightPriceScale: { borderColor: gridColor },
+    timeScale: { borderColor: gridColor, rightOffset: 4 },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    autoSize: true,
+  });
+
+  const series = chart.addSeries(LightweightCharts.BaselineSeries, {
+    baseValue: { type: 'price', price: 0 },
+    topLineColor: IC_MF_UP_COLOR,
+    topFillColor1: ewHexToRgba(IC_MF_UP_COLOR, 0.28),
+    topFillColor2: ewHexToRgba(IC_MF_UP_COLOR, 0.02),
+    bottomLineColor: IC_MF_DOWN_COLOR,
+    bottomFillColor1: ewHexToRgba(IC_MF_DOWN_COLOR, 0.02),
+    bottomFillColor2: ewHexToRgba(IC_MF_DOWN_COLOR, 0.28),
+    lineWidth: 2,
+    priceLineVisible: false,
+    priceFormat: { type: 'custom', minMove: 0.01, formatter: v => `${v.toFixed(0)}pp` },
+  });
+  series.setData(data);
+  series.createPriceLine({ price: 0, color: textColor, lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: false, title: '' });
+
+  const showAll = () => chart.timeScale().setVisibleLogicalRange({ from: 0, to: data.length - 1 + 4 });
+  showAll();
+  const sizeWatcher = new ResizeObserver(entries => {
+    if (entries[0].contentRect.width > 0) { showAll(); sizeWatcher.disconnect(); }
+  });
+  sizeWatcher.observe(container);
+
+  container.style.position = container.style.position || 'relative';
+  const legendEl = document.createElement('div');
+  legendEl.className = 'ic-legend';
+  container.appendChild(legendEl);
+
+  const updateLegend = point => {
+    const p = point || data[data.length - 1];
+    const dateStr = dateByTime.get(`${p.time.year}-${p.time.month}-${p.time.day}`) || '';
+    legendEl.innerHTML =
+      `<span>${escapeHtml(icIndustry || '')}</span>` +
+      `<span>${icMfPeriod.toUpperCase()} MF RoC <b class="${p.value > 0 ? 'positive' : 'negative'}">${p.value >= 0 ? '+' : ''}${p.value.toFixed(1)}pp</b></span>` +
+      `<span>${escapeHtml(dateStr)}</span>`;
+  };
+  updateLegend(null);
+  chart.subscribeCrosshairMove(param => {
+    const point = param.time ? param.seriesData.get(series) : null;
+    updateLegend(point && point.value !== undefined ? { time: param.time, value: point.value } : null);
+  });
+
+  icMfRocChartInst = { chart, series, sizeWatcher, data, updateLegend };
+}
+
+function icDisposeMfRocChart() {
+  if (icMfRocChartInst && icMfRocChartInst.chart) {
+    try { icMfRocChartInst.sizeWatcher.disconnect(); } catch (e) {}
+    try { icMfRocChartInst.chart.remove(); } catch (e) {}
+  }
+  icMfRocChartInst = null;
+}
+
+// Links the crosshairs of the Money Flow and Rate of Change charts by date: hovering
+// either one moves both, so a point on one line and its counterpart on the other are
+// always readable side by side. Rebuilt fresh each time both charts are (re)built,
+// since chart.remove() drops any subscriptions from the previous instance.
+// _icMfCrosshairSyncing guards against the two charts re-triggering each other
+// if setCrosshairPosition itself fires a crosshairMove event.
+let _icMfCrosshairSyncing = false;
+function icWireMfCrosshairSync() {
+  const mf = icMfChartInst, roc = icMfRocChartInst;
+  if (!mf || !roc) return;
+
+  const timeKey = t => `${t.year}-${t.month}-${t.day}`;
+  const mfByTime = new Map(mf.data.map(p => [timeKey(p.time), p]));
+  const rocByTime = new Map(roc.data.map(p => [timeKey(p.time), p]));
+
+  const syncTo = (param, target, targetByTime) => {
+    if (_icMfCrosshairSyncing) return;
+    _icMfCrosshairSyncing = true;
+    const p = param.time ? targetByTime.get(timeKey(param.time)) : undefined;
+    if (p) {
+      target.chart.setCrosshairPosition(p.value, p.time, target.series);
+      target.updateLegend(p);
+    } else {
+      target.chart.clearCrosshairPosition();
+      target.updateLegend(null);
+    }
+    _icMfCrosshairSyncing = false;
+  };
+
+  mf.chart.subscribeCrosshairMove(param => syncTo(param, roc, rocByTime));
+  roc.chart.subscribeCrosshairMove(param => syncTo(param, mf, mfByTime));
+}
+
 function icSetMfPeriod(period) {
   if (!IC_MF_PERIOD_DAYS[period]) return;
   icMfPeriod = period;
@@ -848,6 +981,8 @@ function icSetMfPeriod(period) {
     btn.classList.toggle('active', btn.dataset.period === period);
   });
   icBuildMoneyFlowChart();
+  icBuildMfRocChart();
+  icWireMfCrosshairSync();
 }
 
 // ── SMA toggle (updates existing chart instances without rebuilding them) ────
