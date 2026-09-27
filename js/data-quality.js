@@ -2,15 +2,18 @@
 // DATA QUALITY — cross-file matching report
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// All report sections start collapsed (see the `display:none` on each
-// dq-section-body in index.html) - this just toggles one on click.
-function dqToggleSection(id) {
-  const body = document.getElementById(id + 'Body');
-  const arrow = document.getElementById(id + 'Arrow');
-  if (!body) return;
-  const hidden = body.style.display === 'none';
-  body.style.display = hidden ? '' : 'none';
-  if (arrow) arrow.classList.toggle('dq-open', hidden);
+// The 8 report sections are sub-tabs (dq-tabbar in index.html): exactly one
+// dq-section-body is visible at a time, matching the .tab[data-tab] pattern
+// the Market Breadth tab already uses (brdSwitchTab). All 8 are rendered
+// eagerly by renderDataQuality()/dqRenderCorpActions()/etc. regardless of
+// which is visible, so switching is purely a display toggle - no re-render.
+function dqSwitchTab(id) {
+  document.querySelectorAll('#panel-dataquality .dq-section-body').forEach(el => {
+    el.style.display = el.id === id + 'Body' ? '' : 'none';
+  });
+  document.querySelectorAll('#dqTabbar .dq-tab').forEach(el => {
+    el.classList.toggle('active', el.dataset.tab === id);
+  });
 }
 
 function renderDataQuality() {
