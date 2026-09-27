@@ -126,7 +126,7 @@ function renderDataQuality() {
 // actions that cause a real price discontinuity but aren't (or can't correctly be)
 // back-adjusted by a ratio - demergers, NCRPS bonuses, capital reductions, etc. (splits/
 // bonuses ARE adjusted server-side and don't appear here). Events already corrected from
-// TradingView data (reference-data/DemergerAdjustments.csv) are dropped from it server-side.
+// TradingView data (reference-data/TradingViewAdjustments.csv) are dropped from it server-side.
 // SMA/52W/ADR/change% may look distorted for the rest until the affected window rolls
 // past exDate. The server only contacts TradingView when the button below is clicked.
 let _dqTv = { corrections: [], appliedCount: 0, polling: false };
@@ -147,7 +147,7 @@ function dqRenderCorpActions() {
   const t6 = document.getElementById('dqCorpActionTable');
   t6.querySelector('thead tr').innerHTML = '<th>#</th><th>Symbol</th><th>Ex-Date</th><th>Event</th><th>Close</th><th>TradingView check</th>';
   t6.querySelector('tbody').innerHTML = corpActions.length === 0
-    ? '<tr><td colspan="6" style="text-align:center;color:var(--text2)">None in the last ~370 days.</td></tr>'
+    ? '<tr><td colspan="6" style="text-align:center;color:var(--text2)">None in the retained price history.</td></tr>'
     : corpActions.map((c, i) =>
       `<tr><td>${i+1}</td><td>${escapeHtml(c.symbol)}</td><td>${c.exDate}</td>
        <td style="color:var(--orange)">${escapeHtml(c.subject)}</td>
@@ -165,7 +165,7 @@ function dqSetTvStatus(text, kind) {
 // Idle summary shown next to the button: how many corrections are currently applied.
 function dqTvIdleText() {
   return _dqTv.appliedCount > 0
-    ? `${_dqTv.appliedCount} correction${_dqTv.appliedCount === 1 ? '' : 's'} applied from TradingView (reference-data/DemergerAdjustments.csv)`
+    ? `${_dqTv.appliedCount} correction${_dqTv.appliedCount === 1 ? '' : 's'} applied from TradingView (reference-data/TradingViewAdjustments.csv)`
     : '';
 }
 
@@ -350,7 +350,7 @@ function dqRenderAdjusted() {
     : rows.map(({ a, v, st }, i) =>
       `<tr${st === 'major' ? ' style="background:rgba(248,113,113,.08)"' : ''}>
        <td>${i+1}</td><td>${escapeHtml(a.symbol)}</td><td>${a.exDate}</td>
-       <td>${{ demerger: 'Demerger (TradingView)', rights: 'Rights issue (NSE)' }[a.kind] || 'Split / bonus (NSE)'}</td>
+       <td>${{ 'tv-correction': 'Corrected from TradingView', rights: 'Rights issue (NSE)' }[a.kind] || 'Split / bonus (NSE)'}</td>
        <td style="color:var(--text2)">${escapeHtml(a.detail)}</td>
        <td>×${a.factor}</td>
        <td>${dqVerifyCell(v, st === 'pending' && hadResult(a.isin))}</td></tr>`).join('');

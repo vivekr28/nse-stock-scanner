@@ -6,7 +6,7 @@ re-downloadable), these can't be recovered from NSE later, so the repo is their 
 | File | What it is | Written by |
 |---|---|---|
 | `CorporateActions.csv` | NSE's splits / bonuses / demergers / rights issues (`ISIN, SYMBOL, EXDATE, SUBJECT, FACEVAL, FV_ASOF`; the last two are the face value NSE reported and the date it was read - a rights issue's subscription price needs the face value in force at its ex-date, which the server derives from them). NSE only serves a rolling window, so this file is a permanent **archive**: each download replaces the rows inside NSE's window with its fresh copy and keeps everything older, so events that age out are never lost. Run `Download-NSE-Bhavcopy.ps1 -CorpActionsFrom "01-Jan-2010"` once to archive everything NSE still serves. The server ignores events older than its price history, so the archive can grow safely. | `Download-NSE-Bhavcopy.ps1` (Refresh Data / `Start-Dashboard.ps1`); rows are written sorted by ex-date, symbol, subject so an unchanged feed leaves the file untouched |
-| `DemergerAdjustments.csv` | Price-correction factors for demergers, derived from TradingView (`ISIN, SYMBOL, EXDATE, FACTOR, STATUS, CHECKED_AT, NOTE`). Only rows with `STATUS = adjusted` change prices. Can only be re-derived for events in the last ~370 days, and needs TradingView. Delete a row to undo that correction. | The Data Quality tab's "Adjust prices from TradingView" button |
+| `TradingViewAdjustments.csv` | Price-correction factors derived from TradingView, for corporate actions NSE gives no ratio for (demergers, "Scheme Of Arrangement" restructurings, etc.) (`ISIN, SYMBOL, EXDATE, FACTOR, STATUS, CHECKED_AT, NOTE`). Only rows with `STATUS = adjusted` change prices. Can only be re-derived for events inside the ~510-day price history the dashboard keeps, and needs TradingView. Delete a row to undo that correction. | The Data Quality tab's "Adjust prices from TradingView" button |
 
 Presets live next to this in `scanner-presets/presets.json` (also tracked).
 
@@ -15,5 +15,5 @@ or save a preset, so `git status` will show them modified. Commit them when it s
 `git add reference-data scanner-presets && git commit -m "Update reference data"`.
 
 The server reads and writes these paths itself; on startup it also moves any copy left at an old location
-(`NSE_DATA/CorporateActions.csv`, `NSE_DATA/DemergerAdjustments.csv`, `./presets.json`) into place without
+(`NSE_DATA/CorporateActions.csv`, `NSE_DATA/DemergerAdjustments.csv`, `reference-data/DemergerAdjustments.csv`, `./presets.json`) into place without
 losing anything.
