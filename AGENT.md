@@ -805,6 +805,26 @@ If `S >= P` (offer at or above the market: no dilution) nothing is adjusted - Tr
 
 ---
 
+## Planned: Historical Filter Pass/Fail Overlay on Stock Charts (Sizing Done, Not Started)
+
+**Goal:** In the Stock Scanner tab, when opening a stock's chart (both from the "Passed" and "Failed" results), visually mark on the chart which historical days the stock *would have* satisfied the currently-active filter set vs. which days it wouldn't have — a backtesting/"how do these filters actually behave over time" view, not just today's pass/fail.
+
+**The core challenge:** every filter in `js/screener.js` only ever evaluates "as of the latest day." To mark pass/fail per historical day, each filter needs to be re-run as if *that day* were "today," using only data up to that point. The 17 filters split into three tiers of difficulty:
+
+- **Cheap (single-day, no window):** F3 (turnover value), F11 (sector), F16 (date-range %).
+- **Moderate (per-stock rolling window):** F1, F2, F4, F5, F6, F8, F10, F15 — need a rolling SMA/ADR/52W-high/co-occurrence recomputed at every historical day, but only for the one stock being charted (O(days × window), fine performance-wise).
+- **Expensive (industry/market-wide):** F9 (Industry RS - ranks *all industries* against each other), F12 (Industry Money Flow), F13/F14 (industry size/mcap), F17 (Industry Money Flow Rate of Change). Doing these for one historical day means replaying the whole market as of that day; doing it for every day in a stock's history means replaying the whole market hundreds of times over. Needs a precomputed/cached daily industry-aggregate table, not a per-chart-open computation, or opening a chart gets noticeably slow.
+
+Also: F7 (circuit exclusion) needs historical band data per day, which today only exists for the latest day (see the price-band staleness fix above) - extending that is its own small piece of work.
+
+**Effort estimate (given to the user 2026-09-28, not yet approved to start):**
+- **Medium (~1-2 days):** cover the 10 single-stock filters (everything except F9/F12/F13/F14/F17). Overlay pass/fail as colored markers on the chart, reusing the existing MF-Dots marker-plugin pattern (`icComputeMFDotMarkers`/`markersPlugin`, `js/industry-charts.js`) rather than inventing new chart primitives. Industry-based filters get skipped/noted as "not shown historically."
+- **Large (~3-5+ days):** also cover the industry-aggregate filters - requires a genuine caching layer that precomputes industry RS/money-flow for every trading day once, not per chart open.
+
+**Recommended scope to start with:** Medium - covers the filters people actually toggle most (turnover/ADR/SMA/performance-based); the industry ones can follow later once there's a cache layer worth building for other things too.
+
+---
+
 ## Completed: Equal-Weight Nifty MidSmallcap 400 Chart
 
 **Goal:** Show an equal-weight index chart for Nifty MidSmallcap 400, giving a better read on market breadth than the cap-weighted official index.
