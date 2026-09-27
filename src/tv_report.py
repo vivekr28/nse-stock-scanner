@@ -74,7 +74,7 @@ def corp_action_hints(isin, rec, corp_index):
     event for' difference: rows for the same stock (by ISIN or symbol) dated within 5 days of the date TradingView's
     level shifts. `corp_index` is {ISIN or SYMBOL: [(ex_date, 'DD-Mon-YYYY', subject)]}. A hit means the action IS in
     the feed but is not price-adjusted (a demerger or other non-ratio action, or one older than the Data Quality
-    list's window); no hit means the feed doesn't carry it at all (e.g. a rights issue, which the downloader filters out)."""
+    list's window); no hit means the feed doesn't carry it at all (the downloader filters out every kind of action it doesn't adjust)."""
     if not corp_index:
         return []
     rows = list(corp_index.get(isin) or []) + list(corp_index.get((rec.get('symbol') or '').upper()) or [])
@@ -328,13 +328,13 @@ def build_report(payload, prev=None, corp_index=None):
 
     # ── how to read ────────────────────────────────────────────────────────────
     md += ['## Reading this report', '',
-           '- **TradingView adjusts for an action the dashboard has no event for** - usually a rights issue or another action '
-           'the downloader filters out of `CorporateActions.csv` (it keeps only bonus, split, sub-division, consolidation and '
-           'demerger rows). When the detail says "In the NSE corporate-actions feed", the action IS in `CorporateActions.csv` but '
+           '- **TradingView adjusts for an action the dashboard has no event for** - usually an action the downloader filters '
+           'out of `CorporateActions.csv` (it keeps only bonus, split, sub-division, consolidation, demerger and rights rows). When the detail says "In the NSE corporate-actions feed", the action IS in `CorporateActions.csv` but '
            'is not price-adjusted - typically a demerger or other non-ratio action that the Data Quality "Not Price-Adjusted" '
            'list no longer shows (it only looks back about 370 days) and so was never corrected from TradingView. Without that '
-           'line the feed does not carry the action at all (e.g. a rights issue): it needs handling, or a TradingView-derived '
-           'correction like the demerger ones.',
+           'line the feed does not carry the action at all: it needs handling, or a TradingView-derived '
+           'correction like the demerger ones. (Rights issues are price-adjusted from their NSE terms, so one that still '
+           'shows here means its terms did not parse - see the Data Quality "Not Price-Adjusted" list.)',
            "- **Our adjustment differs from TradingView's** - both sides adjusted but by a different factor: check the ratio in "
            '`CorporateActions.csv` / `DemergerAdjustments.csv` against TradingView.',
            '- **TradingView shows no adjustment for an event the dashboard applied** - either TradingView is not adjusted for '
