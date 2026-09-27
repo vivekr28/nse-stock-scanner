@@ -41,11 +41,13 @@ MIDSMALL400_FILE = 'MidSmallcap400_Constituents.csv'
 # every download - plus our own TradingView-derived corrections.
 REFERENCE_SUBDIR = 'reference-data'
 CORPACTIONS_FILE = 'CorporateActions.csv'
-CORRECTIONS_FILE = 'DemergerAdjustments.csv'  # TradingView-derived price corrections (see tv_adjust.py)
+CORRECTIONS_FILE = 'TradingViewAdjustments.csv'  # TradingView-derived price corrections for corp actions NSE gives no ratio for (see tv_adjust.py) - not only demergers, e.g. "Scheme Of Arrangement - Bonus Ncrps" too
+MAX_DAILY_DAYS = 510  # trading days of history retained per stock (charts, indicators, corp-action relevance) - see process_data()
 # Where these files used to live: (old, new) paths relative to the project root. See migrate_legacy_file().
 LEGACY_LOCATIONS = [
     (os.path.join(DATA_SUBDIR, CORPACTIONS_FILE), os.path.join(REFERENCE_SUBDIR, CORPACTIONS_FILE)),
-    (os.path.join(DATA_SUBDIR, CORRECTIONS_FILE), os.path.join(REFERENCE_SUBDIR, CORRECTIONS_FILE)),
+    (os.path.join(DATA_SUBDIR, 'DemergerAdjustments.csv'), os.path.join(REFERENCE_SUBDIR, CORRECTIONS_FILE)),
+    (os.path.join(REFERENCE_SUBDIR, 'DemergerAdjustments.csv'), os.path.join(REFERENCE_SUBDIR, CORRECTIONS_FILE)),  # renamed: it corrects more than just demergers
     ('presets.json', PRESETS_FILE),
 ]
 VERIFY_FILE = 'TradingViewVerification.json'  # last "Verify against TradingView" result (see run_tv_verify)
@@ -620,11 +622,11 @@ def add_rights_events(events_by_isin, rights, daily_by_symbol, symbol_to_isin, r
     return applied
 
 
-# ─── TradingView-derived demerger corrections ───────────────────────────────
-# Demergers (and similar) have no ratio in NSE's feed, so they land in the Data
+# ─── TradingView-derived corrections ─────────────────────────────────────────
+# Demergers, and other corporate actions NSE gives no ratio for, land in the Data
 # Quality tab's "Not Price-Adjusted" list. The "Adjust prices from TradingView" button
 # (see run_tv_adjust) compares TradingView's already-adjusted history with ours and
-# stores one factor per event in reference-data/DemergerAdjustments.csv. Every processing run
+# stores one factor per event in reference-data/TradingViewAdjustments.csv. Every processing run
 # - including server start - then applies the stored factors through the SAME machinery
 # as splits/bonuses, with no TradingView access at all. Deleting a row from the CSV
 # undoes that correction on the next (re)process.
@@ -640,8 +642,8 @@ def correction_key(symbol, ex_date_str):
     return (normalize_symbol(symbol), ex_dt.date() if ex_dt else None)
 
 
-def load_demerger_corrections(base_dir):
-    """All rows of DemergerAdjustments.csv as dicts (missing file -> [])."""
+def load_tv_corrections(base_dir):
+    """All rows of TradingViewAdjustments.csv as dicts (missing file -> [])."""
     rows = []
     for r in read_csv_file(os.path.join(base_dir, REFERENCE_SUBDIR, CORRECTIONS_FILE)):
         symbol, ex_date = r.get('SYMBOL', ''), r.get('EXDATE', '')
@@ -659,7 +661,7 @@ def load_demerger_corrections(base_dir):
     return rows
 
 
-def save_demerger_corrections(base_dir, rows):
+def save_tv_corrections(base_dir, rows):
     """Write the corrections CSV atomically (newest ex-date first)."""
     path = os.path.join(base_dir, REFERENCE_SUBDIR, CORRECTIONS_FILE)
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -675,7 +677,7 @@ def save_demerger_corrections(base_dir, rows):
     os.replace(tmp, path)
 
 
-def add_demerger_corrections(events_by_isin, corrections, latest_date_str):
+def add_tv_corrections(events_by_isin, corrections, latest_date_str):
     """Fold every 'adjusted' correction into `events_by_isin` (same shape
     load_split_bonus_events returns) so bridge_split_induced_isin_changes and
     apply_split_adjustments treat it exactly like a split. A factor F means
@@ -694,14 +696,14 @@ def add_demerger_corrections(events_by_isin, corrections, latest_date_str):
         events_by_isin[c['isin']].sort(key=lambda e: e[0])
         applied.add(correction_key(c['symbol'], c['exDate']))
     if applied:
-        print(f"    Applying {len(applied)} TradingView demerger correction(s) from {CORRECTIONS_FILE}")
+        print(f"    Applying {len(applied)} TradingView-derived correction(s) from {CORRECTIONS_FILE}")
     return applied
 
 
 def build_adjusted_corp_actions(recognized, corrections, corrected_keys, latest_by_symbol,
                                 daily_by_symbol, symbol_to_isin, max_days):
     """The Data Quality "Price Adjustments Applied" list: every split/bonus/rights event and every
-    TradingView demerger correction that actually changed prices the dashboard keeps
+    TradingView-derived correction (demergers and similar) that actually changed prices the dashboard keeps
     (stock still trading, ex-date inside its retained window - an older event has no
     visible price effect). `factor` is what pre-ex-date prices were multiplied by
     (1/ratio for splits/bonuses). Sorted newest ex-date first."""
@@ -726,7 +728,7 @@ def build_adjusted_corp_actions(recognized, corrections, corrected_keys, latest_
         add(ev['isin'], ev['symbol'], ev['exDate'], ev.get('kind', 'split-bonus'), ev.get('detail', ev['subject']), 1.0 / ev['ratio'])
     for c in corrections:
         if correction_key(c['symbol'], c['exDate']) in corrected_keys:
-            add(c['isin'], c['symbol'], c['exDate'], 'demerger', 'Demerger (factor derived from TradingView)', c['factor'])
+            add(c['isin'], c['symbol'], c['exDate'], 'tv-correction', c.get('note') or 'Corrected from TradingView', c['factor'])
     out.sort(key=lambda e: parse_date_str(e['exDate']) or datetime.min, reverse=True)
     return out
 
@@ -842,8 +844,8 @@ def process_data(base_dir, progress_cb=None):
     rights_issues = []
     corp_events, unhandled_corp_events = load_split_bonus_events(
         base_dir, latest_date, recognized_corp_events, dates[0] if dates else None, rights_issues)
-    demerger_corrections = load_demerger_corrections(base_dir)
-    corrected_keys = add_demerger_corrections(corp_events, demerger_corrections, latest_date)
+    tv_corrections = load_tv_corrections(base_dir)
+    corrected_keys = add_tv_corrections(corp_events, tv_corrections, latest_date)
     corp_events = bridge_split_induced_isin_changes(
         daily_by_symbol, symbol_to_isin, corp_events, extra_symbols=[r['symbol'] for r in rights_issues])
     add_rights_events(corp_events, rights_issues, daily_by_symbol, symbol_to_isin,
@@ -943,15 +945,25 @@ def process_data(base_dir, progress_cb=None):
     # report - the corp-actions feed's own isin can be stale (confirmed live:
     # INDIAGLYCO's demerger row carries its ISIN from before an unrelated 2025
     # split, not the one currently in daily_by_symbol), so resolve by symbol
-    # instead of trusting the row's isin directly. Only the last ~370 days are
-    # kept - that's the outer edge of the 52-week window these events can
-    # still be distorting; older ones have already fully rolled off.
+    # instead of trusting the row's isin directly.
+    #
+    # Kept: every event whose exDate falls inside the ~510-trading-day window the
+    # dashboard actually retains (same bound build_adjusted_corp_actions uses) - an
+    # event older than that has no stored price left to distort, so there is nothing
+    # left to correct. Previously this used a tighter ~370-day cutoff (the 52-week
+    # window these events can still distort in the *visible* indicators), which meant
+    # an unadjusted event 370-700 days old was never surfaced here and the "Adjust
+    # prices from TradingView" button could never reach it - confirmed live: 13 real
+    # demergers (RAYMOND, ITC, SIEMENS, ...) sat silently wrong for their whole
+    # pre-ex-date history until the 27-Sep-2026 full TradingView verification caught
+    # them. Widened to match what the button can actually still fix.
+    retained_start_dt = parse_date_str(dates[-MAX_DAILY_DAYS]) if len(dates) >= MAX_DAILY_DAYS else (
+        parse_date_str(dates[0]) if dates else None)
     unadjusted_corp_actions = []
     if unhandled_corp_events:
-        latest_dt_for_filter = parse_date_str(latest_date) if latest_date else None
         for ev in unhandled_corp_events:
             ex_dt = parse_date_str(ev['exDate'])
-            if not ex_dt or (latest_dt_for_filter and (latest_dt_for_filter - ex_dt).days > 370):
+            if not ex_dt or (retained_start_dt and ex_dt <= retained_start_dt):
                 continue
             if correction_key(ev['symbol'], ev['exDate']) in corrected_keys:
                 continue  # already price-corrected from TradingView data - nothing left to report
@@ -1028,7 +1040,6 @@ def process_data(base_dir, progress_cb=None):
     # setting). 3m/6m periods already fit within the old cap and were unaffected.
     # Columns: date, open, high, low, close, vol, turnover, prev, delivQty, delivPer, trades
     DAILY_COLS = ['date', 'open', 'high', 'low', 'close', 'vol', 'turnover', 'prev', 'delivQty', 'delivPer', 'trades']
-    MAX_DAILY_DAYS = 510
     compact_daily = {}
     for isin, days in daily_by_symbol.items():
         if isin not in latest_by_symbol:
@@ -1040,7 +1051,7 @@ def process_data(base_dir, progress_cb=None):
         ]
 
     adjusted_corp_actions = build_adjusted_corp_actions(
-        recognized_corp_events, demerger_corrections, corrected_keys,
+        recognized_corp_events, tv_corrections, corrected_keys,
         latest_by_symbol, daily_by_symbol, symbol_to_isin, MAX_DAILY_DAYS)
 
     report(f"  Computing equal-weight MidSmallcap 400 index...")
@@ -1222,7 +1233,7 @@ def run_tv_adjust(base_dir, port):
     """Background worker behind POST /api/tv-adjust/start. For every event currently in the
     Data Quality "Not Price-Adjusted" list: read TradingView's daily bars, derive the
     correction factor (tv_adjust.derive_correction), record the outcome in
-    DemergerAdjustments.csv, and - if any price was newly corrected - reprocess so the
+    TradingViewAdjustments.csv, and - if any price was newly corrected - reprocess so the
     corrected prices (and the shrunken list) are live. TradingView is only ever touched
     here, never at server start; the user's chart symbol/resolution are restored after."""
     st = _tv_state
@@ -1255,7 +1266,7 @@ def run_tv_adjust(base_dir, port):
             st['status'] = 'done'
             return
 
-        rows = {correction_key(r['symbol'], r['exDate']): r for r in load_demerger_corrections(base_dir)}
+        rows = {correction_key(r['symbol'], r['exDate']): r for r in load_tv_corrections(base_dir)}
         checked_at = datetime.now().strftime('%Y-%m-%d %H:%M')
         newly_adjusted = 0
         stopped_early = None
@@ -1291,7 +1302,7 @@ def run_tv_adjust(base_dir, port):
 
         if st['results']:
             was_current = not needs_processing(base_dir)
-            save_demerger_corrections(base_dir, list(rows.values()))
+            save_tv_corrections(base_dir, list(rows.values()))
             if was_current and not newly_adjusted:
                 # Only "checked" notes/timestamps changed - no price is affected, so the
                 # processed data is still current. Touch it so the next server start
@@ -1372,7 +1383,7 @@ def _verify_stock(chart, symbol, ours, events):
 
 def run_tv_verify(base_dir, port, verify_all=False):
     """Background worker behind POST /api/tv-verify/start. For the stocks in the Data Quality
-    "Price Adjustments Applied" list (splits, bonuses, rights and TradingView demerger corrections),
+    "Price Adjustments Applied" list (splits, bonuses, rights and TradingView-derived corrections),
     compare our adjusted daily closes with TradingView's over their whole shared history
     (tv_adjust.compare_series) and grade each stock match / minor / major / inconclusive.
 
@@ -2177,7 +2188,7 @@ class NSEHandler(http.server.SimpleHTTPRequestHandler):
     def _serve_tv_adjust_status(self):
         """Run state plus every stored correction row (so the Data Quality table can show
         why an event is still listed) and the count of corrections currently applied."""
-        rows = load_demerger_corrections(self.server.base_dir)
+        rows = load_tv_corrections(self.server.base_dir)
         self._send_json({
             **_tv_state,
             'corrections': rows,

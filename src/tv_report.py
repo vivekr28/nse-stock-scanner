@@ -331,12 +331,12 @@ def build_report(payload, prev=None, corp_index=None):
            '- **TradingView adjusts for an action the dashboard has no event for** - usually an action the downloader filters '
            'out of `CorporateActions.csv` (it keeps only bonus, split, sub-division, consolidation, demerger and rights rows). When the detail says "In the NSE corporate-actions feed", the action IS in `CorporateActions.csv` but '
            'is not price-adjusted - typically a demerger or other non-ratio action that the Data Quality "Not Price-Adjusted" '
-           'list no longer shows (it only looks back about 370 days) and so was never corrected from TradingView. Without that '
+           'list no longer shows (it only looks back over the retained price history) and so was never corrected from TradingView. Without that '
            'line the feed does not carry the action at all: it needs handling, or a TradingView-derived '
            'correction like the demerger ones. (Rights issues are price-adjusted from their NSE terms, so one that still '
            'shows here means its terms did not parse - see the Data Quality "Not Price-Adjusted" list.)',
            "- **Our adjustment differs from TradingView's** - both sides adjusted but by a different factor: check the ratio in "
-           '`CorporateActions.csv` / `DemergerAdjustments.csv` against TradingView.',
+           '`CorporateActions.csv` / `TradingViewAdjustments.csv` against TradingView.',
            '- **TradingView shows no adjustment for an event the dashboard applied** - either TradingView is not adjusted for '
            'that action (it happens) or our event is wrong. Compare the raw NSE close before/after the ex-date.',
            '- **No level shift found** - isolated bars differ: a bad or missing bar in the downloaded data, or a TradingView '
