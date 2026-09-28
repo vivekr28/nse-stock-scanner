@@ -13,6 +13,7 @@ let icActiveTab = 'stocks'; // 'stocks' | 'industry' | 'moneyflow' — only mean
 let icMfChartInst = null;   // Industry Money Flow Chart tab: {chart, series, sizeWatcher}
 let icMfRocChartInst = null; // Industry Money Flow Rate of Change chart, shown next to the above: {chart, series, sizeWatcher}
 let icMfPeriod = '1m';      // '1w' | '1m' | '3m' | '6m'
+let icMfRocLag = '1m';      // ROC timeframe, '1w' | '1m' | '3m' | '6m' - never longer than icMfPeriod
 let icChartInstances = []; // stock-tab chart instances: [{chart, candleSeries, volumeSeries, smaSeries, closes, candleData}]
 let icIndustryChartInst = null; // single big-chart instance (industry index OR single-stock mode)
 let icSingleList = [];   // the Stock Scanner results the single-stock view was opened from
@@ -766,15 +767,16 @@ function icComputeIndustryMoneyFlowSeries(stocks, numDays) {
 
 // Rate-of-change reading of the same money-flow line: at each trading day,
 // today's MF Chg% reading minus that same reading exactly one window-length
-// (numDays) earlier - i.e. the derivative of icComputeIndustryMoneyFlowSeries's
-// line, so a still-negative reading that's climbing shows positive here, and a
-// still-positive reading that's fading shows negative. Mirrors the Industry
-// Analysis tab's Money Flow Rate of Change filter (js/industry.js).
-function icComputeMoneyFlowRocSeries(stocks, numDays) {
+// (lagDays, defaulting to numDays = one full window) earlier - i.e. the derivative
+// of icComputeIndustryMoneyFlowSeries's line, so a still-negative reading that's
+// climbing shows positive here, and a still-positive reading that's fading shows
+// negative. lagDays can be any shorter timeframe than the window. Mirrors the
+// Industry Analysis tab's Money Flow Rate of Change filter (js/industry.js).
+function icComputeMoneyFlowRocSeries(stocks, numDays, lagDays = numDays) {
   const { data, dateByTime } = icComputeIndustryMoneyFlowSeries(stocks, numDays);
   const rocData = [];
-  for (let j = numDays; j < data.length; j++) {
-    rocData.push({ time: data[j].time, value: data[j].value - data[j - numDays].value });
+  for (let j = lagDays; j < data.length; j++) {
+    rocData.push({ time: data[j].time, value: data[j].value - data[j - lagDays].value });
   }
   return { data: rocData, dateByTime };
 }
@@ -870,9 +872,10 @@ function icBuildMfRocChart() {
   container.innerHTML = '';
 
   const numDays = IC_MF_PERIOD_DAYS[icMfPeriod];
-  const { data, dateByTime } = icComputeMoneyFlowRocSeries(icStocks, numDays);
+  const lagDays = IC_MF_PERIOD_DAYS[icMfRocLag];
+  const { data, dateByTime } = icComputeMoneyFlowRocSeries(icStocks, numDays, lagDays);
   if (data.length === 0) {
-    container.innerHTML = `<div class="ic-mf-empty">Not enough history for a ${icMfPeriod.toUpperCase()} rate-of-change line (needs ${numDays * 3} trading days).</div>`;
+    container.innerHTML = `<div class="ic-mf-empty">Not enough history for a ${icMfPeriod.toUpperCase()} rate-of-change line vs ${icMfRocLag.toUpperCase()} ago (needs ${numDays * 2 + lagDays} trading days).</div>`;
     return;
   }
 
@@ -921,7 +924,7 @@ function icBuildMfRocChart() {
     const dateStr = dateByTime.get(`${p.time.year}-${p.time.month}-${p.time.day}`) || '';
     legendEl.innerHTML =
       `<span>${escapeHtml(icIndustry || '')}</span>` +
-      `<span>${icMfPeriod.toUpperCase()} MF RoC <b class="${p.value > 0 ? 'positive' : 'negative'}">${p.value >= 0 ? '+' : ''}${p.value.toFixed(1)}pp</b></span>` +
+      `<span>${icMfPeriod.toUpperCase()} MF RoC vs ${icMfRocLag.toUpperCase()} ago <b class="${p.value > 0 ? 'positive' : 'negative'}">${p.value >= 0 ? '+' : ''}${p.value.toFixed(1)}pp</b></span>` +
       `<span>${escapeHtml(dateStr)}</span>`;
   };
   updateLegend(null);
@@ -974,13 +977,33 @@ function icWireMfCrosshairSync() {
   roc.chart.subscribeCrosshairMove(param => syncTo(param, mf, mfByTime));
 }
 
+// Highlights the active ROC timeframe button and disables the ones longer than the
+// Money Flow window (a lag can be the window itself or any shorter timeframe).
+function icSyncMfRocLagButtons() {
+  if (IC_MF_PERIOD_DAYS[icMfRocLag] > IC_MF_PERIOD_DAYS[icMfPeriod]) icMfRocLag = icMfPeriod;
+  document.querySelectorAll('#icMfRocLagToggle .ic-layout-btn').forEach(btn => {
+    const lag = btn.dataset.lag;
+    btn.disabled = IC_MF_PERIOD_DAYS[lag] > IC_MF_PERIOD_DAYS[icMfPeriod];
+    btn.classList.toggle('active', lag === icMfRocLag);
+  });
+}
+
 function icSetMfPeriod(period) {
   if (!IC_MF_PERIOD_DAYS[period]) return;
   icMfPeriod = period;
   document.querySelectorAll('#icMfPeriodToggle .ic-layout-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.period === period);
   });
+  icSyncMfRocLagButtons();
   icBuildMoneyFlowChart();
+  icBuildMfRocChart();
+  icWireMfCrosshairSync();
+}
+
+function icSetMfRocLag(lag) {
+  if (!IC_MF_PERIOD_DAYS[lag] || IC_MF_PERIOD_DAYS[lag] > IC_MF_PERIOD_DAYS[icMfPeriod]) return;
+  icMfRocLag = lag;
+  icSyncMfRocLagButtons();
   icBuildMfRocChart();
   icWireMfCrosshairSync();
 }

@@ -4,6 +4,37 @@
 
 const MF_PERIOD_DAYS = { '1w': 5, '1m': 21, '3m': 63, '6m': 126, '1y': 250 };
 
+// ── Money Flow Rate of Change: ROC timeframe (lag) ──
+// The ROC compares the MF Chg% reading now against the same reading `lag` ago. The lag
+// can be any timeframe equal to or shorter than the Money Flow window (window itself =
+// the original behaviour), so a 6M window can be read against 1W, 1M, 3M or 6M ago.
+const MF_ROC_LAGS = ['1w', '1m', '3m', '6m', '1y'];
+
+// Lag keys valid for a window, shortest first.
+function mfRocValidLags(period) {
+  const n = MF_PERIOD_DAYS[period] || 126;
+  return MF_ROC_LAGS.filter(k => MF_PERIOD_DAYS[k] <= n);
+}
+
+// The lag to use: the requested one if it fits the window, else the window's own length.
+function mfRocResolveLag(period, lag) {
+  return mfRocValidLags(period).includes(lag) ? lag : (MF_PERIOD_DAYS[period] ? period : '6m');
+}
+
+// Disables lag <option>s longer than the selected window and snaps an invalid selection
+// down to the longest valid one. Options stay in the DOM (rather than being rebuilt) so
+// a preset can set the lag select's value before or after the window's.
+function mfRocSyncLagSelect(periodSelId, lagSelId) {
+  const periodSel = document.getElementById(periodSelId);
+  const lagSel = document.getElementById(lagSelId);
+  if (!periodSel || !lagSel) return;
+  const valid = mfRocValidLags(periodSel.value);
+  for (const opt of lagSel.options) {
+    opt.disabled = opt.hidden = !valid.includes(opt.value);
+  }
+  lagSel.value = mfRocResolveLag(periodSel.value, lagSel.value);
+}
+
 // ── Compute industry money flow for current and previous period ──
 // endOffsetDays > 0 shifts the "current" anchor back that many trading days,
 // so the same window/previous-window comparison can be replayed as of a past
@@ -42,6 +73,32 @@ function computeIndustryMoneyFlow(period, endOffsetDays = 0) {
            currentDays: currentDates.length, prevDays: prevDates.length };
 }
 
+// Money Flow Rate of Change per industry, for the Scanner's F17 filter: the industry's
+// MF Chg% reading over `period` now, minus that same reading as of `lag` ago (`lag` is
+// the window itself or any shorter timeframe, see mfRocResolveLag). Returns
+// { industryName: pp }. Industries are grouped from Store.latestBySymbol, the same way
+// the Industry Analysis tab does it.
+function computeIndustryMoneyFlowRocMap(period, lag) {
+  const mfNow = computeIndustryMoneyFlow(period);
+  const mfPast = computeIndustryMoneyFlow(period, MF_PERIOD_DAYS[mfRocResolveLag(period, lag)]);
+  const flowsNow = {}, flowsPast = {};
+  for (const key in Store.latestBySymbol) {
+    const ind = Store.latestBySymbol[key].industry || 'Undefined-Diversified';
+    if (!flowsNow[ind]) flowsNow[ind] = { current: 0, prev: 0 };
+    if (!flowsPast[ind]) flowsPast[ind] = { current: 0, prev: 0 };
+    flowsNow[ind].current += (mfNow.current[key] || 0);
+    flowsNow[ind].prev += (mfNow.previous[key] || 0);
+    flowsPast[ind].current += (mfPast.current[key] || 0);
+    flowsPast[ind].prev += (mfPast.previous[key] || 0);
+  }
+  const roc = {};
+  for (const ind in flowsNow) {
+    roc[ind] = mfPctChange(flowsNow[ind].current, flowsNow[ind].prev)
+      - mfPctChange(flowsPast[ind].current, flowsPast[ind].prev);
+  }
+  return roc;
+}
+
 // ── Store chart bar regions for hover/click ──
 let _chartBars = [];   // [{x, y, w, h, ind}]
 let _chartData = [];   // full indList reference for popup
@@ -54,6 +111,8 @@ function renderIndustryAnalysis() {
   const isRoc = sortBy === 'money_flow_roc';
   const mfRocPeriod = document.getElementById('mfRocPeriod').value;
   const effectivePeriod = isRoc ? mfRocPeriod : mfPeriod;
+  mfRocSyncLagSelect('mfRocPeriod', 'mfRocLag');
+  const mfRocLag = mfRocResolveLag(mfRocPeriod, document.getElementById('mfRocLag').value);
 
   // Show/hide money flow period dropdown + all-periods toggle
   const mfGroup = document.getElementById('mfPeriodGroup');
@@ -62,6 +121,8 @@ function renderIndustryAnalysis() {
   if (mfAllGroup) mfAllGroup.style.display = sortBy === 'money_flow' ? '' : 'none';
   const mfRocGroup = document.getElementById('mfRocPeriodGroup');
   if (mfRocGroup) mfRocGroup.style.display = isRoc ? '' : 'none';
+  const mfRocLagGroup = document.getElementById('mfRocLagGroup');
+  if (mfRocLagGroup) mfRocLagGroup.style.display = isRoc ? '' : 'none';
 
   // Show/hide + populate the all-periods money flow comparison table
   // (respects the same Min Stocks / Min Market Cap filters as the main table)
@@ -80,10 +141,10 @@ function renderIndustryAnalysis() {
   if (allPeriodsOn) renderMoneyFlowAllPeriodsTable(computeAllPeriodsMoneyFlow(minStocks, minMcap));
 
   // Compute money flow per symbol for current and previous period. In ROC mode,
-  // also replay the same window/previous-window comparison as of one window-length
+  // also replay the same window/previous-window comparison as of the ROC timeframe
   // ago, so we can compare "MF Chg% now" against "MF Chg% back then" per industry.
   const mfData = computeIndustryMoneyFlow(effectivePeriod);
-  const mfPastData = isRoc ? computeIndustryMoneyFlow(effectivePeriod, MF_PERIOD_DAYS[effectivePeriod] || 126) : null;
+  const mfPastData = isRoc ? computeIndustryMoneyFlow(effectivePeriod, MF_PERIOD_DAYS[mfRocLag]) : null;
 
   // Group stocks by industry
   const industries = {};
@@ -125,7 +186,7 @@ function renderIndustryAnalysis() {
     // Money flow % change: (current - previous) / previous * 100
     const moneyFlowChg = mfPctChange(data.moneyFlowCurrent, data.moneyFlowPrev);
 
-    // Rate of change: the same MF Chg% reading, one window-length ago, vs now.
+    // Rate of change: the same MF Chg% reading, one ROC timeframe ago, vs now.
     // Positive = the reading has been climbing (improving) even if still negative;
     // negative = it's been sliding (fading) even if still positive.
     const moneyFlowChgPast = isRoc ? mfPctChange(data.moneyFlowPastCurrent, data.moneyFlowPastPrev) : 0;
@@ -192,12 +253,13 @@ function renderIndustryAnalysis() {
   // ── Horizontal Bar Chart (replaced by the all-periods table when that's shown) ──
   const rsChartSection = document.getElementById('rsChartSection');
   if (rsChartSection) rsChartSection.style.display = allPeriodsOn ? 'none' : '';
-  if (!allPeriodsOn) renderMetricChart(indList.slice(0, 40), sortBy, effectivePeriod, mfData);
+  if (!allPeriodsOn) renderMetricChart(indList.slice(0, 40), sortBy, effectivePeriod, mfData, mfRocLag);
 
   // ── Industry Table (all filtered industries; manual header sort layered on the filter order) ──
   // A manual column sort only lasts until the Sort By metric / MF period changes, so picking a
   // new Sort By always brings the table back in step with the chart.
-  const sortTrack = (sortBy === 'money_flow' || sortBy === 'money_flow_roc') ? sortBy + '|' + effectivePeriod : sortBy;
+  const sortTrack = sortBy === 'money_flow_roc' ? sortBy + '|' + effectivePeriod + '|' + mfRocLag
+    : sortBy === 'money_flow' ? sortBy + '|' + effectivePeriod : sortBy;
   if (sortTrack !== _indSortTrack) {
     _indSortTrack = sortTrack;
     indSortCol = null;
@@ -209,7 +271,7 @@ function renderIndustryAnalysis() {
     sortLabel: document.getElementById('industrySort').selectedOptions[0].textContent,
     mfLabel: periodLabels[effectivePeriod] || '6M',
     isRoc,
-    rocPeriodLabel: periodLabels[mfRocPeriod] || '3M'
+    rocPeriodLabel: periodLabels[mfRocLag] || '3M'
   };
   renderIndustryBreakdownTable();
 
@@ -417,18 +479,19 @@ const METRIC_CONFIG = {
                  tip: 'Percentage change in cumulative turnover vs the prior equivalent period. Positive = more money flowing in than before; negative = declining interest.' },
   money_flow_roc: { key: 'moneyFlowRoc',  unit: 'pp',  dec: 1, maxVal: null,
                  title: 'Industry by Money Flow Rate of Change',
-                 tip: 'Change in the MF Chg% reading itself, comparing now to the same window one window-length ago (in percentage points). Positive = the flow reading is improving even if still negative; negative = it is fading even if still positive.' }
+                 tip: 'Change in the MF Chg% reading itself, comparing now to the same reading one ROC timeframe ago (in percentage points; the timeframe can be the window itself or any shorter one). Positive = the flow reading is improving even if still negative; negative = it is fading even if still positive.' }
 };
 
 // ── Horizontal Bar Chart (adapts to selected metric) ──
-function renderMetricChart(data, sortBy, mfPeriod, mfData) {
+function renderMetricChart(data, sortBy, mfPeriod, mfData, rocLag) {
   const cfg = { ...METRIC_CONFIG[sortBy] || METRIC_CONFIG.rs_score };
 
   // Append period to money_flow title
   if (sortBy === 'money_flow' || sortBy === 'money_flow_roc') {
     const periodLabel = { '1w': 'Last 1 Week', '1m': 'Last 1 Month', '3m': 'Last 3 Months', '6m': 'Last 6 Months', '1y': 'Last 1 Year' }[mfPeriod] || 'Last 6 Months';
     const daysInfo = mfData ? ' (' + mfData.currentDays + ' vs ' + mfData.prevDays + ' trading days)' : '';
-    cfg.title = (sortBy === 'money_flow' ? 'Money Flow Change — ' : 'Money Flow Rate of Change — ') + periodLabel + daysInfo;
+    const lagInfo = sortBy === 'money_flow_roc' && rocLag ? ', vs ' + rocLag.toUpperCase() + ' ago' : '';
+    cfg.title = (sortBy === 'money_flow' ? 'Money Flow Change — ' : 'Money Flow Rate of Change — ') + periodLabel + daysInfo + lagInfo;
   }
 
   // Update chart heading and tooltip

@@ -312,6 +312,7 @@ function runScreener() {
 
   const f17On = document.getElementById('scrF17On').checked;
   const f17Period = document.getElementById('scrF17Period').value;
+  const f17Lag = mfRocResolveLag(f17Period, document.getElementById('scrF17Lag').value);
   const f17Val = parseFloat(document.getElementById('scrF17Val').value) || 0;
 
   const f13On = document.getElementById('scrF13On').checked;
@@ -365,30 +366,9 @@ function runScreener() {
     }
   }
 
-  // Pre-compute industry money-flow rate-of-change map if needed (F17): the
-  // industry's MF Chg% reading now, minus that same reading one window-length
-  // ago - see computeIndustryMoneyFlow's endOffsetDays and mfPctChange in industry.js.
-  let indMFRocMap = {};
-  if (f17On) {
-    const mfNow = computeIndustryMoneyFlow(f17Period);
-    const mfPast = computeIndustryMoneyFlow(f17Period, MF_PERIOD_DAYS[f17Period] || 126);
-    const indFlowsNow = {}, indFlowsPast = {};
-    for (const key in Store.latestBySymbol) {
-      const s = Store.latestBySymbol[key];
-      const ind = s.industry || 'Undefined-Diversified';
-      if (!indFlowsNow[ind]) indFlowsNow[ind] = { current: 0, prev: 0 };
-      if (!indFlowsPast[ind]) indFlowsPast[ind] = { current: 0, prev: 0 };
-      indFlowsNow[ind].current += (mfNow.current[key] || 0);
-      indFlowsNow[ind].prev += (mfNow.previous[key] || 0);
-      indFlowsPast[ind].current += (mfPast.current[key] || 0);
-      indFlowsPast[ind].prev += (mfPast.previous[key] || 0);
-    }
-    for (const ind in indFlowsNow) {
-      const nowChg = mfPctChange(indFlowsNow[ind].current, indFlowsNow[ind].prev);
-      const pastChg = mfPctChange(indFlowsPast[ind].current, indFlowsPast[ind].prev);
-      indMFRocMap[ind] = nowChg - pastChg;
-    }
-  }
+  // Pre-compute industry money-flow rate-of-change map if needed (F17) - see
+  // computeIndustryMoneyFlowRocMap in industry.js.
+  const indMFRocMap = f17On ? computeIndustryMoneyFlowRocMap(f17Period, f17Lag) : {};
 
   // Pre-compute industry aggregates for F13/F14 standalone filters
   let indAgg = {};
@@ -576,7 +556,7 @@ function runScreener() {
       s._indMFRoc = rocPct;
       s._indMFRocPeriod = f17Period;
       if (rocPct < f17Val) {
-        failReasons.push(`F17: Industry MF RoC ${rocPct.toFixed(1)}pp < ${f17Val}pp (${f17Period})`);
+        failReasons.push(`F17: Industry MF RoC ${rocPct.toFixed(1)}pp < ${f17Val}pp (${f17Period}${f17Lag !== f17Period ? ' vs ' + f17Lag + ' ago' : ''})`);
       }
     } else {
       s._indMFRoc = NaN;
@@ -734,8 +714,11 @@ function renderScreenerTable() {
     cols.push({ key: '_indMF', label: `Ind MF% (${periodLabel})`, fmt: v => isNaN(v) ? '-' : v.toFixed(1) + '%', cls: v => v >= 0 ? 'positive' : 'negative' });
   }
   if (f17On) {
-    const rocPeriodLabel = { '3m': '3M', '6m': '6M', '1y': '1Y' }[document.getElementById('scrF17Period').value] || '3M';
-    cols.push({ key: '_indMFRoc', label: `Ind MF RoC (${rocPeriodLabel})`, fmt: v => isNaN(v) ? '-' : (v >= 0 ? '+' : '') + v.toFixed(1) + 'pp', cls: v => v >= 0 ? 'positive' : 'negative' });
+    const f17PeriodKey = document.getElementById('scrF17Period').value;
+    const f17LagKey = mfRocResolveLag(f17PeriodKey, document.getElementById('scrF17Lag').value);
+    const rocPeriodLabel = { '3m': '3M', '6m': '6M', '1y': '1Y' }[f17PeriodKey] || '3M';
+    const rocLagSuffix = f17LagKey !== f17PeriodKey ? ` vs ${f17LagKey.toUpperCase()} ago` : '';
+    cols.push({ key: '_indMFRoc', label: `Ind MF RoC (${rocPeriodLabel}${rocLagSuffix})`, fmt: v => isNaN(v) ? '-' : (v >= 0 ? '+' : '') + v.toFixed(1) + 'pp', cls: v => v >= 0 ? 'positive' : 'negative' });
   }
   if (f15On) {
     const perfPeriodLabel = { '1d': '1D', '1w': '1W', '1m': '1M', '3m': '3M', '6m': '6M', '1y': '1Y' }[document.getElementById('scrF15Period').value] || '1M';
@@ -835,6 +818,8 @@ function resetScreener() {
   document.getElementById('scrF12Val').value = '0';
   document.getElementById('scrF17On').checked = false;
   document.getElementById('scrF17Period').value = '3m';
+  document.getElementById('scrF17Lag').value = '3m';
+  mfRocSyncLagSelect('scrF17Period', 'scrF17Lag');
   document.getElementById('scrF17Val').value = '0';
   document.getElementById('scrF13On').checked = false;
   document.getElementById('scrF13Val').value = '3';

@@ -51,6 +51,7 @@ const PRESET_FIELDS = [
   { id: 'scrF12Val', type: 'number' },
   { id: 'scrF17On', type: 'checkbox' },
   { id: 'scrF17Period', type: 'select' },
+  { id: 'scrF17Lag', type: 'select' },
   { id: 'scrF17Val', type: 'number' },
   { id: 'scrF13On', type: 'checkbox' },
   { id: 'scrF13Val', type: 'number' },
@@ -82,7 +83,7 @@ const DEFAULT_FILTER_STATE = {
   scrF10On: false, scrF10_20sma: true, scrF10_50sma: false, scrF10_200sma: false, scrF10_200ema: false,
   scrF11On: false, scrF11Sector: '',
   scrF12On: false, scrF12Period: '6m', scrF12Val: '0',
-  scrF17On: false, scrF17Period: '3m', scrF17Val: '0',
+  scrF17On: false, scrF17Period: '3m', scrF17Lag: '3m', scrF17Val: '0',
   scrF13On: false, scrF13Val: '3',
   scrF14On: false, scrF14Val: '0',
   scrF15On: false, scrF15Period: '1m', scrF15Val: '0',
@@ -104,6 +105,9 @@ function capturePresetState() {
 
 // ── Restore filter state from preset ──
 function applyPresetState(state) {
+  // Presets saved before the ROC timeframe existed compared against one full window
+  // ago, so a missing scrF17Lag means "same as the window".
+  if ('scrF17Period' in state && !('scrF17Lag' in state)) state = { ...state, scrF17Lag: state.scrF17Period };
   for (const f of PRESET_FIELDS) {
     if (!(f.id in state)) continue;
     const el = document.getElementById(f.id);
@@ -111,6 +115,7 @@ function applyPresetState(state) {
     if (f.type === 'checkbox') el.checked = !!state[f.id];
     else el.value = state[f.id];
   }
+  if (typeof mfRocSyncLagSelect === 'function') mfRocSyncLagSelect('scrF17Period', 'scrF17Lag');
 }
 
 // ── API helpers ──
