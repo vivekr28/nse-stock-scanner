@@ -119,6 +119,30 @@ test('icComputeMoneyFlowRocSeries: fewer than 3*numDays trading days -> no point
   assert.equal(rocData.length, 0); // ...but not enough of them yet for a RoC reading
 });
 
+test('icComputeMoneyFlowRocSeries: lagDays shorter than the window compares against that many days back, hand-derived', () => {
+  const stocks = buildTwelveDayFixture();
+  const numDays = 3;
+  const lagDays = 1;
+  const { data: baseData } = icComputeIndustryMoneyFlowSeries(stocks, numDays);
+  const { data: rocData } = icComputeMoneyFlowRocSeries(stocks, numDays, lagDays);
+
+  // Base line has 7 points; a 1-day lag loses only the first one -> 6 points.
+  assert.equal(rocData.length, 6);
+  rocData.forEach((p, j) => {
+    const expected = baseData[lagDays + j].value - baseData[j].value;
+    assert.ok(Math.abs(p.value - expected) < 1e-9, `point ${j}: ${p.value} vs ${expected}`);
+  });
+  // First point: day7 base (cur 50+60+70=180 vs prev 20+30+40=90 -> 100%) minus day6 base (150%) = -50pp.
+  assert.equal(rocData[0].value, -50);
+  assertTime(rocData[0].time, 2025, 1, 7);
+
+  // Omitting lagDays (or passing numDays) is the original one-full-window-back behaviour.
+  const { data: defaultLag } = icComputeMoneyFlowRocSeries(stocks, numDays);
+  const { data: fullLag } = icComputeMoneyFlowRocSeries(stocks, numDays, numDays);
+  assert.equal(defaultLag.length, 4);
+  assert.deepEqual(defaultLag.map(p => p.value), fullLag.map(p => p.value));
+});
+
 test('icComputeMoneyFlowRocSeries: aggregates turnover across multiple stocks in the industry', () => {
   resetStore();
   const dates = Array.from({ length: 12 }, (_, i) => `${i + 1}-Jan-2025`);

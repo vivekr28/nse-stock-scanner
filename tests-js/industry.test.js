@@ -224,6 +224,156 @@ test('Money Flow Rate of Change: still positive now but less so than one window 
   assert.equal(roc, -250); // +300% -> +50% is decelerating, even though still positive -> negative pp
 });
 
+// ─── Money Flow Rate of Change: ROC timeframe (lag) shorter than the window ──────────
+// The ROC can compare "MF Chg% now" against the reading any timeframe <= the window ago;
+// lag === window is the original one-window-back behaviour. Both call sites pass
+// computeIndustryMoneyFlow(window, MF_PERIOD_DAYS[lag]) for the "past" side.
+
+test('mfRocValidLags: only timeframes equal to or shorter than the window, shortest first', () => {
+  assert.deepEqual([...sb.mfRocValidLags('6m')], ['1w', '1m', '3m', '6m']);
+  assert.deepEqual([...sb.mfRocValidLags('3m')], ['1w', '1m', '3m']);
+  assert.deepEqual([...sb.mfRocValidLags('1m')], ['1w', '1m']);
+  assert.deepEqual([...sb.mfRocValidLags('1y')], ['1w', '1m', '3m', '6m', '1y']);
+});
+
+test('mfRocResolveLag: keeps a valid lag, snaps a too-long one down to the window itself', () => {
+  assert.equal(sb.mfRocResolveLag('6m', '1m'), '1m');
+  assert.equal(sb.mfRocResolveLag('6m', '6m'), '6m');
+  assert.equal(sb.mfRocResolveLag('3m', '6m'), '3m'); // 6M window -> 3M window: lag 6M no longer fits
+  assert.equal(sb.mfRocResolveLag('1m', '1y'), '1m');
+  assert.equal(sb.mfRocResolveLag('3m', 'bogus'), '3m');
+  assert.equal(sb.mfRocResolveLag('3m', undefined), '3m');
+});
+
+test('Money Flow Rate of Change: a 1M window read against 1W ago, hand-derived', () => {
+  resetStore();
+  // 50 trading days, turnover = day number (1..50). 1M window = 21 days, 1W lag = 5 days.
+  const dates = Array.from({ length: 50 }, (_, i) => `d${i + 1}`);
+  Store.dates = dates;
+  Store.dailyBySymbol = { X: dates.map((d, i) => ({ date: d, turnover: i + 1 })) };
+
+  const now = aggregateAcrossSymbols(computeIndustryMoneyFlow('1m'), ['X']);
+  // current d30..d50 = 840, previous d9..d29 = 399
+  assert.equal(now.current, 840);
+  assert.equal(now.prev, 399);
+
+  const past1w = aggregateAcrossSymbols(computeIndustryMoneyFlow('1m', 5), ['X']);
+  // anchor 5 days back: current d25..d45 = 735, previous d4..d24 = 294
+  assert.equal(past1w.current, 735);
+  assert.equal(past1w.prev, 294);
+
+  const nowChg = mfPctChange(now.current, now.prev);
+  const roc1w = nowChg - mfPctChange(past1w.current, past1w.prev);
+  assert.ok(Math.abs(roc1w - (441 / 399 * 100 - 150)) < 1e-9, `got ${roc1w}`); // ~110.53% - 150% = ~-39.47pp
+
+  // Lag = the whole window (21 days) is the original behaviour and gives a different reading.
+  const past1m = aggregateAcrossSymbols(computeIndustryMoneyFlow('1m', 21), ['X']);
+  // anchor 21 days back: current d9..d29 = 399, previous d-12..d8 clamped to d1..d8 = 36
+  assert.equal(past1m.current, 399);
+  assert.equal(past1m.prev, 36);
+  const roc1m = nowChg - mfPctChange(past1m.current, past1m.prev);
+  assert.notEqual(roc1m, roc1w);
+});
+
+// ─── mfRocSyncLagSelect (DOM sync between the window and ROC timeframe dropdowns) ──
+// Stubs document.getElementById with plain objects standing in for the two <select>s; the
+// function only touches .value and each option's .value/.disabled/.hidden.
+
+function fakeLagSelects(windowValue, lagValue) {
+  const lagSel = {
+    value: lagValue,
+    options: ['1w', '1m', '3m', '6m', '1y'].map(v => ({ value: v, disabled: false, hidden: false })),
+  };
+  const periodSel = { value: windowValue };
+  sb.document.getElementById = id => ({ w: periodSel, l: lagSel })[id];
+  return { periodSel, lagSel };
+}
+const disabledOf = lagSel => lagSel.options.filter(o => o.disabled).map(o => o.value);
+
+test('mfRocSyncLagSelect: disables (and hides) timeframes longer than the window, keeps a valid selection', () => {
+  const { lagSel } = fakeLagSelects('6m', '1m');
+  sb.mfRocSyncLagSelect('w', 'l');
+  assert.deepEqual(disabledOf(lagSel), ['1y']);
+  assert.deepEqual(lagSel.options.filter(o => o.hidden).map(o => o.value), ['1y']);
+  assert.equal(lagSel.value, '1m');
+});
+
+test('mfRocSyncLagSelect: a selection that no longer fits snaps down to the window itself', () => {
+  const { lagSel } = fakeLagSelects('3m', '6m'); // e.g. window was just changed 6M -> 3M
+  sb.mfRocSyncLagSelect('w', 'l');
+  assert.deepEqual(disabledOf(lagSel), ['6m', '1y']);
+  assert.equal(lagSel.value, '3m');
+});
+
+test('mfRocSyncLagSelect: re-enables options when the window grows back', () => {
+  const { periodSel, lagSel } = fakeLagSelects('1m', '1m');
+  sb.mfRocSyncLagSelect('w', 'l');
+  assert.deepEqual(disabledOf(lagSel), ['3m', '6m', '1y']);
+  periodSel.value = '1y';
+  sb.mfRocSyncLagSelect('w', 'l');
+  assert.deepEqual(disabledOf(lagSel), []);
+  assert.equal(lagSel.value, '1m'); // still valid, so it's left alone
+});
+
+test('mfRocSyncLagSelect: missing elements are a safe no-op', () => {
+  sb.document.getElementById = () => null;
+  sb.mfRocSyncLagSelect('w', 'l'); // must not throw
+});
+
+// ─── computeIndustryMoneyFlowRocMap (Scanner F17) ────────────────────────────────────
+// 50 trading days. Industry "A" = two symbols whose turnover sums to day-number (1..50),
+// industry "B" = one symbol at a flat 10/day, and one symbol with no industry set.
+
+function buildRocMapFixture() {
+  resetStore();
+  const dates = Array.from({ length: 50 }, (_, i) => `d${i + 1}`);
+  Store.dates = dates;
+  Store.dailyBySymbol = {
+    A1: dates.map((d, i) => ({ date: d, turnover: (i + 1) / 2 })),
+    A2: dates.map((d, i) => ({ date: d, turnover: (i + 1) / 2 })),
+    B1: dates.map(d => ({ date: d, turnover: 10 })),
+    C1: dates.map(d => ({ date: d, turnover: 5 })),
+  };
+  Store.latestBySymbol = {
+    A1: { industry: 'A' }, A2: { industry: 'A' }, B1: { industry: 'B' }, C1: {},
+  };
+}
+const near = (a, b) => Math.abs(a - b) < 1e-9;
+
+test('computeIndustryMoneyFlowRocMap: 1M window vs 1W ago, aggregated per industry, hand-derived', () => {
+  buildRocMapFixture();
+  const roc = sb.computeIndustryMoneyFlowRocMap('1m', '1w');
+  // A: now (840 vs 399) = 110.526...%, 5 days back (735 vs 294) = 150% -> -39.47pp (same numbers as the single-symbol test above)
+  assert.ok(near(roc.A, 441 / 399 * 100 - 150), `A: ${roc.A}`);
+  // Flat turnover -> 0% change now and 0% back then -> 0pp.
+  assert.equal(roc.B, 0);
+  // A symbol with no industry lands in the Undefined-Diversified bucket, like the rest of the app.
+  assert.equal(roc['Undefined-Diversified'], 0);
+  assert.deepEqual(Object.keys(roc).sort(), ['A', 'B', 'Undefined-Diversified']);
+});
+
+test('computeIndustryMoneyFlowRocMap: lag = the whole window is the original one-window-back reading', () => {
+  buildRocMapFixture();
+  const roc = sb.computeIndustryMoneyFlowRocMap('1m', '1m');
+  // A: now 110.526...%; 21 days back: current 399, previous only 36 (history runs out) -> 1008.33...%
+  assert.ok(near(roc.A, 441 / 399 * 100 - 363 / 36 * 100), `A: ${roc.A}`);
+  assert.notEqual(roc.A, sb.computeIndustryMoneyFlowRocMap('1m', '1w').A);
+});
+
+test('computeIndustryMoneyFlowRocMap: a lag longer than the window is treated as the window itself', () => {
+  buildRocMapFixture();
+  const same = sb.computeIndustryMoneyFlowRocMap('1m', '1m');
+  for (const badLag of ['3m', '1y', 'bogus', undefined]) {
+    assert.equal(sb.computeIndustryMoneyFlowRocMap('1m', badLag).A, same.A);
+  }
+});
+
+test('computeIndustryMoneyFlowRocMap: no symbols -> empty map', () => {
+  resetStore();
+  Store.dates = ['d1', 'd2'];
+  assert.deepEqual(Object.keys(sb.computeIndustryMoneyFlowRocMap('1w', '1w')), []);
+});
+
 // ─── mfPctChange ──────────────────────────────────────────────────────────────────
 
 test('mfPctChange: normal percentage change', () => {

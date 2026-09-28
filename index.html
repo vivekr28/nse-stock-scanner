@@ -420,12 +420,20 @@
             <!-- F17: Industry Money Flow Rate of Change filter -->
             <div class="scr-filter-row">
               <input type="checkbox" id="scrF17On">
-              <span class="scr-label" title="Compares the industry's Money Flow Chg% now to the same reading one window-length ago, so a still-negative industry that's improving passes, and a still-positive industry that's fading does not.">Industry MF Rate of Change:</span>
+              <span class="scr-label" title="Compares the industry's Money Flow Chg% now (over the window) to the same reading one ROC timeframe ago - the window itself or any shorter timeframe - so a still-negative industry that's improving passes, and a still-positive industry that's fading does not.">Industry MF Rate of Change:</span>
               <div class="scr-inputs">
-                <select id="scrF17Period" style="min-width:80px;">
+                <select id="scrF17Period" style="min-width:80px;" onchange="mfRocSyncLagSelect('scrF17Period','scrF17Lag')">
                   <option value="3m" selected>3 Months</option>
                   <option value="6m">6 Months</option>
                   <option value="1y">12 Months</option>
+                </select>
+                <span class="scr-unit">vs</span>
+                <select id="scrF17Lag" style="min-width:80px;" title="ROC timeframe: how far back to compare the Money Flow Chg% reading">
+                  <option value="1w">1W ago</option>
+                  <option value="1m">1M ago</option>
+                  <option value="3m" selected>3M ago</option>
+                  <option value="6m" disabled hidden>6M ago</option>
+                  <option value="1y" disabled hidden>12M ago</option>
                 </select>
                 <span class="scr-unit">&gt;</span>
                 <input type="number" id="scrF17Val" value="0" step="5" style="width:60px;">
@@ -533,6 +541,13 @@
             <button class="btn btn-secondary ic-layout-btn" data-period="3m" onclick="icSetMfPeriod('3m')">3M</button>
             <button class="btn btn-secondary ic-layout-btn" data-period="6m" onclick="icSetMfPeriod('6m')">6M</button>
           </div>
+          <span class="ic-mf-toolbar-label" style="margin-left:18px;" title="Rate of Change compares today's Money Flow reading with the same reading this long ago. Can be the window above or any shorter timeframe.">Rate of change vs:</span>
+          <div class="ic-layout-toggle" id="icMfRocLagToggle">
+            <button class="btn btn-secondary ic-layout-btn" data-lag="1w" onclick="icSetMfRocLag('1w')">1W</button>
+            <button class="btn btn-secondary ic-layout-btn active" data-lag="1m" onclick="icSetMfRocLag('1m')">1M</button>
+            <button class="btn btn-secondary ic-layout-btn" data-lag="3m" onclick="icSetMfRocLag('3m')">3M</button>
+            <button class="btn btn-secondary ic-layout-btn" data-lag="6m" onclick="icSetMfRocLag('6m')">6M</button>
+          </div>
         </div>
         <div class="ic-mf-charts-row">
           <div class="ic-mf-chart-col">
@@ -540,7 +555,7 @@
             <div id="icMoneyFlowChartContainer" class="ic-industry-chart-container"></div>
           </div>
           <div class="ic-mf-chart-col">
-            <div class="ic-mf-chart-heading" title="Change in the Money Flow line itself, comparing now to one window-length ago. Positive = the reading is improving even if still negative; negative = it's fading even if still positive.">Rate of Change</div>
+            <div class="ic-mf-chart-heading" title="Change in the Money Flow line itself, comparing now to the selected timeframe ago. Positive = the reading is improving even if still negative; negative = it's fading even if still positive.">Rate of Change</div>
             <div id="icMfRocChartContainer" class="ic-industry-chart-container"></div>
           </div>
         </div>
@@ -638,11 +653,21 @@
       </label>
     </div>
     <div class="filter-group" id="mfRocPeriodGroup" style="display:none;">
-      <label title="Compares today's Money Flow Chg% reading to the same reading exactly one window-length ago, so a still-negative industry that's improving scores positive, and a still-positive industry that's fading scores negative.">Money Flow Window</label>
+      <label title="The window the Money Flow Chg% reading is measured over.">Money Flow Window</label>
       <select id="mfRocPeriod" onchange="renderIndustryAnalysis()">
         <option value="3m" selected>Last 3 Months</option>
         <option value="6m">Last 6 Months</option>
         <option value="1y">Last 1 Year</option>
+      </select>
+    </div>
+    <div class="filter-group" id="mfRocLagGroup" style="display:none;">
+      <label title="Compares today's Money Flow Chg% reading to the same reading this long ago, so a still-negative industry that's improving scores positive, and a still-positive industry that's fading scores negative. Can be the window itself or any shorter timeframe.">ROC Timeframe</label>
+      <select id="mfRocLag" onchange="renderIndustryAnalysis()">
+        <option value="1w">1 Week</option>
+        <option value="1m">1 Month</option>
+        <option value="3m" selected>3 Months</option>
+        <option value="6m">6 Months</option>
+        <option value="1y">1 Year</option>
       </select>
     </div>
   </div>
