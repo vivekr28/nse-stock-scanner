@@ -179,7 +179,9 @@ The scripts use global scope (no ES modules or bundler). They must load in this 
 
 **Price Band columns:** `Symbol, Series, Date, Upper_Band/High Price Band, Lower_Band/Low Price Band, Price Band/Applicable Price Band` (column names vary across dates)
 
-**Sector-Stock-Mapping.csv columns:** `Stock Name, Listing Date, Basic Industry, Market Cap, 3 Month Returns(%), % from 52W High, % from 52W Low, Index, Sector, Daily Price Turnover 50, 30 Days MA ADR(%), Industry 3M Rank`
+**Sector-Stock-Mapping.csv columns:** `Stock Name, Listing Date, Basic Industry, Market Cap, Index, Sector, Macro Sector, Industry Group`
+
+**Classification source:** `Sector` and `Basic Industry` hold NSE's four-tier industry classification as published by Screener.in (Screener's labels: Broad Sector -> `Macro Sector`, Sector -> `Sector`, Broad Industry -> `Industry Group`, Industry -> `Basic Industry`; ~22 sectors, ~190 basic industries). The file is generated, not hand-maintained: `python src/build_screener_classification.py` walks Screener's `/market/` industry pages (capped at 25 companies each, `?page=` is disallowed by its robots.txt) and fetches company pages for the rest, ~20 min at 1 request/s. The first run copies the previous mapping to `Sector-Stock-Mapping.legacy.csv` (source of the stock list, Market Cap, Listing Date, Index) and results are cached in `screener-classification-cache.json`; `--skip-walk` reuses the cache. Stocks Screener cannot classify fall back to `Undefined-Diversified`. The pre-switch mapping used a different, non-NSE taxonomy (e.g. `Chemicals Specialty`, `Software Services`) that does not map one-to-one onto the new names, so saved presets that reference a specific industry name need re-saving.
 
 **Important:** The `Index` column in the sector mapping contains comma-separated quoted values like `"Nifty 500,Nifty Smallcap 250"`. The CSV parser handles this with a proper quoted-field parser. The `Index` column is **completely ignored** — only `Sector` and `Basic Industry` are used.
 
