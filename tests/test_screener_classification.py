@@ -1,7 +1,6 @@
-"""build_screener_classification.py: page parsers, universe/cache loaders, and main() end to end with the
+"""build_screener_classification.py: page parsers, universe/previous-mapping loaders, and main() end to end with the
 network replaced by canned Screener pages (no real requests are ever made)."""
 import csv
-import json
 import sys
 from datetime import date, timedelta
 
@@ -57,6 +56,10 @@ def test_parse_company_page_without_a_classification_returns_none():
 
 # --- loaders -----------------------------------------------------------------
 
+def _write_mapping(path, rows, header=bsc.OUT_COLUMNS):
+    path.write_text(','.join(header) + '\n' + ''.join(','.join(r) + '\n' for r in rows), encoding='utf-8')
+
+
 def test_load_universe_strips_the_padded_equity_l_headers(tmp_path):
     path = tmp_path / 'EQUITY_L.csv'
     path.write_text('SYMBOL,NAME OF COMPANY, SERIES, DATE OF LISTING, PAID UP VALUE\n'
@@ -65,24 +68,37 @@ def test_load_universe_strips_the_padded_equity_l_headers(tmp_path):
     assert bsc.load_universe(str(path)) == {'20MICRONS': '06-OCT-2008', 'ATUL': '01-JAN-1990'}
 
 
-def test_load_cache_upgrades_the_old_list_format(tmp_path):
-    path = tmp_path / 'cache.json'
-    path.write_text(json.dumps({'OLD': TIERS, 'NEW': {'tiers': TIERS, 'src': 'walk', 'at': '2026-01-01'}}))
-    cache = bsc.load_cache(str(path))
-    assert cache['OLD']['tiers'] == TIERS and cache['OLD']['src'] == 'company'
-    assert cache['NEW'] == {'tiers': TIERS, 'src': 'walk', 'at': '2026-01-01'}
+def test_load_previous_reads_tiers_source_and_fetch_date(tmp_path):
+    path = tmp_path / 'map.csv'
+    _write_mapping(path, [['AAA', '01-JAN-2000', 'Dyes And Pigments', 'Chemicals', 'Commodities',
+                           'Chemicals & Petrochemicals', 'walk', '2026-01-01']])
+    assert bsc.load_previous(str(path)) == {'AAA': {'tiers': TIERS, 'src': 'walk', 'at': '2026-01-01'}}
 
 
-def test_load_cache_missing_file_is_empty(tmp_path):
-    assert bsc.load_cache(str(tmp_path / 'nope.json')) == {}
+def test_load_previous_treats_a_file_without_source_columns_as_company_data_and_skips_blank_rows(tmp_path):
+    path = tmp_path / 'map.csv'
+    _write_mapping(path, [['AAA', '01-JAN-2000', 'Dyes And Pigments', 'Chemicals', 'Commodities', 'Chem'],
+                          ['BBB', '01-JAN-2000', '', '', '', '']],
+                   header=['Stock Name', 'Listing Date', 'Basic Industry', 'Sector', 'Macro Sector', 'Industry Group'])
+    state = bsc.load_previous(str(path))
+    assert list(state) == ['AAA']                                    # BBB has no classification
+    assert state['AAA']['src'] == 'company' and state['AAA']['at'] == date.today().isoformat()   # file mtime
+
+
+def test_load_previous_uses_the_first_existing_path(tmp_path):
+    path = tmp_path / 'map.csv'
+    _write_mapping(path, [['AAA', '', 'I', 'S', 'M', 'G', 'walk', '2026-01-01']])
+    assert list(bsc.load_previous(str(tmp_path / 'nope.csv'), str(path))) == ['AAA']
+    assert bsc.load_previous(str(tmp_path / 'nope.csv')) == {}
 
 
 # --- main() end to end -------------------------------------------------------
 
 @pytest.fixture
 def run(tmp_path, monkeypatch):
-    """run(pages, cache=None, *flags) -> (fetched paths, mapping rows, cache dict). `pages` maps a Screener path to
-    canned HTML; any other path behaves like a 404 (None)."""
+    """run(pages, previous=None, *flags) -> (fetched paths, mapping rows). `pages` maps a Screener path to canned
+    HTML (any other path behaves like a 404); `previous` is {symbol: (source, fetched date)}, written first as the
+    existing Sector-Stock-Mapping.csv, each stock with the TIERS classification."""
     data_dir = tmp_path / 'NSE_DATA'
     data_dir.mkdir()
     (data_dir / 'EQUITY_L.csv').write_text(
@@ -90,43 +106,58 @@ def run(tmp_path, monkeypatch):
         'BODALCHEM,Bodal,EQ,22-AUG-2011\nNEWCO,New Co,EQ,01-SEP-2026\nGHOST,Ghost,EQ,01-JAN-2000\n'
         'OLDCO,Old Co,EQ,01-JAN-2000\nFRESHCO,Fresh Co,EQ,01-JAN-2000\n', encoding='utf-8')
 
-    def _run(pages, cache=None, *flags):
-        if cache is not None:
-            (data_dir / 'screener-classification-cache.json').write_text(json.dumps(cache))
+    def _run(pages, previous=None, *flags):
+        if previous is not None:
+            _write_mapping(data_dir / 'Sector-Stock-Mapping.csv',
+                           [[s, '', TIERS[3], TIERS[1], TIERS[0], TIERS[2], src, at]
+                            for s, (src, at) in previous.items()])
         fetched = []
         monkeypatch.setattr(bsc, 'fetch', lambda path, delay: fetched.append(path) or pages.get(path))
         monkeypatch.setattr(sys, 'argv', ['bsc', '--dir', str(tmp_path), '--delay', '0', *flags])
         bsc.main()
         with open(data_dir / 'Sector-Stock-Mapping.csv', encoding='utf-8', newline='') as f:
-            rows = {r['Stock Name']: r for r in csv.DictReader(f)}
-        with open(data_dir / 'screener-classification-cache.json', encoding='utf-8') as f:
-            return fetched, rows, json.load(f)
+            return fetched, {r['Stock Name']: r for r in csv.DictReader(f)}
     return _run
 
 
 def test_main_walks_then_fills_gaps_from_company_pages(run):
+    today = date.today().isoformat()
     pages = {
         '/market/': f'<a href="{LEAF}">x</a>',
         LEAF: industry_page(PARENTS, 'Dyes And Pigments', ['BODALCHEM']),
         # NEWCO has no consolidated page (404), so the standalone page is used
         '/company/NEWCO/': company_page(['Financials', 'Financial Services', 'Finance', 'Housing Finance']),
     }
-    fetched, rows, cache = run(pages)
+    fetched, rows = run(pages)
     assert rows['BODALCHEM']['Basic Industry'] == 'Dyes And Pigments' and rows['BODALCHEM']['Sector'] == 'Chemicals'
     assert rows['BODALCHEM']['Macro Sector'] == 'Commodities'
     assert rows['BODALCHEM']['Industry Group'] == 'Chemicals & Petrochemicals'
     assert rows['BODALCHEM']['Listing Date'] == '22-AUG-2011'        # listing date comes from EQUITY_L
-    assert rows['NEWCO']['Basic Industry'] == 'Housing Finance'      # a listing no older mapping had
+    assert rows['NEWCO']['Basic Industry'] == 'Housing Finance'      # a listing no earlier mapping had
     assert '/company/NEWCO/consolidated/' in fetched and '/company/NEWCO/' in fetched
     assert '/company/BODALCHEM/consolidated/' not in fetched         # the walk already covered it
-    assert cache['BODALCHEM']['src'] == 'walk' and cache['NEWCO']['src'] == 'company'
+    assert (rows['BODALCHEM']['Source'], rows['BODALCHEM']['Fetched']) == ('walk', today)
+    assert (rows['NEWCO']['Source'], rows['NEWCO']['Fetched']) == ('company', today)
+
+
+def test_only_nse_symbols_are_kept(run):
+    pages = {'/market/': f'<a href="{LEAF}">x</a>',
+             LEAF: industry_page(PARENTS, 'Dyes And Pigments', ['BODALCHEM', '506854', 'BSEONLY'])}
+    _, rows = run(pages)
+    assert list(rows) == SYMBOLS                                     # the walk saw BSE-only companies; none are kept
 
 
 def test_main_writes_unclassifiable_stocks_with_blank_tiers(run):
-    _, rows, cache = run({'/market/': ''})
+    _, rows = run({'/market/': ''})
     assert rows['GHOST']['Sector'] == '' and rows['GHOST']['Basic Industry'] == ''
-    assert 'GHOST' not in cache
+    assert rows['GHOST']['Source'] == '' and rows['GHOST']['Fetched'] == ''
     assert list(rows) == SYMBOLS                                     # every EQUITY_L symbol gets a row
+
+
+def test_main_output_columns(run, tmp_path):
+    run({'/market/': ''})
+    header = (tmp_path / 'NSE_DATA' / 'Sector-Stock-Mapping.csv').read_text(encoding='utf-8').splitlines()[0]
+    assert header == 'Stock Name,Listing Date,Basic Industry,Sector,Macro Sector,Industry Group,Source,Fetched'
 
 
 def test_main_also_writes_the_git_tracked_copy_in_reference_data(run, tmp_path):
@@ -135,35 +166,40 @@ def test_main_also_writes_the_git_tracked_copy_in_reference_data(run, tmp_path):
     assert (tmp_path / 'reference-data' / 'Sector-Stock-Mapping.csv').read_bytes() == live
 
 
-def test_main_output_has_no_market_cap_or_index_columns(run, tmp_path):
-    run({'/market/': ''})
-    header = (tmp_path / 'NSE_DATA' / 'Sector-Stock-Mapping.csv').read_text(encoding='utf-8').splitlines()[0]
-    assert header == 'Stock Name,Listing Date,Basic Industry,Sector,Macro Sector,Industry Group'
+def test_a_fresh_clone_starts_from_the_tracked_copy(run, tmp_path):
+    """No NSE_DATA mapping yet, but reference-data/ has one: nothing needs re-fetching under --skip-walk."""
+    ref = tmp_path / 'reference-data'
+    ref.mkdir()
+    today = date.today().isoformat()
+    _write_mapping(ref / 'Sector-Stock-Mapping.csv',
+                   [[s, '', TIERS[3], TIERS[1], TIERS[0], TIERS[2], 'company', today] for s in SYMBOLS])
+    fetched, rows = run({}, None, '--skip-walk')
+    assert fetched == []
+    assert rows['GHOST']['Basic Industry'] == 'Dyes And Pigments'
 
 
 def test_skip_walk_only_refetches_missing_and_expired_company_entries(run):
     today = date.today().isoformat()
     old = (date.today() - timedelta(days=45)).isoformat()
-    entry = lambda at, src='company': {'tiers': TIERS, 'src': src, 'at': at}
-    cache = {'BODALCHEM': entry(today, 'walk'), 'FRESHCO': entry(today), 'OLDCO': entry(old)}
-    fetched, _, out = run({}, cache, '--skip-walk')
+    previous = {'BODALCHEM': ('walk', today), 'FRESHCO': ('company', today), 'OLDCO': ('company', old)}
+    fetched, rows = run({}, previous, '--skip-walk')
     assert '/market/' not in fetched                                 # no industry walk
     assert {p.split('/')[2] for p in fetched} == {'NEWCO', 'GHOST', 'OLDCO'}   # missing + expired only
-    assert out['FRESHCO']['at'] == today and out['OLDCO']['at'] == old        # pages 404, so old entry is kept
+    assert rows['FRESHCO']['Fetched'] == today and rows['OLDCO']['Fetched'] == old   # 404s keep the old entry
 
 
 def test_max_age_days_controls_expiry(run):
     ten_days_ago = (date.today() - timedelta(days=10)).isoformat()
-    cache = {s: {'tiers': TIERS, 'src': 'company', 'at': ten_days_ago} for s in SYMBOLS}
-    fetched, _, _ = run({}, cache, '--skip-walk', '--max-age-days', '5')
+    previous = {s: ('company', ten_days_ago) for s in SYMBOLS}
+    fetched, _ = run({}, previous, '--skip-walk', '--max-age-days', '5')
     assert len(fetched) == 10                                        # 5 stocks x (consolidated + standalone)
-    fetched, _, _ = run({}, cache, '--skip-walk', '--max-age-days', '30')
+    fetched, _ = run({}, previous, '--skip-walk', '--max-age-days', '30')
     assert fetched == []
 
 
 def test_stale_walk_entry_is_refetched_when_the_walk_no_longer_returns_it(run):
     old = (date.today() - timedelta(days=3)).isoformat()
-    cache = {s: {'tiers': TIERS, 'src': 'company', 'at': date.today().isoformat()} for s in SYMBOLS[1:]}
-    cache['BODALCHEM'] = {'tiers': TIERS, 'src': 'walk', 'at': old}
-    fetched, _, _ = run({'/market/': ''}, cache)                     # walk finds nothing today
+    previous = {s: ('company', date.today().isoformat()) for s in SYMBOLS[1:]}
+    previous['BODALCHEM'] = ('walk', old)
+    fetched, _ = run({'/market/': ''}, previous)                     # walk finds nothing today
     assert '/company/BODALCHEM/consolidated/' in fetched
