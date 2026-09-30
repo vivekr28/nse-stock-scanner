@@ -60,7 +60,7 @@ FULL_VERIFY_PREV_FILE = 'TradingViewFullVerification.prev.json'
 REPORTS_SUBDIR = 'verification-reports'
 # Bump whenever processed_data.json gains/changes a field the client relies on: startup then
 # reprocesses an older cache by itself instead of silently serving output missing the new field.
-PROCESSED_SCHEMA = 2
+PROCESSED_SCHEMA = 3
 CORRECTION_COLUMNS = ['ISIN', 'SYMBOL', 'EXDATE', 'FACTOR', 'STATUS', 'CHECKED_AT', 'NOTE']
 
 # ─── TradingView correction run state (polled by the Data Quality tab) ───────
@@ -160,6 +160,12 @@ def parse_date_str(s):
         return datetime.strptime(s, '%d-%b-%Y')
     except ValueError:
         return None
+
+
+def is_fund_isin(isin):
+    """ETFs / mutual-fund units carry ISINs starting `INF`; company shares start `INE`. This dashboard is stocks
+    only, so rows with an INF ISIN are left out (and listed on the Data Quality tab instead)."""
+    return (isin or '').upper().startswith('INF')
 
 
 def normalize_symbol(s):
@@ -813,6 +819,7 @@ def process_data(base_dir, progress_cb=None):
     daily_by_symbol = defaultdict(list)
     symbol_to_isin = {}
     date_set = set()
+    etf_latest = {}   # ISIN -> newest bhavcopy row of each excluded ETF/fund (for the Data Quality tab)
 
     t1 = time.time()
     for row in bhav_rows:
@@ -828,6 +835,18 @@ def process_data(base_dir, progress_cb=None):
 
         isin = (row.get(col_isin) or '').strip()
         if not isin:
+            continue
+
+        if is_fund_isin(isin):
+            # Not a stock: skip it, but remember its newest row. Kept out of date_set on purpose so a fund can
+            # never decide which day is the latest trading day.
+            row_ts = parse_date_str(date_str)
+            kept = etf_latest.get(isin)
+            if kept is None or (row_ts and (kept['ts'] is None or row_ts >= kept['ts'])):
+                etf_latest[isin] = {
+                    'ts': row_ts, 'symbol': sym, 'name': (row.get(col_company) or '').strip(), 'isin': isin,
+                    'series': series, 'lastTradeDate': date_str, 'close': close,
+                    'turnover': parse_num(row.get(col_turnover)) or 0}
             continue
 
         date_set.add(date_str)
@@ -853,6 +872,9 @@ def process_data(base_dir, progress_cb=None):
         })
 
     print(f"    Grouped {len(daily_by_symbol):,} ISINs in {time.time()-t1:.1f}s")
+    excluded_etfs = sorted(({k: v for k, v in e.items() if k != 'ts'} for e in etf_latest.values()),
+                           key=lambda e: e['symbol'])
+    print(f"    {len(excluded_etfs)} ETFs/funds (ISIN INF...) excluded")
     if bhav_rows and not daily_by_symbol:
         # Confirmed live 27-Sep-2026: a stale/malformed NSE_Bhavcopy_Combined.csv (header
         # missing ISIN/COMPANY_NAME, from a Recycle Bin restore of an old snapshot predating
@@ -1135,6 +1157,7 @@ def process_data(base_dir, progress_cb=None):
         'symbolToISIN': symbol_to_isin,
         'sectorMap': sector_map,
         'staleStocks': stale_stocks,
+        'excludedEtfs': excluded_etfs,
         'ewIndex': ew_index,
         'unadjustedCorpActions': unadjusted_corp_actions,
         'adjustedCorpActions': adjusted_corp_actions,

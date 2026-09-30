@@ -16,6 +16,7 @@ const Store = {
   low52w: {},           // symbol -> 52w low
   adr: {},              // symbol -> average daily range %
   bandBySymbol: {},     // ISIN -> {upper, lower, bandPct}
+  excludedEtfs: [],     // [{symbol, name, isin, series, lastTradeDate, close, turnover}] - ETFs/funds (ISIN INF...) left out of the stock data; see Data Quality tab
   symbolToISIN: {},     // normalizedSymbol -> ISIN
   ewIndex: null,        // {cols, bars: [[date,open,high,low,close,turnover,count],...], constituentCount} or null
   unadjustedCorpActions: [], // [{isin, symbol, exDate, subject, close}] - recognized corp actions (demergers, etc.) NOT price-adjusted; see Data Quality tab

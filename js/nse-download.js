@@ -20,6 +20,7 @@ async function tryAutoFetchJSON() {
     Store.latestDate = data.latestDate;
     Store.symbolToISIN = data.symbolToISIN || {};
     Store.staleStocks = data.staleStocks || [];
+    Store.excludedEtfs = data.excludedEtfs || [];
     Store.latestBySymbol = data.latestBySymbol || {};
     Store.bandBySymbol = data.bandBySymbol || {};
     Store.sectorMap = data.sectorMap || {};

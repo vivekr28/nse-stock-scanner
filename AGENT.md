@@ -29,6 +29,7 @@ NSE-StockScanner/
 ├── tests/                        # pytest suite for src/ (dev-only; see "Completed: Test Suite" below) — never touches NSE_DATA/ or reference-data/
 │   ├── conftest.py               # Adds src/ to sys.path (no src/__init__.py — flat script layout, not a package); Phase 2+: fixture-building helpers + the `project`/`data` fixtures
 │   ├── test_parsing.py           # Phase 1: pure parsing/factor functions (rights, splits/bonus, face-value roll-back, etc.) — no I/O
+│   ├── test_etf_filter.py        # ETFs/funds (ISIN INF…) excluded from process_data(): stock data, excludedEtfs list, latest date, price band, schema
 │   ├── test_process_data.py      # Phase 2: small-fixture end-to-end process_data() tests (9 synthetic symbols, 15 days) — the tier that would have caught the 27-Sep-2026 zero-stocks incident
 │   ├── test_adjustments.py       # Phase 3: apply_split_adjustments/add_rights_events/bridge_split_induced_isin_changes/add_tv_corrections in isolation, synthetic in-memory dicts (no CSVs) — edge cases Phase 2's one fixture had no room for
 │   ├── test_tv_adjust.py         # Phase 4a: derive_correction/compare_series/_explain_level_changes — no TradingView access, plain {date: close} dicts
@@ -43,7 +44,7 @@ NSE-StockScanner/
 │   ├── industry.test.js          # Phase 8: computeRSScores (js/utils.js, shared with screener.js's F9)/computeIndustryMoneyFlow (incl. endOffsetDays)/computeAllPeriodsMoneyFlow/mfPctChange/Money Flow Rate of Change formula (js/industry.js)
 │   ├── industry-charts.test.js   # Phase 8: icComputeIndustryMoneyFlowSeries/icComputeMoneyFlowRocSeries (js/industry-charts.js) — the Industry Money Flow / Rate of Change chart lines
 │   ├── presets.test.js           # capturePresetState/applyPresetState (js/presets.js) for the F17 ROC timeframe (`scrF17Lag`), incl. the old-preset fallback
-│   └── data-processor.test.js    # Phase 9: processData()/processBandData() (js/data-processor.js) — CSV grouping, computed indicators, stale-stock detection, band merge/circuit-hit math
+│   └── data-processor.test.js    # (also covers ETF/fund filtering: isFundIsin, Store.excludedEtfs) Phase 9: processData()/processBandData() (js/data-processor.js) — CSV grouping, computed indicators, stale-stock detection, band merge/circuit-hit math
 ├── pytest.ini                    # testpaths=tests; declares the `slow` marker for future real-data smoke tests
 ├── requirements-dev.txt          # pytest only — dev tooling, never imported by the runtime (which stays stdlib-only)
 ├── scanner-presets/              # GIT-TRACKED
@@ -204,7 +205,7 @@ The scripts use global scope (no ES modules or bundler). They must load in this 
 **Server-side (Python, on startup):**
 ```
 NSE_Bhavcopy_Combined.csv → process_data()
-                           → Filter EQ+BE, group by ISIN
+                           → Filter EQ+BE, drop ETFs/funds (ISIN INF…), group by ISIN
                            → Compute SMA/52W/ADR/change%
                            → Merge bands, sectors
                            → processed_data.json (49MB)
@@ -477,6 +478,7 @@ Cross-file matching report:
 - Sector mapping stocks with no trade data (builds `bhavSymbolSet` from bhav entries for reverse lookup)
 - Band stocks with no bhavcopy entry
 - Stale stocks (not traded on latest day)
+- **ETFs / Funds Excluded** — `Store.excludedEtfs` (ISIN starting `INF`), with an "ETFs Excluded" summary card; the list includes funds that traded earlier in the history but not on the latest day
 - **Recent Corporate Actions Not Price-Adjusted** — `Store.unadjustedCorpActions` (populated server-side, see "Stock Split/Bonus Price Adjustment" below): demergers, NCRPS bonuses, capital reductions, etc. inside the ~510-day price history the dashboard keeps that cause a real price discontinuity but aren't (or can't correctly be) back-adjusted by a simple ratio. Splits/bonuses that *were* successfully adjusted never appear here — this table is specifically for the ones that couldn't be. Columns: Symbol, Ex-Date, Event, Close, TradingView check. Added directly in response to a user question about why `INDIAGLYCO` showed an unexplained ~-79% gap (a demerger, confirmed via NSE's own corporate-actions feed) that the split/bonus logic correctly left alone. **The section has an "Adjust prices from TradingView" button** that corrects these from TradingView's already-adjusted history — corrected events are stored in `reference-data/TradingViewAdjustments.csv`, applied on every processing run and dropped from this list; the rest stay listed with a "TradingView check" note explaining why (e.g. "TradingView shows no adjustment for this event (raw ex-date move -11.7%)"). Full design in "TradingView-Derived Corrections" below.
 
 - **Price Adjustments Applied** — `Store.adjustedCorpActions` (`adjustedCorpActions` in `processed_data.json`, built by `build_adjusted_corp_actions()`): every price adjustment in effect — **splits and bonuses** (ratio from NSE's feed), **rights issues** (theoretical ex-rights price from NSE's terms — see "Rights-Issue Price Adjustment") and **demergers** (TradingView-derived factor) — one row per event with Ex-Date, Type, Event, **Factor** (what pre-ex-date prices were multiplied by; `1/ratio` for splits/bonuses) and a "TradingView check" column. Only stocks still trading and events whose ex-date falls inside the retained price window are listed (an older event has no visible price effect; a delisted stock isn't in the dashboard anywhere). Verified against the pipeline itself: every price-adjusted stock the dashboard shows is listed (203 of 203) and none is listed that wasn't actually changed; the single price-adjusted stock not listed is a stale/delisted one. **Dividends are not adjusted** by this pipeline, so none are listed. **The list is a to-do queue:** a stock that verified as `match` against TradingView for its *current* adjustments is hidden (a "Show verified stocks (N)" checkbox brings them back) and only returns when it gets a new or changed adjustment; stocks with a difference (`major`/`minor`/`inconclusive`) stay listed until they match; not-yet-checked stocks show "Not verified". Has a "Verify against TradingView" button — see "Verifying Adjusted Prices Against TradingView".
@@ -576,6 +578,7 @@ At the user's request, the palette and typeface were re-sampled from `wealthlab.
 1. **No stock is excluded** from analysis due to missing sector/industry/band data. Missing sector/industry -> `Undefined-Diversified`. Missing band -> shown as `-`. Stocks with insufficient price history can optionally be included via the "Include stocks with insufficient price history" checkbox (calculates indicators from available data, min 5 bars).
 2. **Stocks not traded on latest day** are excluded from scanner and analysis but tracked in Data Quality.
 3. **Only EQ and BE series** are included. SM (SME) and other series are filtered out.
+3a. **Only stocks**: ETFs and mutual-fund units trade in the EQ series too but are not stocks, so rows whose ISIN starts with `INF` (company shares are `INE…`) are dropped by `process_data()` (`is_fund_isin()`) and the client-side `processData()` (`isFundIsin()`), before any breadth/scanner/sector/industry analysis. The newest row of each is kept in `excludedEtfs` (`Store.excludedEtfs`: `symbol, name, isin, series, lastTradeDate, close, turnover`) for the Data Quality tab. A fund never affects `latestDate` (so it cannot make stocks look stale) and is not registered in `symbolToISIN`, so price-band rows for it are ignored. `PROCESSED_SCHEMA` is 3 because of this field; the raw combined CSVs still contain the fund rows.
 4. **Market cap** comes from the static Sector-Stock-Mapping.csv, not computed from live price.
 5. **Monthly change** uses 22 trading sessions. Stocks with fewer sessions use change since first available date.
 6. **Server-assisted architecture** — Python server (`nse_server.py`) pre-processes CSV data into JSON on startup; browser loads pre-computed data via two-phase fetch (lite for instant display, daily in background). CSV/cache fallback paths still work without the server.

@@ -63,6 +63,12 @@ function normalizeSymbol(s) {
   return (s || '').trim().toLowerCase().replace(/[&\-]/g, '_');
 }
 
+// ETFs / mutual-fund units carry ISINs starting INF; company shares start INE. The dashboard is stocks only
+// (mirrors is_fund_isin in src/nse_server.py).
+function isFundIsin(isin) {
+  return (isin || '').toUpperCase().startsWith('INF');
+}
+
 // ── Number Parsing ───────────────────────────────────────────────────────────
 function parseNum(v) {
   if (v === undefined || v === null || v === '' || v === '-') return NaN;
