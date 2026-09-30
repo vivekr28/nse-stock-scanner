@@ -33,6 +33,8 @@ NSE-StockScanner/
 │   ├── test_adjustments.py       # Phase 3: apply_split_adjustments/add_rights_events/bridge_split_induced_isin_changes/add_tv_corrections in isolation, synthetic in-memory dicts (no CSVs) — edge cases Phase 2's one fixture had no room for
 │   ├── test_tv_adjust.py         # Phase 4a: derive_correction/compare_series/_explain_level_changes — no TradingView access, plain {date: close} dicts
 │   ├── test_tv_report.py         # Phase 4b: category/primary_cause/corp_action_hints/build_report — pure functions, no I/O
+│   ├── test_market_cap.py        # load_market_caps() (NSE mcap file: rupees->crore, series preference, bad rows) + process_data() priority NSE file > mapping column > 0, and sector/industry defaults
+│   ├── test_screener_classification.py  # src/build_screener_classification.py: industry/company page parsers, EQUITY_L universe + cache loaders, main() end to end against canned pages (walk, gap-fill, --skip-walk, --max-age-days expiry)
 │   └── test_real_data_smoke.py   # Phase 6: one `slow`-marked, opt-in test against the REAL project NSE_DATA/ (skips itself if absent) — never runs in CI
 ├── .github/workflows/tests.yml   # Phase 5: runs the suite (minus `slow` tests) on every push to main and every PR
 ├── tests-js/                     # Phase 7+: JS unit tests, a separate track from tests/ — different language/runtime, run with Node's built-in test runner (`node --test`), not pytest
