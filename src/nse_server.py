@@ -32,6 +32,8 @@ DATA_SUBDIR = 'NSE_DATA'
 BHAV_FILE = 'NSE_Bhavcopy_Combined.csv'
 BAND_FILE = 'NSE_PriceBand_Combined.csv'
 SECTOR_FILE = 'Sector-Stock-Mapping.csv'
+# NSE's daily market-cap file (mcap*.csv from the PR<date>.zip bhavcopy archive), saved as-is by Download-NSE-Bhavcopy.ps1
+MARKETCAP_FILE = 'NSE_MarketCap.csv'
 PROCESSED_FILE = 'processed_data.json'
 # Saved screener presets (server-managed via /api/presets). Lives in a git-tracked folder.
 PRESETS_FILE = 'scanner-presets/presets.json'
@@ -58,7 +60,7 @@ FULL_VERIFY_PREV_FILE = 'TradingViewFullVerification.prev.json'
 REPORTS_SUBDIR = 'verification-reports'
 # Bump whenever processed_data.json gains/changes a field the client relies on: startup then
 # reprocesses an older cache by itself instead of silently serving output missing the new field.
-PROCESSED_SCHEMA = 2
+PROCESSED_SCHEMA = 4
 CORRECTION_COLUMNS = ['ISIN', 'SYMBOL', 'EXDATE', 'FACTOR', 'STATUS', 'CHECKED_AT', 'NOTE']
 
 # ─── TradingView correction run state (polled by the Data Quality tab) ───────
@@ -160,11 +162,74 @@ def parse_date_str(s):
         return None
 
 
+def is_fund_isin(isin):
+    """ETFs / mutual-fund units carry ISINs starting `INF`; company shares start `INE`. This dashboard is stocks
+    only, so rows with an INF ISIN are left out (and listed on the Data Quality tab instead)."""
+    return (isin or '').upper().startswith('INF')
+
+
 def normalize_symbol(s):
     """Match JS normalizeSymbol: lowercase, replace & and - with _."""
     if not s:
         return ''
     return re.sub(r'[&\-]', '_', s.strip().lower())
+
+
+# Preference when NSE lists the same symbol under several series (EQ is the main board)
+_MCAP_SERIES_RANK = {'EQ': 0, 'BE': 1, 'BZ': 2, 'SM': 3, 'ST': 4}
+
+
+# REIT and InvIT units are trusts, not company shares; NSE trades them in their own series, so the EQ/BE filter never
+# lets them into the stock data. They are listed on the Data Quality tab for reference.
+_TRUST_SERIES = {'RR': 'REIT', 'IV': 'InvIT'}
+
+
+def load_trust_units(filepath):
+    """NSE mcap*.csv -> [{symbol, name, type ('REIT' | 'InvIT'), series, tradeDate, close, marketCap (Rs crore)}], sorted
+    REITs first, then InvITs, each by symbol. Empty list if the file is missing/unreadable."""
+    if not os.path.exists(filepath):
+        return []
+    units = []
+    try:
+        with open(filepath, 'r', encoding='latin-1', newline='') as f:
+            for row in csv.DictReader(f):
+                row = {(k or '').strip(): (v or '').strip() for k, v in row.items()}
+                kind = _TRUST_SERIES.get(row.get('Series', ''))
+                if not kind or not row.get('Symbol'):
+                    continue
+                cap = parse_num(row.get('Market Cap(Rs.)') or '')
+                units.append({
+                    'symbol': row['Symbol'], 'name': row.get('Security Name', ''), 'type': kind,
+                    'series': row['Series'], 'tradeDate': row.get('Trade Date', ''),
+                    'close': parse_num(row.get('Close Price/Paid up value(Rs.)') or ''),
+                    'marketCap': round(cap / 1e7, 2) if cap and cap > 0 else None})
+    except (OSError, csv.Error):
+        return []
+    return sorted(units, key=lambda u: (u['type'] != 'REIT', u['symbol']))   # REITs first, then InvITs
+
+
+def load_market_caps(filepath):
+    """NSE mcap*.csv -> {normalized symbol: market cap in Rs crore}. `Market Cap(Rs.)` is in rupees.
+    Empty dict if the file is missing/unreadable (callers then fall back to the sector-mapping value)."""
+    if not os.path.exists(filepath):
+        return {}
+    best = {}
+    try:
+        with open(filepath, 'r', encoding='latin-1', newline='') as f:
+            for row in csv.DictReader(f):
+                row = {(k or '').strip(): (v or '').strip() for k, v in row.items()}
+                sym = row.get('Symbol')
+                cap = parse_num(row.get('Market Cap(Rs.)') or '')
+                if not sym or not cap or cap <= 0:
+                    continue
+                rank = _MCAP_SERIES_RANK.get(row.get('Series', ''), 9)
+                key = normalize_symbol(sym)
+                if key not in best or rank < best[key][0]:
+                    best[key] = (rank, round(cap / 1e7, 2))
+    except (OSError, csv.Error):
+        return {}
+    return {k: v[1] for k, v in best.items()}
+
 
 
 def read_csv_file(filepath):
@@ -746,6 +811,7 @@ def process_data(base_dir, progress_cb=None):
     bhav_path = os.path.join(data_dir, BHAV_FILE)
     band_path = os.path.join(data_dir, BAND_FILE)
     sector_path = os.path.join(data_dir, SECTOR_FILE)
+    marketcap_path = os.path.join(data_dir, MARKETCAP_FILE)
 
     if not os.path.exists(bhav_path):
         print(f"  [!] Bhavcopy not found: {bhav_path}")
@@ -782,6 +848,7 @@ def process_data(base_dir, progress_cb=None):
     daily_by_symbol = defaultdict(list)
     symbol_to_isin = {}
     date_set = set()
+    etf_latest = {}   # ISIN -> newest bhavcopy row of each excluded ETF/fund (for the Data Quality tab)
 
     t1 = time.time()
     for row in bhav_rows:
@@ -797,6 +864,18 @@ def process_data(base_dir, progress_cb=None):
 
         isin = (row.get(col_isin) or '').strip()
         if not isin:
+            continue
+
+        if is_fund_isin(isin):
+            # Not a stock: skip it, but remember its newest row. Kept out of date_set on purpose so a fund can
+            # never decide which day is the latest trading day.
+            row_ts = parse_date_str(date_str)
+            kept = etf_latest.get(isin)
+            if kept is None or (row_ts and (kept['ts'] is None or row_ts >= kept['ts'])):
+                etf_latest[isin] = {
+                    'ts': row_ts, 'symbol': sym, 'name': (row.get(col_company) or '').strip(), 'isin': isin,
+                    'series': series, 'lastTradeDate': date_str, 'close': close,
+                    'turnover': parse_num(row.get(col_turnover)) or 0}
             continue
 
         date_set.add(date_str)
@@ -822,6 +901,9 @@ def process_data(base_dir, progress_cb=None):
         })
 
     print(f"    Grouped {len(daily_by_symbol):,} ISINs in {time.time()-t1:.1f}s")
+    excluded_etfs = sorted(({k: v for k, v in e.items() if k != 'ts'} for e in etf_latest.values()),
+                           key=lambda e: e['symbol'])
+    print(f"    {len(excluded_etfs)} ETFs/funds (ISIN INF...) excluded")
     if bhav_rows and not daily_by_symbol:
         # Confirmed live 27-Sep-2026: a stale/malformed NSE_Bhavcopy_Combined.csv (header
         # missing ISIN/COMPANY_NAME, from a Recycle Bin restore of an old snapshot predating
@@ -878,6 +960,12 @@ def process_data(base_dir, progress_cb=None):
                 }
         print(f"    {len(sector_map)} stocks mapped")
 
+    # Market cap: NSE's daily file wins over the (static) sector-mapping column; covers stocks the mapping lacks
+    market_caps = load_market_caps(marketcap_path)
+    excluded_trusts = load_trust_units(marketcap_path)
+    if market_caps:
+        print(f"    {len(market_caps)} market caps from {MARKETCAP_FILE}")
+
     # Compute indicators for each symbol
     t2 = time.time()
     report(f"  Computing indicators...")
@@ -922,6 +1010,7 @@ def process_data(base_dir, progress_cb=None):
 
         # Sector info
         s_info = sector_map.get(normalize_symbol(latest['symbol']), {'sector': '', 'industry': '', 'marketCap': 0})
+        market_cap = market_caps.get(normalize_symbol(latest['symbol']), s_info['marketCap'])
 
         # Monthly change % (22 trading sessions)
         month_ref = days[-22] if len(days) >= 22 else days[0]
@@ -943,7 +1032,7 @@ def process_data(base_dir, progress_cb=None):
             'distFromSMA': round(dist_from_sma, 2) if dist_from_sma is not None else None,
             'sector': sector,
             'industry': industry,
-            'marketCap': s_info['marketCap'],
+            'marketCap': market_cap,
             'aboveSMA': (latest['close'] > sma20) if sma20 else False,
             'tradingDays': len(days),
         }
@@ -1098,6 +1187,8 @@ def process_data(base_dir, progress_cb=None):
         'symbolToISIN': symbol_to_isin,
         'sectorMap': sector_map,
         'staleStocks': stale_stocks,
+        'excludedEtfs': excluded_etfs,
+        'excludedTrusts': excluded_trusts,
         'ewIndex': ew_index,
         'unadjustedCorpActions': unadjusted_corp_actions,
         'adjustedCorpActions': adjusted_corp_actions,
@@ -1204,7 +1295,7 @@ def needs_processing(base_dir):
         return True
 
     json_mtime = os.path.getmtime(json_path)
-    watched = [os.path.join(data_dir, f) for f in (BHAV_FILE, BAND_FILE, SECTOR_FILE, MIDSMALL400_FILE)]
+    watched = [os.path.join(data_dir, f) for f in (BHAV_FILE, BAND_FILE, SECTOR_FILE, MARKETCAP_FILE, MIDSMALL400_FILE)]
     watched += [os.path.join(base_dir, REFERENCE_SUBDIR, f) for f in (CORPACTIONS_FILE, CORRECTIONS_FILE)]
     for csv_path in watched:
         if os.path.exists(csv_path) and os.path.getmtime(csv_path) > json_mtime:
@@ -2424,6 +2515,7 @@ def get_data_files_info(base_dir):
             ref('MidSmallcap 400 constituents', MIDSMALL400_FILE),
             ref('Corporate actions', CORPACTIONS_FILE, folder=os.path.join(base_dir, REFERENCE_SUBDIR)),
             ref('Sector mapping', SECTOR_FILE),
+            ref('Market cap (NSE mcap file)', MARKETCAP_FILE),
             ref('Processed data (dashboard JSON)', PROCESSED_FILE),
         ],
     }

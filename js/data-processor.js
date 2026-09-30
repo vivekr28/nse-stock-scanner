@@ -28,6 +28,7 @@ function processData() {
   Store.dailyBySymbol = {};
   Store.symbolToISIN = {};
   const dateSet = new Set();
+  const etfLatest = {};   // ISIN -> newest row of each excluded ETF/fund (Data Quality tab)
 
   for (const row of data) {
     const sym = (row[colSymbol] || '').trim();
@@ -51,6 +52,17 @@ function processData() {
 
     if (isNaN(close) || close <= 0) continue;
 
+    // ETFs / fund units (ISIN INF...) are not stocks: skip, but remember the newest row. Kept out of dateSet so a
+    // fund can never decide which day is the latest trading day.
+    if (isFundIsin(isin)) {
+      const ts = parseDate(dateStr);
+      const kept = etfLatest[isin];
+      if (!kept || ts >= kept.ts) {
+        etfLatest[isin] = { ts, symbol: sym, name: companyName, isin, series, lastTradeDate: dateStr, close, turnover: turnover || 0 };
+      }
+      continue;
+    }
+
     dateSet.add(dateStr);
 
     const isinKey = isin;
@@ -63,6 +75,10 @@ function processData() {
       isin, companyName
     });
   }
+
+  Store.excludedEtfs = Object.values(etfLatest)
+    .map(({ ts, ...e }) => e)
+    .sort((a, b) => a.symbol.localeCompare(b.symbol));
 
   // Sort dates
   Store.dates = Array.from(dateSet).sort((a, b) => parseDate(a) - parseDate(b));

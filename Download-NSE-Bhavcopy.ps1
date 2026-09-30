@@ -402,6 +402,37 @@ catch {
     Write-Host "  Warning: Could not download EQUITY_L.csv - $($_.Exception.Message)" -ForegroundColor Yellow
 }
 
+# -- Download NSE market-cap file (mcap*.csv inside the PR<ddMMyy>.zip bhavcopy archive) ----
+# One row per listed security with Close x Issue Size in Rs. Falls back day by day (holidays / not yet published).
+Write-Host "`nDownloading market-cap file..." -ForegroundColor Cyan
+$MarketCapFile = Join-Path $MergedFolder "NSE_MarketCap.csv"
+$mcapDone = $false
+for ($back = 0; $back -le 10 -and -not $mcapDone; $back++) {
+    $mcapDate = (Get-Date).AddDays(-$back)
+    if ($mcapDate.DayOfWeek -in 'Saturday','Sunday') { continue }
+    $mcapZip = Join-Path ([System.IO.Path]::GetTempPath()) ("PR{0}.zip" -f $mcapDate.ToString("ddMMyy"))
+    try {
+        $null = Invoke-WebRequest -Uri ("https://nsearchives.nseindia.com/archives/equities/bhavcopy/pr/PR{0}.zip" -f $mcapDate.ToString("ddMMyy")) `
+            -Headers $Headers -WebSession $Session -OutFile $mcapZip -UseBasicParsing -TimeoutSec 60 -ErrorAction Stop
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $zip = [System.IO.Compression.ZipFile]::OpenRead($mcapZip)
+        try {
+            $entry = $zip.Entries | Where-Object { $_.Name -like "mcap*.csv" } | Select-Object -First 1
+            if ($entry) {
+                [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $MarketCapFile, $true)
+                $mcapDone = $true
+                Write-Host "  Market cap file downloaded ($($mcapDate.ToString('dd-MMM-yyyy')), $([math]::Round((Get-Item $MarketCapFile).Length / 1KB, 1)) KB)" -ForegroundColor Green
+            }
+        }
+        finally { $zip.Dispose() }
+    }
+    catch { }
+    finally { if (Test-Path $mcapZip) { Remove-Item $mcapZip -Force -ErrorAction SilentlyContinue } }
+}
+if (-not $mcapDone) {
+    Write-Host "  Warning: Could not download the market-cap file - market caps fall back to Sector-Stock-Mapping.csv" -ForegroundColor Yellow
+}
+
 # -- Download Nifty MidSmallcap 400 constituent list ---------------------------
 Write-Host "`nDownloading MidSmallcap 400 constituents..." -ForegroundColor Cyan
 $MidSmall400File = Join-Path $MergedFolder "MidSmallcap400_Constituents.csv"
@@ -808,10 +839,13 @@ if ($AllBand.Count -gt 0) {
     }
 }
 
-# -- Copy sector mapping if present --------------------------------------------
-$SectorSrc = Join-Path $ScriptDir "Sector-Stock-Mapping.csv"
+# -- Seed the sector mapping from the git-tracked copy if NSE_DATA has none ------
+# reference-data\Sector-Stock-Mapping.csv is written by src/build_screener_classification.py; the older
+# location (next to this script) is still honoured.
 $SectorDst = Join-Path $MergedFolder "Sector-Stock-Mapping.csv"
-if ((Test-Path $SectorSrc) -and -not (Test-Path $SectorDst)) {
+$SectorSrc = @((Join-Path $ReferenceFolder "Sector-Stock-Mapping.csv"), (Join-Path $ScriptDir "Sector-Stock-Mapping.csv")) |
+    Where-Object { Test-Path $_ } | Select-Object -First 1
+if ($SectorSrc -and -not (Test-Path $SectorDst)) {
     Copy-Item $SectorSrc $SectorDst
     Write-Host "  Copied sector mapping to NSE_Data folder." -ForegroundColor Cyan
 }

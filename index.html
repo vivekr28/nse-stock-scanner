@@ -765,6 +765,8 @@
       <div class="stat-card"><div class="label">Sector Matched</div><div class="value" id="dqSectorMatched">-</div></div>
       <div class="stat-card"><div class="label">Unmatched</div><div class="value" id="dqUnmatched">-</div></div>
       <div class="stat-card"><div class="label">Not Traded (Stale)</div><div class="value" id="dqStaleCount">-</div></div>
+      <div class="stat-card"><div class="label">ETFs Excluded</div><div class="value" id="dqEtfCount">-</div></div>
+      <div class="stat-card"><div class="label">REITs / InvITs Excluded</div><div class="value" id="dqTrustCount">-</div></div>
       <div class="stat-card"><div class="label">Unadjusted Corp Actions</div><div class="value" id="dqCorpActionCount">-</div></div>
       <div class="stat-card"><div class="label">Price Adjustments Applied</div><div class="value" id="dqAdjustedCount">-</div></div>
     </div>
@@ -775,6 +777,8 @@
     <button class="dq-tab" data-tab="dqNoTrade" onclick="dqSwitchTab('dqNoTrade')">In Sector Mapping but NOT in Bhavcopy</button>
     <button class="dq-tab" data-tab="dqStale" onclick="dqSwitchTab('dqStale')">In Bhavcopy but NOT traded on latest day</button>
     <button class="dq-tab" data-tab="dqNoBhav" onclick="dqSwitchTab('dqNoBhav')">In Price Band but NOT in Bhavcopy</button>
+    <button class="dq-tab" data-tab="dqEtf" onclick="dqSwitchTab('dqEtf')">ETFs / Funds Excluded</button>
+    <button class="dq-tab" data-tab="dqTrust" onclick="dqSwitchTab('dqTrust')">REITs / InvITs Excluded</button>
     <button class="dq-tab" data-tab="dqCorpAction" onclick="dqSwitchTab('dqCorpAction')">Recent Corporate Actions Not Price-Adjusted</button>
     <button class="dq-tab" data-tab="dqAdjusted" onclick="dqSwitchTab('dqAdjusted')">Price Adjustments Applied</button>
     <button class="dq-tab" data-tab="dqFull" onclick="dqSwitchTab('dqFull')">Full Price Verification (all stocks vs TradingView) <span id="dqFullBadge" style="font-size:12px;margin-left:6px;"></span></button>
@@ -794,6 +798,14 @@
   <div class="card dq-section-body" id="dqStaleBody" style="display:none;">
     <p style="color:var(--text2);font-size:12px;margin:8px 0;">These stocks have historical data but didn't trade on the most recent trading day. They are excluded from the scanner and analysis.</p>
     <div class="table-wrap"><table id="dqStaleTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
+  </div>
+  <div class="card dq-section-body" id="dqEtfBody" style="display:none;">
+    <p style="color:var(--text2);font-size:12px;margin:8px 0;">The dashboard covers stocks only. These ETFs / mutual-fund units (ISIN starting INF) trade in the same NSE series as stocks, so they are filtered out of the bhavcopy before any scanning, breadth or sector/industry analysis.</p>
+    <div class="table-wrap"><table id="dqEtfTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
+  </div>
+  <div class="card dq-section-body" id="dqTrustBody" style="display:none;">
+    <p style="color:var(--text2);font-size:12px;margin:8px 0;">REIT and InvIT units are trusts, not company shares. NSE trades them in their own series (RR / IV), so the EQ/BE filter never lets them into the stock data. Listed here for reference, from NSE's market-cap file (needs Refresh Data to be present).</p>
+    <div class="table-wrap"><table id="dqTrustTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
   </div>
   <div class="card dq-section-body" id="dqNoBhavBody" style="display:none;">
     <p style="color:var(--text2);font-size:12px;margin:8px 0;">These stocks have band data but no trading data.</p>

@@ -29,6 +29,7 @@ function resetStore() {
   Store.bandBySymbol = {};
   Store.symbolToISIN = {};
   Store.staleStocks = [];
+  Store.excludedEtfs = [];
   Store.loaded = { bhav: true, band: false, sector: true };
 }
 
@@ -140,15 +141,15 @@ test('processData: fewer than 22 days -> monthlyChangePct falls back to change s
 test('processData: a stock whose last trade predates the global latest date is "stale" - tracked and excluded', () => {
   resetStore();
   Store.bhavData = [
-    bhavRow({ symbol: 'FRESH', date: '1-Jan-2025', open: 10, high: 11, low: 9, close: 10, prev: 10, isin: 'INFRESH' }),
-    bhavRow({ symbol: 'FRESH', date: '2-Jan-2025', open: 10, high: 11, low: 9, close: 10, prev: 10, isin: 'INFRESH' }),
+    bhavRow({ symbol: 'FRESH', date: '1-Jan-2025', open: 10, high: 11, low: 9, close: 10, prev: 10, isin: 'INEFRESH' }),
+    bhavRow({ symbol: 'FRESH', date: '2-Jan-2025', open: 10, high: 11, low: 9, close: 10, prev: 10, isin: 'INEFRESH' }),
     bhavRow({ symbol: 'STALE', date: '1-Jan-2025', open: 10, high: 11, low: 9, close: 10, prev: 10, isin: 'INSTALE' }),
     // STALE has no row on 2-Jan-2025, so its last trade date (1-Jan) != Store.latestDate (2-Jan)
   ];
   processData();
 
   assert.equal(Store.latestDate, '2-Jan-2025');
-  assert.ok(Store.latestBySymbol.INFRESH);
+  assert.ok(Store.latestBySymbol.INEFRESH);
   assert.equal(Store.latestBySymbol.INSTALE, undefined);
   assert.equal(Store.staleStocks.length, 1);
   assert.equal(Store.staleStocks[0].symbol, 'STALE');
@@ -282,4 +283,76 @@ test('processBandData: bandPct is stored as the raw trimmed cell text, with no "
 
   assert.equal(Store.latestBySymbol.INAAA.bandPct, '20');       // not '20%'
   assert.equal(Store.latestBySymbol.INBBB.bandPct, 'No Band');  // not 'No Band%'
+});
+
+// ─── ETF / fund filtering (ISIN starting INF is not a stock) ────────────────────────────────
+
+test('isFundIsin: INF (mutual fund / ETF) vs INE (company share)', () => {
+  assert.equal(sb.isFundIsin('INF204K01XI3'), true);
+  assert.equal(sb.isFundIsin('inf204k01xi3'), true);
+  assert.equal(sb.isFundIsin('INE002A01018'), false);
+  assert.equal(sb.isFundIsin(''), false);
+  assert.equal(sb.isFundIsin(undefined), false);
+});
+
+test('processData: ETF rows (INF ISIN) are left out of the stock data and listed in Store.excludedEtfs', () => {
+  resetStore();
+  Store.bhavData = [
+    bhavRow({ symbol: 'STOCKCO', date: '1-Jan-2025', open: 10, high: 11, low: 9, close: 10, prev: 10, isin: 'INE1STK01011' }),
+    bhavRow({ symbol: 'GOLDETF', date: '1-Jan-2025', open: 50, high: 51, low: 49, close: 50, prev: 50, isin: 'INF1ETF01011',
+             companyName: 'Some Gold ETF', turnover: 7 }),
+    bhavRow({ symbol: 'GOLDETF', date: '2-Jan-2025', open: 52, high: 53, low: 51, close: 52, prev: 50, isin: 'INF1ETF01011',
+             companyName: 'Some Gold ETF', turnover: 9 }),
+    bhavRow({ symbol: 'STOCKCO', date: '2-Jan-2025', open: 10, high: 12, low: 9, close: 11, prev: 10, isin: 'INE1STK01011' }),
+  ];
+  processData();
+
+  // JSON round-trip: Store lives in the vm sandbox (another realm), so strict deepEqual would reject its arrays/objects
+  const plain = (v) => JSON.parse(JSON.stringify(v));
+  assert.deepEqual(Object.keys(Store.latestBySymbol), ['INE1STK01011']);
+  assert.deepEqual(Object.keys(Store.dailyBySymbol), ['INE1STK01011']);
+  assert.equal(Store.symbolToISIN[sb.normalizeSymbol('GOLDETF')], undefined);
+  assert.deepEqual(plain(Store.excludedEtfs), [{
+    symbol: 'GOLDETF', name: 'Some Gold ETF', isin: 'INF1ETF01011', series: 'EQ',
+    lastTradeDate: '2-Jan-2025', close: 52, turnover: 9,      // the newest of its two rows; no internal sort key leaked
+  }]);
+});
+
+test('processData: a fund that trades after every stock does not move the latest date or make stocks stale', () => {
+  resetStore();
+  Store.bhavData = [
+    bhavRow({ symbol: 'STOCKCO', date: '1-Jan-2025', open: 10, high: 11, low: 9, close: 10, prev: 10, isin: 'INE1STK01011' }),
+    bhavRow({ symbol: 'NIFTYETF', date: '3-Jan-2025', open: 20, high: 21, low: 19, close: 20, prev: 20, isin: 'INF2ETF01011' }),
+  ];
+  processData();
+
+  assert.equal(Store.latestDate, '1-Jan-2025');
+  assert.equal(Store.staleStocks.length, 0);
+  assert.ok(Store.latestBySymbol.INE1STK01011);
+  assert.equal(Store.excludedEtfs[0].lastTradeDate, '3-Jan-2025');
+});
+
+test('processData: no ETFs gives an empty Store.excludedEtfs', () => {
+  resetStore();
+  Store.bhavData = [
+    bhavRow({ symbol: 'STOCKCO', date: '1-Jan-2025', open: 10, high: 11, low: 9, close: 10, prev: 10, isin: 'INE1STK01011' }),
+  ];
+  processData();
+  assert.equal(Store.excludedEtfs.length, 0);
+});
+
+test('processBandData: a price-band row for an ETF is ignored', () => {
+  resetStore();
+  Store.loaded.band = true;
+  Store.bhavData = [
+    bhavRow({ symbol: 'STOCKCO', date: '1-Jan-2025', open: 10, high: 11, low: 9, close: 10, prev: 10, isin: 'INE1STK01011' }),
+    bhavRow({ symbol: 'GOLDETF', date: '1-Jan-2025', open: 50, high: 51, low: 49, close: 50, prev: 50, isin: 'INF1ETF01011' }),
+  ];
+  Store.bandData = [
+    bandRow({ symbol: 'STOCKCO', upper: 11, lower: 9, bandPct: '20', date: '1-Jan-2025' }),
+    bandRow({ symbol: 'GOLDETF', upper: 60, lower: 40, bandPct: '20', date: '1-Jan-2025' }),
+  ];
+  processData();
+
+  assert.deepEqual(Object.keys(Store.bandBySymbol), ['INE1STK01011']);
 });

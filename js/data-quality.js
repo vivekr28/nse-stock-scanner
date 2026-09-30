@@ -2,9 +2,9 @@
 // DATA QUALITY — cross-file matching report
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// The 8 report sections are sub-tabs (dq-tabbar in index.html): exactly one
+// The 10 report sections are sub-tabs (dq-tabbar in index.html): exactly one
 // dq-section-body is visible at a time, matching the .tab[data-tab] pattern
-// the Market Breadth tab already uses (brdSwitchTab). All 8 are rendered
+// the Market Breadth tab already uses (brdSwitchTab). All 10 are rendered
 // eagerly by renderDataQuality()/dqRenderCorpActions()/etc. regardless of
 // which is visible, so switching is purely a display toggle - no re-render.
 function dqSwitchTab(id) {
@@ -66,6 +66,8 @@ function renderDataQuality() {
   document.getElementById('dqSectorMatched').textContent = sectorMatched + ' / ' + bhavKeys.size;
   document.getElementById('dqUnmatched').textContent = noSector.length + noBand.length + noTrade.length + noBhav.length;
   document.getElementById('dqStaleCount').textContent = (Store.staleStocks || []).length;
+  document.getElementById('dqEtfCount').textContent = (Store.excludedEtfs || []).length;
+  document.getElementById('dqTrustCount').textContent = (Store.excludedTrusts || []).length;
 
   // Table: no sector mapping
   const t1 = document.getElementById('dqNoSectorTable');
@@ -114,6 +116,28 @@ function renderDataQuality() {
       `<tr><td>${i+1}</td><td>${s.symbol}</td><td>${s.series}</td><td>${fmt2(s.close)}</td>
        <td>${s.lastTradeDate}</td><td>${s.tradingDays}</td>
        <td style="color:var(--orange)">Not traded since ${s.lastTradeDate}</td></tr>`).join('');
+
+  // Table: ETFs / funds filtered out of the stock data
+  const etfs = Store.excludedEtfs || [];
+  const t6 = document.getElementById('dqEtfTable');
+  t6.querySelector('thead tr').innerHTML = '<th>#</th><th>Symbol</th><th>Name</th><th>ISIN</th><th>Series</th><th>Last Trade Date</th><th>Close</th><th>Turnover(Cr)</th>';
+  t6.querySelector('tbody').innerHTML = etfs.length === 0
+    ? '<tr><td colspan="8" style="text-align:center;color:var(--text2)">No ETFs / funds in the bhavcopy</td></tr>'
+    : [...etfs].sort((a, b) => a.symbol.localeCompare(b.symbol)).map((e, i) =>
+      `<tr><td>${i+1}</td><td>${escapeHtml(e.symbol)}</td><td>${escapeHtml(e.name || '')}</td><td>${escapeHtml(e.isin)}</td>
+       <td>${escapeHtml(e.series)}</td><td>${escapeHtml(e.lastTradeDate)}</td><td>${fmt2(e.close)}</td>
+       <td>${fmtTurnoverCr(e.turnover)}</td></tr>`).join('');
+
+  // Table: REIT / InvIT units (series RR / IV) kept out of the stock data
+  const trusts = Store.excludedTrusts || [];
+  const t7 = document.getElementById('dqTrustTable');
+  t7.querySelector('thead tr').innerHTML = '<th>#</th><th>Symbol</th><th>Name</th><th>Type</th><th>Series</th><th>Trade Date</th><th>Close</th><th>Market Cap</th>';
+  t7.querySelector('tbody').innerHTML = trusts.length === 0
+    ? '<tr><td colspan="8" style="text-align:center;color:var(--text2)">No REIT / InvIT units found (they come from NSE_MarketCap.csv)</td></tr>'
+    : trusts.map((u, i) =>
+      `<tr><td>${i+1}</td><td>${escapeHtml(u.symbol)}</td><td>${escapeHtml(u.name || '')}</td><td>${escapeHtml(u.type)}</td>
+       <td>${escapeHtml(u.series)}</td><td>${escapeHtml(u.tradeDate || '')}</td><td>${u.close == null ? '-' : fmt2(u.close)}</td>
+       <td>${u.marketCap == null ? '-' : fmtCr(u.marketCap)}</td></tr>`).join('');
 
   dqRenderCorpActions();
   dqLoadTvState();
