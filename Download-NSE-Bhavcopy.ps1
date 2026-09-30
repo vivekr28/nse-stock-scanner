@@ -839,10 +839,13 @@ if ($AllBand.Count -gt 0) {
     }
 }
 
-# -- Copy sector mapping if present --------------------------------------------
-$SectorSrc = Join-Path $ScriptDir "Sector-Stock-Mapping.csv"
+# -- Seed the sector mapping from the git-tracked copy if NSE_DATA has none ------
+# reference-data\Sector-Stock-Mapping.csv is written by src/build_screener_classification.py; the older
+# location (next to this script) is still honoured.
 $SectorDst = Join-Path $MergedFolder "Sector-Stock-Mapping.csv"
-if ((Test-Path $SectorSrc) -and -not (Test-Path $SectorDst)) {
+$SectorSrc = @((Join-Path $ReferenceFolder "Sector-Stock-Mapping.csv"), (Join-Path $ScriptDir "Sector-Stock-Mapping.csv")) |
+    Where-Object { Test-Path $_ } | Select-Object -First 1
+if ($SectorSrc -and -not (Test-Path $SectorDst)) {
     Copy-Item $SectorSrc $SectorDst
     Write-Host "  Copied sector mapping to NSE_Data folder." -ForegroundColor Cyan
 }

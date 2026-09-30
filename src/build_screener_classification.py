@@ -15,7 +15,7 @@ How it works
      companies (`?page=N` is disallowed by Screener's robots.txt, so it is not used).
   3. Fetches the company page of every stock the walk did not return, and re-fetches such entries once they are
      older than --max-age-days (walked entries are refreshed by every walk).
-  4. Writes Sector-Stock-Mapping.csv: `Sector` = Screener Sector, `Basic Industry` = Screener Industry (the finest
+  4. Writes Sector-Stock-Mapping.csv (to NSE_DATA/ and to the git-tracked reference-data/): `Sector` = Screener Sector, `Basic Industry` = Screener Industry (the finest
      tier, ~190 values), plus `Macro Sector` and `Industry Group`. Market cap is not stored here: it comes from
      NSE_MarketCap.csv (see nse_server.load_market_caps).
 Results are cached in screener-classification-cache.json; --skip-walk reuses the cache and only fetches missing or
@@ -28,6 +28,7 @@ import html
 import json
 import os
 import re
+import shutil
 import time
 from datetime import date, timedelta
 import urllib.error
@@ -38,6 +39,7 @@ UA = {'User-Agent': 'Mozilla/5.0 (personal research; low rate)'}
 EQUITY_LIST_FILE = 'EQUITY_L.csv'
 MAPPING_FILE = 'Sector-Stock-Mapping.csv'
 CACHE_FILE = 'screener-classification-cache.json'
+REFERENCE_SUBDIR = 'reference-data'   # git-tracked copy of the mapping, so a fresh clone works without a scrape
 OUT_COLUMNS = ['Stock Name', 'Listing Date', 'Basic Industry', 'Sector', 'Macro Sector', 'Industry Group']
 
 
@@ -166,6 +168,10 @@ def main():
             writer.writerow({'Stock Name': symbol, 'Listing Date': listed, 'Basic Industry': industry,
                              'Sector': sector, 'Macro Sector': macro, 'Industry Group': group})
     print(f'Wrote {len(universe) - len(unresolved)} of {len(universe)} stocks to {MAPPING_FILE}')
+    reference_dir = os.path.join(args.dir, REFERENCE_SUBDIR)
+    os.makedirs(reference_dir, exist_ok=True)
+    shutil.copyfile(mapping_path, os.path.join(reference_dir, MAPPING_FILE))
+    print(f'Copied to {REFERENCE_SUBDIR}/{MAPPING_FILE} (git-tracked; commit it when it changes)')
     if unresolved:
         print('No classification found (shown as Undefined-Diversified):', ', '.join(unresolved))
 

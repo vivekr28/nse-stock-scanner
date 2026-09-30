@@ -129,6 +129,12 @@ def test_main_writes_unclassifiable_stocks_with_blank_tiers(run):
     assert list(rows) == SYMBOLS                                     # every EQUITY_L symbol gets a row
 
 
+def test_main_also_writes_the_git_tracked_copy_in_reference_data(run, tmp_path):
+    run({'/market/': ''})
+    live = (tmp_path / 'NSE_DATA' / 'Sector-Stock-Mapping.csv').read_bytes()
+    assert (tmp_path / 'reference-data' / 'Sector-Stock-Mapping.csv').read_bytes() == live
+
+
 def test_main_output_has_no_market_cap_or_index_columns(run, tmp_path):
     run({'/market/': ''})
     header = (tmp_path / 'NSE_DATA' / 'Sector-Stock-Mapping.csv').read_text(encoding='utf-8').splitlines()[0]
