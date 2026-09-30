@@ -16,6 +16,7 @@ const Store = {
   low52w: {},           // symbol -> 52w low
   adr: {},              // symbol -> average daily range %
   bandBySymbol: {},     // ISIN -> {upper, lower, bandPct}
+  excludedTrusts: [],   // [{symbol, name, type: 'REIT'|'InvIT', series, tradeDate, close, marketCap}] - REIT/InvIT units (series RR/IV) kept out of the stock data; from NSE's market-cap file, server only; see Data Quality tab
   excludedEtfs: [],     // [{symbol, name, isin, series, lastTradeDate, close, turnover}] - ETFs/funds (ISIN INF...) left out of the stock data; see Data Quality tab
   symbolToISIN: {},     // normalizedSymbol -> ISIN
   ewIndex: null,        // {cols, bars: [[date,open,high,low,close,turnover,count],...], constituentCount} or null

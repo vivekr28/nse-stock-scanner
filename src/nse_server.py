@@ -60,7 +60,7 @@ FULL_VERIFY_PREV_FILE = 'TradingViewFullVerification.prev.json'
 REPORTS_SUBDIR = 'verification-reports'
 # Bump whenever processed_data.json gains/changes a field the client relies on: startup then
 # reprocesses an older cache by itself instead of silently serving output missing the new field.
-PROCESSED_SCHEMA = 3
+PROCESSED_SCHEMA = 4
 CORRECTION_COLUMNS = ['ISIN', 'SYMBOL', 'EXDATE', 'FACTOR', 'STATUS', 'CHECKED_AT', 'NOTE']
 
 # ─── TradingView correction run state (polled by the Data Quality tab) ───────
@@ -177,6 +177,35 @@ def normalize_symbol(s):
 
 # Preference when NSE lists the same symbol under several series (EQ is the main board)
 _MCAP_SERIES_RANK = {'EQ': 0, 'BE': 1, 'BZ': 2, 'SM': 3, 'ST': 4}
+
+
+# REIT and InvIT units are trusts, not company shares; NSE trades them in their own series, so the EQ/BE filter never
+# lets them into the stock data. They are listed on the Data Quality tab for reference.
+_TRUST_SERIES = {'RR': 'REIT', 'IV': 'InvIT'}
+
+
+def load_trust_units(filepath):
+    """NSE mcap*.csv -> [{symbol, name, type ('REIT' | 'InvIT'), series, tradeDate, close, marketCap (Rs crore)}], sorted
+    REITs first, then InvITs, each by symbol. Empty list if the file is missing/unreadable."""
+    if not os.path.exists(filepath):
+        return []
+    units = []
+    try:
+        with open(filepath, 'r', encoding='latin-1', newline='') as f:
+            for row in csv.DictReader(f):
+                row = {(k or '').strip(): (v or '').strip() for k, v in row.items()}
+                kind = _TRUST_SERIES.get(row.get('Series', ''))
+                if not kind or not row.get('Symbol'):
+                    continue
+                cap = parse_num(row.get('Market Cap(Rs.)') or '')
+                units.append({
+                    'symbol': row['Symbol'], 'name': row.get('Security Name', ''), 'type': kind,
+                    'series': row['Series'], 'tradeDate': row.get('Trade Date', ''),
+                    'close': parse_num(row.get('Close Price/Paid up value(Rs.)') or ''),
+                    'marketCap': round(cap / 1e7, 2) if cap and cap > 0 else None})
+    except (OSError, csv.Error):
+        return []
+    return sorted(units, key=lambda u: (u['type'] != 'REIT', u['symbol']))   # REITs first, then InvITs
 
 
 def load_market_caps(filepath):
@@ -933,6 +962,7 @@ def process_data(base_dir, progress_cb=None):
 
     # Market cap: NSE's daily file wins over the (static) sector-mapping column; covers stocks the mapping lacks
     market_caps = load_market_caps(marketcap_path)
+    excluded_trusts = load_trust_units(marketcap_path)
     if market_caps:
         print(f"    {len(market_caps)} market caps from {MARKETCAP_FILE}")
 
@@ -1158,6 +1188,7 @@ def process_data(base_dir, progress_cb=None):
         'sectorMap': sector_map,
         'staleStocks': stale_stocks,
         'excludedEtfs': excluded_etfs,
+        'excludedTrusts': excluded_trusts,
         'ewIndex': ew_index,
         'unadjustedCorpActions': unadjusted_corp_actions,
         'adjustedCorpActions': adjusted_corp_actions,
