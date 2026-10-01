@@ -22,8 +22,8 @@ const BRD_WEEK_MOVE_PCT = 10;  // 5-trading-day change% threshold, either direct
 const BRD_MONTH_MOVE_PCT = 20; // 21-trading-day change% threshold, either direction
 
 const BRD_METRICS = {
-  above20: { label: '% Stocks Above 20 SMA', prefix: 'above20', countKey: 'above20CloseCount' },
-  above50: { label: '% Stocks Above 50 SMA', prefix: 'above50', countKey: 'above50CloseCount' },
+  above20: { label: '% Stocks Above 20 SMA', prefix: 'above20', line: true, countKey: 'above20CloseCount' },
+  above50: { label: '% Stocks Above 50 SMA', prefix: 'above50', line: true, countKey: 'above50CloseCount' },
   move4d: { label: `% Stocks with ${BRD_DAY_MOVE_PCT}%+ Move (Day)`, prefix: 'move4d', countKey: 'move4dCloseCount' },
   move10w: { label: `% Stocks with ${BRD_WEEK_MOVE_PCT}%+ Move (Week)`, prefix: 'move10w', countKey: 'move10wCloseCount' },
   move20m: { label: `% Stocks with ${BRD_MONTH_MOVE_PCT}%+ Move (Month)`, prefix: 'move20m', countKey: 'move20mCloseCount' },
@@ -31,7 +31,7 @@ const BRD_METRICS = {
 
 let _brdHistory = [];       // cached per renderBreadth() call - [{date, above20Pct, above20Count, ...}]
 let _brdActiveTab = 'above20';
-let brdChart = null, brdCandleSeries = null, brdCountSeries = null;
+let brdChart = null, brdCandleSeries = null, brdLineSeries = null, brdCountSeries = null;
 let _brdCandles = [], _brdCounts = []; // currently-displayed series data, for the crosshair legend below
 
 function renderBreadth() {
@@ -61,12 +61,7 @@ function renderBreadth() {
   _brdHistory = computeBreadthHistories(numDays);
 
   const noteEl = document.getElementById('brdUniverseNote');
-  if (noteEl) {
-    const universe = brdUniverseIsinSet();
-    noteEl.textContent = universe
-      ? `Universe: Nifty MidSmallcap 400 (${universe.size} stocks) — narrowed from the full market to cut single-stock noise`
-      : 'Universe: full market (MidSmallcap 400 constituent list unavailable — reprocess to enable)';
-  }
+  if (noteEl) noteEl.textContent = 'Universe: all NSE stocks';
 
   // Only render the chart immediately if this panel already happens to be the
   // visible tab (e.g. a Phase-2 background refresh while the user is already
@@ -76,20 +71,6 @@ function renderBreadth() {
   // active on first load) measures a zero-size box.
   const panel = document.getElementById('panel-breadth');
   if (panel && panel.classList.contains('active')) brdRenderActiveTab();
-}
-
-// Restricts the breadth universe to the Nifty MidSmallcap 400 constituents
-// (the same list already used for the EW Index chart) instead of all ~2,900
-// stocks - a user-requested noise reduction: the full market includes a long
-// tail of illiquid/thinly-traded names whose single-stock swings dominate a
-// simple % calculation. Falls back to the full market (returns null) if
-// Store.ewIndex/isins isn't available yet (server not reprocessed since this
-// was added, or the MidSmallcap constituents file is missing) - see the
-// "Nifty MidSmallcap 400" note in Design Decisions for why this list is only
-// ever the CURRENT constituents applied across all history, not point-in-time.
-function brdUniverseIsinSet() {
-  const isins = Store.ewIndex && Store.ewIndex.isins;
-  return (isins && isins.length) ? new Set(isins) : null;
 }
 
 // Single pass over every stock's own chronological daily array (not a
@@ -103,7 +84,6 @@ function computeBreadthHistories(numDays) {
   const n = historyDates.length;
   const dateIndex = {};
   historyDates.forEach((d, i) => { dateIndex[d] = i; });
-  const universe = brdUniverseIsinSet();
 
   const mk = () => ({ o: new Array(n).fill(0), h: new Array(n).fill(0), l: new Array(n).fill(0), c: new Array(n).fill(0), tot: new Array(n).fill(0) });
   const above20 = mk(), above50 = mk(), move4d = mk(), move10w = mk(), move20m = mk();
@@ -126,7 +106,6 @@ function computeBreadthHistories(numDays) {
   }
 
   for (const key in Store.dailyBySymbol) {
-    if (universe && !universe.has(key)) continue;
     const days = Store.dailyBySymbol[key];
     const len = days.length;
     let sum20 = 0, sum50 = 0;
@@ -219,6 +198,13 @@ function brdEnsureChart() {
   });
   brdCandleSeries.priceScale().applyOptions({ scaleMargins: { top: 0.1, bottom: 0.1 } });
 
+  // Plain line (close %) for the two SMA tabs; candles for the move tabs.
+  brdLineSeries = brdChart.addSeries(LightweightCharts.LineSeries, {
+    color: BRD_UP_COLOR, lineWidth: 2,
+    priceFormat: { type: 'custom', formatter: v => v.toFixed(1) + '%' },
+  });
+  brdLineSeries.priceScale().applyOptions({ scaleMargins: { top: 0.1, bottom: 0.1 } });
+
   brdCountSeries = brdChart.addSeries(LightweightCharts.HistogramSeries, {
     priceFormat: { type: 'volume' },
     priceScaleId: 'brdCount',
@@ -238,6 +224,10 @@ function brdEnsureChart() {
     const bar = _brdCandles[i];
     const cnt = _brdCounts[i];
     if (!bar) { legendEl.innerHTML = ''; return; }
+    if (BRD_METRICS[_brdActiveTab].line) {
+      legendEl.innerHTML = `<span>% <b>${bar.close.toFixed(1)}%</b></span><span>Stocks <b>${cnt ? cnt.value : 0}</b></span>`;
+      return;
+    }
     legendEl.innerHTML =
       `<span>O <b>${bar.open.toFixed(1)}%</b></span>` +
       `<span>H <b>${bar.high.toFixed(1)}%</b></span>` +
@@ -247,7 +237,8 @@ function brdEnsureChart() {
   }
   brdChart.subscribeCrosshairMove(param => {
     if (!param.time) { updateBrdLegend(null); return; }
-    const idx = _brdCandles.findIndex(c => c.time === param.time);
+    const t = param.time; // BusinessDay objects - compare by value, not identity
+    const idx = _brdCandles.findIndex(c => c.time.year === t.year && c.time.month === t.month && c.time.day === t.day);
     updateBrdLegend(idx >= 0 ? idx : null);
   });
   brdChart._updateBrdLegend = updateBrdLegend;
@@ -269,7 +260,9 @@ function brdRenderActiveTab() {
     counts.push({ time, value: d[metric.countKey], color: bar.close >= bar.open ? BRD_UP_COLOR : BRD_DOWN_COLOR });
   });
 
-  brdCandleSeries.setData(candles);
+  const isLine = !!metric.line;
+  brdCandleSeries.setData(isLine ? [] : candles);
+  brdLineSeries.setData(isLine ? candles.map(c => ({ time: c.time, value: c.close })) : []);
   brdCountSeries.setData(counts);
   _brdCandles = candles;
   _brdCounts = counts;
