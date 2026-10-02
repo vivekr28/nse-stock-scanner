@@ -11,7 +11,8 @@
 
 # -- Parameters ----------------------------------------------------------------
 param(
-    [string]$StartFrom = ""   # Optional: force start date, e.g. "01-Sep-2024" to backfill older data
+    [string]$StartFrom = "",  # Optional: force start date, e.g. "01-Sep-2024" to backfill older data
+    [string]$IndexStartFrom = ""  # Optional: first date of the index closing-value history, e.g. "03-Oct-2024" (default: last 730 days)
 )
 
 # -- Make this script double-click friendly ------------------------------------
@@ -33,7 +34,7 @@ if (-not (Test-Path $DownloadScript)) {
 }
 
 $global:LASTEXITCODE = 0
-& $DownloadScript -NoPause -StartFrom $StartFrom
+& $DownloadScript -NoPause -StartFrom $StartFrom -IndexStartFrom $IndexStartFrom
 $downloadExit = $LASTEXITCODE
 $Host.UI.RawUI.WindowTitle = "NSE Dashboard"   # the downloader sets its own title
 
