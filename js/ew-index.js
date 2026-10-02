@@ -64,7 +64,7 @@ function ewEnsureChart() {
     layout: { background: { color: 'transparent' }, textColor },
     grid: { vertLines: { color: gridColor }, horzLines: { color: gridColor } },
     rightPriceScale: { borderColor: gridColor },
-    timeScale: { borderColor: gridColor },
+    timeScale: { rightBarStaysOnScroll: true, borderColor: gridColor },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
     autoSize: true,
   });
