@@ -1,0 +1,2 @@
+@echo off
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$tvPath = Get-AppxPackage -Name '*TradingView*' | Select-Object -ExpandProperty InstallLocation; Start-Process \"$tvPath\TradingView.exe\" -ArgumentList '--remote-debugging-port=9222'"
