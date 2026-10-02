@@ -152,11 +152,15 @@ function computeBreadthHistories(numDays) {
       if (i >= 50) sum50 -= days[i - 50].close;
 
       const hi = day.high;
+      // priorMax[k] = highest high of the w-1 bars before today, so "new high" means strictly above them
+      // (a flat stock whose high never changes is not making new highs).
+      const priorMax = {};
       for (const k in deques) {
         const dq = deques[k], w = BRD_HIGH_WINDOWS[k];
+        while (dq.length > heads[k] && dq[heads[k]] <= i - w) heads[k]++;
+        priorMax[k] = dq.length > heads[k] ? days[dq[heads[k]]].high : 0;
         while (dq.length > heads[k] && days[dq[dq.length - 1]].high <= hi) dq.pop();
         dq.push(i);
-        while (dq[heads[k]] <= i - w) heads[k]++;
       }
       const athBefore = athMax; // highest high of all earlier bars
       if (hi > athMax) athMax = hi;
@@ -169,7 +173,7 @@ function computeBreadthHistories(numDays) {
           if (i < BRD_HIGH_WINDOWS[k] - 1) continue; // need a full window
           const m = highMetrics[k];
           m.tot[gi]++;
-          if (hi >= days[deques[k][heads[k]]].high) m.c[gi]++; // today's high is the window max
+          if (hi > priorMax[k]) m.c[gi]++;
         }
         if (i >= BRD_ATH_MIN_BARS - 1) {
           highAth.tot[gi]++;
