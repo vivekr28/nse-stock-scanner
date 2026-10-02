@@ -27,11 +27,38 @@ const BRD_METRICS = {
   move4d: { label: `% Stocks with ${BRD_DAY_MOVE_PCT}%+ Move (Day)`, prefix: 'move4d', countKey: 'move4dCloseCount' },
   move10w: { label: `% Stocks with ${BRD_WEEK_MOVE_PCT}%+ Move (Week)`, prefix: 'move10w', countKey: 'move10wCloseCount' },
   move20m: { label: `% Stocks with ${BRD_MONTH_MOVE_PCT}%+ Move (Month)`, prefix: 'move20m', countKey: 'move20mCloseCount' },
+  // Sub-metrics of the "Stocks Making New Highs" tab - picked by its dropdown, not by a tab button.
+  high1m: { label: '% Stocks Making 1M High', prefix: 'high1m', line: true, countKey: 'high1mCloseCount' },
+  high3m: { label: '% Stocks Making 3M High', prefix: 'high3m', line: true, countKey: 'high3mCloseCount' },
+  high1y: { label: '% Stocks Making 1Y High', prefix: 'high1y', line: true, countKey: 'high1yCloseCount' },
+  highAth: { label: '% Stocks Making ATH', prefix: 'highAth', line: true, countKey: 'highAthCloseCount' },
+  // All four new-high lines overlaid on one chart (no single OHLC/count; see brdRenderActiveTab).
+  highAll: { label: '% Stocks Making New Highs (All)', multi: true },
 };
+const BRD_HIGH_LINES = [
+  { key: 'high1m', name: '1M', color: '#18eee7' },
+  { key: 'high3m', name: '3M', color: '#f59e0b' },
+  { key: 'high1y', name: '1Y', color: '#a78bfa' },
+  { key: 'highAth', name: 'ATH', color: '#ff1616' },
+];
+// Trailing-window lengths in trading days. ATH has no window: it is the highest high in all data loaded.
+const BRD_HIGH_WINDOWS = { high1m: 21, high3m: 63, high1y: 252 };
+const BRD_ATH_MIN_BARS = 252; // ATH only counts stocks with >= 1y of history, so early bars of the dataset don't all read as "new highs"
 
 let _brdHistory = [];       // cached per renderBreadth() call - [{date, above20Pct, above20Count, ...}]
 let _brdActiveTab = 'above20';
+
+// The "newhighs" tab shows whichever metric its dropdown selects; every other tab maps 1:1 to a BRD_METRICS key.
+function brdActiveMetricKey() {
+  if (_brdActiveTab !== 'newhighs') return _brdActiveTab;
+  const sel = document.getElementById('brdHighSelect');
+  return (sel && BRD_METRICS[sel.value]) ? sel.value : 'high1m';
+}
+function brdIsMulti() {
+  return !!BRD_METRICS[brdActiveMetricKey()].multi;
+}
 let brdChart = null, brdCandleSeries = null, brdLineSeries = null, brdCountSeries = null;
+let brdMultiSeries = [], _brdMultiData = {};
 let _brdCandles = [], _brdCounts = []; // currently-displayed series data, for the crosshair legend below
 
 function renderBreadth() {
@@ -62,6 +89,7 @@ function renderBreadth() {
 
   const noteEl = document.getElementById('brdUniverseNote');
   if (noteEl) noteEl.textContent = 'Universe: all NSE stocks';
+  // (New Highs tab: windows are 21 / 63 / 252 trading days; ATH = highest high in the data loaded, stocks with >= 1y of history only.)
 
   // Only render the chart immediately if this panel already happens to be the
   // visible tab (e.g. a Phase-2 background refresh while the user is already
@@ -87,6 +115,8 @@ function computeBreadthHistories(numDays) {
 
   const mk = () => ({ o: new Array(n).fill(0), h: new Array(n).fill(0), l: new Array(n).fill(0), c: new Array(n).fill(0), tot: new Array(n).fill(0) });
   const above20 = mk(), above50 = mk(), move4d = mk(), move10w = mk(), move20m = mk();
+  const high1m = mk(), high3m = mk(), high1y = mk(), highAth = mk();
+  const highMetrics = { high1m, high3m, high1y };
 
   // field > reference for all 4 OHLC fields at once
   function tallyAbove(m, gi, day, ref) {
@@ -109,6 +139,10 @@ function computeBreadthHistories(numDays) {
     const days = Store.dailyBySymbol[key];
     const len = days.length;
     let sum20 = 0, sum50 = 0;
+    // Monotonic deques (indices, decreasing highs) give each trailing-window max in O(1) amortised.
+    const deques = { high1m: [], high3m: [], high1y: [] };
+    const heads = { high1m: 0, high3m: 0, high1y: 0 };
+    let athMax = 0;
     for (let i = 0; i < len; i++) {
       const day = days[i];
       const close = day.close;
@@ -117,8 +151,31 @@ function computeBreadthHistories(numDays) {
       sum50 += close;
       if (i >= 50) sum50 -= days[i - 50].close;
 
+      const hi = day.high;
+      for (const k in deques) {
+        const dq = deques[k], w = BRD_HIGH_WINDOWS[k];
+        while (dq.length > heads[k] && days[dq[dq.length - 1]].high <= hi) dq.pop();
+        dq.push(i);
+        while (dq[heads[k]] <= i - w) heads[k]++;
+      }
+      const athBefore = athMax; // highest high of all earlier bars
+      if (hi > athMax) athMax = hi;
+
       const gi = dateIndex[day.date];
       if (gi === undefined) continue;
+
+      if (hi > 0) {
+        for (const k in deques) {
+          if (i < BRD_HIGH_WINDOWS[k] - 1) continue; // need a full window
+          const m = highMetrics[k];
+          m.tot[gi]++;
+          if (hi >= days[deques[k][heads[k]]].high) m.c[gi]++; // today's high is the window max
+        }
+        if (i >= BRD_ATH_MIN_BARS - 1) {
+          highAth.tot[gi]++;
+          if (hi > athBefore) highAth.c[gi]++;
+        }
+      }
 
       if (i >= 19) tallyAbove(above20, gi, day, sum20 / 20);
       if (i >= 49) tallyAbove(above50, gi, day, sum50 / 50);
@@ -150,17 +207,28 @@ function computeBreadthHistories(numDays) {
     move4dOHLC: toOHLC(move4d, i), move4dCloseCount: move4d.c[i],
     move10wOHLC: toOHLC(move10w, i), move10wCloseCount: move10w.c[i],
     move20mOHLC: toOHLC(move20m, i), move20mCloseCount: move20m.c[i],
+    high1mOHLC: toOHLC(high1m, i), high1mCloseCount: high1m.c[i],
+    high3mOHLC: toOHLC(high3m, i), high3mCloseCount: high3m.c[i],
+    high1yOHLC: toOHLC(high1y, i), high1yCloseCount: high1y.c[i],
+    highAthOHLC: toOHLC(highAth, i), highAthCloseCount: highAth.c[i],
   }));
 }
 
 // ── Tab switching ─────────────────────────────────────────────────────────
 function brdSwitchTab(tab) {
-  if (!BRD_METRICS[tab]) return;
+  if (!BRD_METRICS[tab] && tab !== 'newhighs') return;
   _brdActiveTab = tab;
+  const sel = document.getElementById('brdHighSelect');
+  if (sel) sel.style.display = tab === 'newhighs' ? '' : 'none';
   document.querySelectorAll('#brdTabbar .brd-tab').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.tab === tab);
   });
-  document.getElementById('brdChartTitle').textContent = BRD_METRICS[tab].label;
+  document.getElementById('brdChartTitle').textContent = BRD_METRICS[brdActiveMetricKey()].label;
+  brdRenderActiveTab();
+}
+
+function brdHighSelectChanged() {
+  document.getElementById('brdChartTitle').textContent = BRD_METRICS[brdActiveMetricKey()].label;
   brdRenderActiveTab();
 }
 
@@ -205,6 +273,11 @@ function brdEnsureChart() {
   });
   brdLineSeries.priceScale().applyOptions({ scaleMargins: { top: 0.1, bottom: 0.1 } });
 
+  brdMultiSeries = BRD_HIGH_LINES.map(l => brdChart.addSeries(LightweightCharts.LineSeries, {
+    color: l.color, lineWidth: 2, priceLineVisible: false,
+    priceFormat: { type: 'custom', formatter: v => v.toFixed(1) + '%' },
+  }));
+
   brdCountSeries = brdChart.addSeries(LightweightCharts.HistogramSeries, {
     priceFormat: { type: 'volume' },
     priceScaleId: 'brdCount',
@@ -224,7 +297,14 @@ function brdEnsureChart() {
     const bar = _brdCandles[i];
     const cnt = _brdCounts[i];
     if (!bar) { legendEl.innerHTML = ''; return; }
-    if (BRD_METRICS[_brdActiveTab].line) {
+    if (brdIsMulti()) {
+      legendEl.innerHTML = BRD_HIGH_LINES.map(l => {
+        const v = _brdMultiData[l.key] && _brdMultiData[l.key][i];
+        return `<span><i style="display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;background:${l.color}"></i>${l.name} High <b style="color:${l.color}">${v ? v.value.toFixed(1) : '0.0'}%</b></span>`;
+      }).join('');
+      return;
+    }
+    if (BRD_METRICS[brdActiveMetricKey()].line) {
       legendEl.innerHTML = `<span>% <b>${bar.close.toFixed(1)}%</b></span><span>Stocks <b>${cnt ? cnt.value : 0}</b></span>`;
       return;
     }
@@ -249,7 +329,10 @@ function brdRenderActiveTab() {
   brdEnsureChart();
   if (!brdChart) return; // library failed to load
 
-  const metric = BRD_METRICS[_brdActiveTab];
+  const metric = BRD_METRICS[brdActiveMetricKey()];
+  if (metric.multi) { brdRenderMulti(); return; }
+  brdMultiSeries.forEach(sr => sr.setData([]));
+  _brdMultiData = {};
   const ohlcKey = metric.prefix + 'OHLC';
   const candles = [], counts = [];
   _brdHistory.forEach(d => {
@@ -275,5 +358,28 @@ function brdRenderActiveTab() {
   // visible range to fewer bars than actually exist (confirmed live: fit to
   // only ~277 of 507 bars, with a large empty gap of blank space to their
   // left, on the very first render right after the tab was clicked).
+  requestAnimationFrame(() => brdChart.timeScale().fitContent());
+}
+
+// "All" view: the four new-high percentages as overlaid lines on the one price scale; the raw-count
+// pane is left empty since the four counts don't share a single meaningful bar.
+function brdRenderMulti() {
+  brdCandleSeries.setData([]);
+  brdLineSeries.setData([]);
+  brdCountSeries.setData([]);
+  _brdMultiData = {};
+  _brdCandles = [];
+  BRD_HIGH_LINES.forEach((l, idx) => {
+    const data = [];
+    _brdHistory.forEach(d => {
+      const time = ewToBusinessDay(d.date);
+      if (time) data.push({ time, value: d[l.key + 'OHLC'].close });
+    });
+    _brdMultiData[l.key] = data;
+    brdMultiSeries[idx].setData(data);
+    if (idx === 0) _brdCandles = data.map(p => ({ time: p.time })); // time axis for the crosshair lookup
+  });
+  _brdCounts = [];
+  if (brdChart._updateBrdLegend) brdChart._updateBrdLegend(null);
   requestAnimationFrame(() => brdChart.timeScale().fitContent());
 }

@@ -418,6 +418,7 @@ Filter labels use white text (`var(--text)`). `switchFilterTab()` toggles betwee
 - 60-day breadth history chart (canvas, gradient fill, dot markers every 5 points)
 - 6-month (~125 day) breadth history chart (canvas, dot markers every 10 points)
 - `computeBreadthHistory(numDays)` uses pre-built date->index maps for O(1) lookup
+- **Stocks Making New Highs** tab: a dropdown picks 1M / 3M / 1Y / ATH; line chart of % of stocks whose day's high is the max of the trailing 21 / 63 / 252 trading days (ATH = highest high in all loaded data, only stocks with >=252 bars counted; the data only goes back to Sep 2024, so ATH is "since then"). Bars with no full window yet plot 0.
 
 ### 4. Sector Analysis (`panel-sector`) — `js/sector.js`
 

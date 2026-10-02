@@ -573,6 +573,14 @@
     <button class="brd-tab" data-tab="move4d" onclick="brdSwitchTab('move4d')">4%+ Move (Day)</button>
     <button class="brd-tab" data-tab="move10w" onclick="brdSwitchTab('move10w')">10%+ Move (Week)</button>
     <button class="brd-tab" data-tab="move20m" onclick="brdSwitchTab('move20m')">20%+ Move (Month)</button>
+    <button class="brd-tab" data-tab="newhighs" onclick="brdSwitchTab('newhighs')">Stocks Making New Highs</button>
+    <select id="brdHighSelect" onchange="brdHighSelectChanged()" style="display:none;margin-left:8px;">
+      <option value="high1m">1 Month High</option>
+      <option value="high3m">3 Month High</option>
+      <option value="high1y">1 Year High</option>
+      <option value="highAth">All-Time High</option>
+      <option value="highAll">All (overlay)</option>
+    </select>
   </div>
   <div class="chart-container brd-chart-container">
     <div class="ic-title-line1" style="margin-bottom:2px;">
@@ -879,7 +887,7 @@
 <script src="js/data-processor.js?v=2"></script>
 <script src="js/scanner.js?v=2"></script>
 <script src="js/screener.js?v=14"></script>
-<script src="js/breadth.js?v=4"></script>
+<script src="js/breadth.js?v=7"></script>
 <script src="js/sector.js?v=2"></script>
 <script src="js/industry.js?v=10"></script>
 <script src="js/lib/lightweight-charts.standalone.production.js"></script>
