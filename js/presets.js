@@ -53,6 +53,10 @@ const PRESET_FIELDS = [
   { id: 'scrF17Period', type: 'select' },
   { id: 'scrF17Lag', type: 'select' },
   { id: 'scrF17Val', type: 'number' },
+  { id: 'scrF18On', type: 'checkbox' },
+  { id: 'scrF18_1m', type: 'checkbox' },
+  { id: 'scrF18_3m', type: 'checkbox' },
+  { id: 'scrF18_52w', type: 'checkbox' },
   { id: 'scrF13On', type: 'checkbox' },
   { id: 'scrF13Val', type: 'number' },
   { id: 'scrF14On', type: 'checkbox' },
@@ -84,6 +88,7 @@ const DEFAULT_FILTER_STATE = {
   scrF11On: false, scrF11Sector: '',
   scrF12On: false, scrF12Period: '6m', scrF12Val: '0',
   scrF17On: false, scrF17Period: '3m', scrF17Lag: '3m', scrF17Val: '0',
+  scrF18On: false, scrF18_1m: false, scrF18_3m: true, scrF18_52w: false,
   scrF13On: false, scrF13Val: '3',
   scrF14On: false, scrF14Val: '0',
   scrF15On: false, scrF15Period: '1m', scrF15Val: '0',
@@ -108,6 +113,10 @@ function applyPresetState(state) {
   // Presets saved before the ROC timeframe existed compared against one full window
   // ago, so a missing scrF17Lag means "same as the window".
   if ('scrF17Period' in state && !('scrF17Lag' in state)) state = { ...state, scrF17Lag: state.scrF17Period };
+  // The first version of the F18 "Making New High" filter had a single dropdown (scrF18Period) instead of 1M / 3M / 52W tick boxes.
+  if ('scrF18Period' in state && !('scrF18_3m' in state)) {
+    state = { ...state, scrF18_1m: state.scrF18Period === '1m', scrF18_3m: state.scrF18Period === '3m', scrF18_52w: state.scrF18Period === '52w' };
+  }
   for (const f of PRESET_FIELDS) {
     if (!(f.id in state)) continue;
     const el = document.getElementById(f.id);
