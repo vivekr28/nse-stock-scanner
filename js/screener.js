@@ -94,6 +94,26 @@ function computeDynPerformancePartial(days, lookbackDays) {
   return ref.close > 0 ? ((latest.close - ref.close) / ref.close * 100) : NaN;
 }
 
+// Trading-day windows for F18 "Making new high": the same windows as the Market Breadth tab's new-highs indicator
+// (BRD_HIGH_WINDOWS in breadth.js), so a stock counted there is a stock this filter finds.
+const SCR_NEW_HIGH_DAYS = { '1m': 21, '3m': 63, '52w': 252 };
+const SCR_NEW_HIGH_LABELS = { '1m': '1M', '3m': '3M', '52w': '52W' };
+const SCR_NEW_HIGH_PERIODS = ['1m', '3m', '52w'];
+
+// Is the latest bar's HIGH strictly above the highest high of the previous (window - 1) bars? A flat stock whose high
+// never changes is not making a new high. Strict mode needs a full window of history; partial mode (the screener's
+// "allow partial" switch) accepts any stock with at least 5 earlier bars and compares against what exists.
+// Returns { insufficient: true } or { ok, high, priorHigh }.
+function computeDynNewHigh(days, windowDays, allowPartial) {
+  if (days.length < (allowPartial ? 6 : windowDays)) return { insufficient: true };
+  const latest = days[days.length - 1];
+  let priorHigh = 0;
+  for (let i = Math.max(0, days.length - windowDays); i < days.length - 1; i++) {
+    if (days[i].high > priorHigh) priorHigh = days[i].high;
+  }
+  return { ok: latest.high > priorHigh, high: latest.high, priorHigh };
+}
+
 // 'YYYY-MM-DD' (date input) -> local-midnight timestamp, comparable with parseDate() of 'DD-MMM-YYYY' bar dates
 function scrIsoToTs(iso) {
   if (!iso) return NaN;
@@ -309,6 +329,11 @@ function runScreener() {
   const f12On = document.getElementById('scrF12On').checked;
   const f12Period = document.getElementById('scrF12Period').value;
   const f12Val = parseFloat(document.getElementById('scrF12Val').value) || 0;
+
+  const f18On = document.getElementById('scrF18On').checked;
+  // Every ticked window must be a new high (like "Price Above": all ticked averages). Nothing ticked = no restriction.
+  const f18Periods = SCR_NEW_HIGH_PERIODS.filter(p => document.getElementById('scrF18_' + p).checked);
+  const f18Longest = f18Periods.length ? f18Periods.reduce((a, b) => (SCR_NEW_HIGH_DAYS[b] > SCR_NEW_HIGH_DAYS[a] ? b : a)) : null;
 
   const f17On = document.getElementById('scrF17On').checked;
   const f17Period = document.getElementById('scrF17Period').value;
@@ -598,6 +623,27 @@ function runScreener() {
       }
     }
 
+    // F18: Making a new 1M / 3M / 52W high today (every ticked window must be one)
+    if (f18On) {
+      const results = {};
+      for (const p of SCR_NEW_HIGH_PERIODS) results[p] = computeDynNewHigh(days, SCR_NEW_HIGH_DAYS[p], allowPartial);
+      // which of the three windows this stock is making a new high in (shown in the table whatever is ticked)
+      s._newHighs = SCR_NEW_HIGH_PERIODS.filter(p => !results[p].insufficient && results[p].ok).map(p => SCR_NEW_HIGH_LABELS[p]).join(' ');
+      const longest = f18Longest && !results[f18Longest].insufficient ? results[f18Longest] : null;
+      s._priorHigh = longest ? longest.priorHigh : NaN;
+      for (const p of f18Periods) {
+        const r = results[p], label = SCR_NEW_HIGH_LABELS[p];
+        if (r.insufficient) {
+          failReasons.push(`F18: Insufficient history for a ${label} high (need ${SCR_NEW_HIGH_DAYS[p]} days)`);
+        } else if (!r.ok) {
+          failReasons.push(`F18: High ${fmt2(r.high)} not above the prior ${label} high ${fmt2(r.priorHigh)}`);
+        }
+      }
+    } else {
+      s._newHighs = '';
+      s._priorHigh = NaN;
+    }
+
     if (failReasons.length === 0) {
       passed.push(s);
     } else {
@@ -617,7 +663,7 @@ function runScreener() {
   scrSortCol = null;
 
   // Count active filters
-  const activeCount = [f1On, f2On, f3On, f4On, f5On, f6On, f7On, f8On, f9On, f10On, f11On, f12On, f13On, f14On, f15On, f16On, f17On].filter(Boolean).length;
+  const activeCount = [f1On, f2On, f3On, f4On, f5On, f6On, f7On, f8On, f9On, f10On, f11On, f12On, f13On, f14On, f15On, f16On, f17On, f18On].filter(Boolean).length;
 
   // Stats
   const advancing = passed.filter(s => s.changePct > 0).length;
@@ -653,6 +699,7 @@ function renderScreenerTable() {
   const f15On = document.getElementById('scrF15On').checked;
   const f16On = document.getElementById('scrF16On').checked;
   const f17On = document.getElementById('scrF17On').checked;
+  const f18On = document.getElementById('scrF18On').checked;
 
   const cols = [
     { key: 'symbol', label: 'Symbol', fmt: (v, row) => `<a href="#" class="stock-link" data-isin="${escapeHtml(row.isin)}">${escapeHtml(v)}</a>` },
@@ -728,6 +775,14 @@ function renderScreenerTable() {
     const ff = SCR_FIELD_LETTER[document.getElementById('scrF16FromField').value];
     const tf = SCR_FIELD_LETTER[document.getElementById('scrF16ToField').value];
     cols.push({ key: '_dateChg', label: `Chg% (${ff}→${tf})`, fmt: v => isNaN(v) ? '-' : fmtPct(v), cls: v => v >= 0 ? 'positive' : 'negative' });
+  }
+  if (f18On) {
+    const ticked = SCR_NEW_HIGH_PERIODS.filter(p => document.getElementById('scrF18_' + p).checked);
+    cols.push({ key: '_newHighs', label: 'New High In', fmt: v => v ? `<span class="positive">${v}</span>` : '-' });
+    if (ticked.length) {
+      const longest = ticked.reduce((a, b) => (SCR_NEW_HIGH_DAYS[b] > SCR_NEW_HIGH_DAYS[a] ? b : a));
+      cols.push({ key: '_priorHigh', label: `Prior ${SCR_NEW_HIGH_LABELS[longest]} High`, fmt: v => isNaN(v) ? '-' : fmt2(v) });
+    }
   }
   cols.push({ key: 'marketCap', label: 'MCap(Cr)', fmt: v => fmtCr(v) });
 
@@ -821,6 +876,10 @@ function resetScreener() {
   document.getElementById('scrF17Lag').value = '3m';
   mfRocSyncLagSelect('scrF17Period', 'scrF17Lag');
   document.getElementById('scrF17Val').value = '0';
+  document.getElementById('scrF18On').checked = false;
+  document.getElementById('scrF18_1m').checked = false;
+  document.getElementById('scrF18_3m').checked = true;
+  document.getElementById('scrF18_52w').checked = false;
   document.getElementById('scrF13On').checked = false;
   document.getElementById('scrF13Val').value = '3';
   document.getElementById('scrF14On').checked = false;
@@ -1048,7 +1107,7 @@ function updateApplyBtn() {
 }
 
 function updateFilterBadge() {
-  const techIds = ['scrF1On','scrF2On','scrF3On','scrF4On','scrF5On','scrF6On','scrF7On','scrF8On','scrF10On','scrF15On','scrF16On'];
+  const techIds = ['scrF1On','scrF2On','scrF3On','scrF4On','scrF5On','scrF6On','scrF7On','scrF8On','scrF10On','scrF15On','scrF16On','scrF18On'];
   const indIds  = ['scrF9On','scrF11On','scrF12On','scrF13On','scrF14On','scrF17On'];
   const countChecked = ids => ids.filter(id => { const el = document.getElementById(id); return el && el.checked; }).length;
 

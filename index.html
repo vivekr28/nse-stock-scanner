@@ -231,6 +231,19 @@
               </div>
             </div>
 
+            <!-- F18: Making a new high today (any combination of 1M / 3M / 52W; all ticked must be new highs) -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF18On">
+              <span class="scr-label">Making New High:</span>
+              <div class="scr-inputs">
+                <div class="scr-cb-group" title="Today's high is above the highest high of the previous 20 / 62 / 251 trading days (21 / 63 / 252-day windows, the same as the Market Breadth tab). Every ticked window must be a new high.">
+                  <label><input type="checkbox" id="scrF18_1m"> 1M</label>
+                  <label><input type="checkbox" id="scrF18_3m" checked> 3M</label>
+                  <label><input type="checkbox" id="scrF18_52w"> 52W</label>
+                </div>
+              </div>
+            </div>
+
             <!-- F8: Price / SMA proximity -->
             <div class="scr-filter-row">
               <input type="checkbox" id="scrF8On">
@@ -919,7 +932,7 @@
 <script src="js/cache.js?v=2"></script>
 <script src="js/data-processor.js?v=2"></script>
 <script src="js/scanner.js?v=2"></script>
-<script src="js/screener.js?v=14"></script>
+<script src="js/screener.js?v=16"></script>
 <script src="js/breadth.js?v=11"></script>
 <script src="js/sector.js?v=2"></script>
 <script src="js/industry.js?v=10"></script>
@@ -929,7 +942,7 @@
 <script src="js/market-overview.js?v=7"></script>
 <script src="js/industry-charts.js?v=20"></script>
 <script src="js/data-quality.js?v=11"></script>
-<script src="js/presets.js?v=9"></script>
+<script src="js/presets.js?v=11"></script>
 <script src="js/ui.js?v=11"></script>
 <script src="js/nse-download.js?v=4"></script>
 
