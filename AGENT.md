@@ -844,6 +844,39 @@ Also: F7 (circuit exclusion) needs historical band data per day, which today onl
 
 ---
 
+## Planned: "As of Date" Scan in the Stock Scanner (Analysed 2026-10-03, Not Started)
+
+**Goal:** keep the same filters and add a date picker, so the Stock Scanner shows which stocks *would have passed* the filters on that past date. Related to, but different from, the per-stock chart overlay planned above (that marks pass/fail per day for ONE stock; this scans the WHOLE market on ONE date). Not a primary feature: any extra data it needs must load **on demand**, never at dashboard start-up.
+
+**Status today:** not possible - `runScreener()` only evaluates "as of the latest day". But the data and most of the logic exist.
+
+**Approach:** every filter reads the stock's daily price array and treats the LAST bar as "today", so cutting each stock's array at the chosen date (and `Store.dates`) makes them evaluate as of that date with no change to the filter code. The snapshot fields the filters read (`sma20`, `high52w`, `adr`, `changePct`, `monthlyChangePct`, `distFrom52H/L`, `aboveSMA`, ...) are recomputed per stock for that date with the JS indicator maths in `js/data-processor.js` (identical formulas to the server's `process_data()`, kept in step by `tests/test_indicator_parity.py`). Swap `Store.latestBySymbol` / `Store.dailyBySymbol` / `Store.dates` for the as-of versions while the scan runs, then restore them.
+
+**Per filter** (all use data already loaded unless stated):
+- **Works as is (cut-off history):** F1, F2, F3, F4, F5, F6, F8, F10, F15, F18; F16 is already date-based and unaffected.
+- **Works by recomputing the industry aggregates from the as-of snapshot:** F9 (industry RS), F12 (money flow; `computeIndustryMoneyFlow(period, endOffsetDays)` already takes an offset), F17 (money-flow RoC; `computeIndustryMoneyFlowRocMap` likewise), F13 (stocks per industry = stocks that traded that day).
+- **Static, accepted tradeoff:** F11 sector and the industry labels are today's classification (no history), same as the MidSmallcap 400 list.
+- **Needs on-demand data - F7 (exclude circuits):** the band history is on disk (`NSE_DATA/PriceBand/` has one file per trading day and `NSE_PriceBand_Combined.csv` has a `Date` column; 98.6% of stock-days have a row), but the processed data only keeps the LATEST day's band per stock. The band changes often - 5,928 changes between consecutive days, 1,306 of 2,559 stocks changed band at some point - so today's band is wrong for about half the stocks on a past date. The files hold only the band % (2 / 5 / 10 / 20 / 40 / "No Band"); upper/lower circuit prices are prev close x (1 +- band%) and hit-UC/LC uses the same 0.999 / 1.001 tolerances as `process_data()`. Plan: a small server endpoint that reads the combined band file only when a past date is picked and F7 is ticked and returns each stock's band as a list of changes (a few hundred KB; carry the last band forward over the 1.4% of stock-days with no row), cached in the page afterwards.
+- **Needs on-demand data - stocks that stopped trading:** history is kept only for stocks that traded on the latest day (2,559 now); the 290 stocks that did not (delisted / suspended, e.g. EROSMEDIA, last traded 24-Oct-2024) are recorded as `staleStocks` with NO price history. A past-date scan would silently leave them out (survivorship bias). This is the biggest accuracy gap and should be fixed before trusting dates more than a few months back: an on-demand endpoint that returns their history from the bhavcopy (through the same adjustment pipeline).
+- **Approximate or unavailable - F14 (minimum industry market cap):** only today's market cap is stored. Either scale today's market cap by the price ratio (approximate: share counts change) and label it approximate, or skip the filter for past dates.
+
+**Limits to show in the UI:** only ~510 trading days (about 2 years) of daily history are kept per stock and the data starts 02-Sep-2024, so the 52-week (252-day) and 200-day filters are only fully valid for dates in roughly the last 8 months - earlier dates need "Allow partial history". Prices are back-adjusted for splits / bonuses / rights, so ratio-based filters are unaffected but a price is not what was quoted that day. Sector / industry labels are today's.
+
+**Verification plan (this is what makes it trustworthy):**
+- Scanning "as of the latest date" must return exactly the same stocks as today's scan, for every filter.
+- Counts for any date must equal the Market Breadth tab's per-date history (`computeBreadthHistories`): F18 vs its 1M / 3M / 52W new-high counts, F10 (20 SMA) vs its above-20-SMA count.
+- Unit tests with hand-worked past-date fixtures (the screener tests load `js/screener.js` under Node, see `tests-js/screener-newhigh.test.js`), and a real-data check that cutting the data at a past date and running the Python `process_data()` on the truncated bhavcopy gives the same snapshot as the JS as-of snapshot.
+
+**Effort (estimates, not measured):**
+- Core - date picker + the "works as is" and industry-aggregate filters + tests: about 1-2 days.
+- Real historical price bands for F7 (on-demand endpoint): about 0.5-1 day.
+- Stocks that stopped trading (on-demand history): about 1 day.
+- Optional: a "% return since that date" column for the passed stocks (how past passes did): about half a day.
+
+**Recommended order:** core first (no new data), then the delisted-stock history (accuracy), then F7.
+
+---
+
 ## Completed: Equal-Weight Nifty MidSmallcap 400 Chart
 
 **Goal:** Show an equal-weight index chart for Nifty MidSmallcap 400, giving a better read on market breadth than the cap-weighted official index.
