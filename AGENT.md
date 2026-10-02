@@ -73,6 +73,8 @@ NSE-StockScanner/
 │   ├── sector.js                 # Sector analysis table + heatmap
 │   ├── industry.js               # Industry RS scoring, bar chart, heatmap, table, Money Flow (incl. all-periods table)
 │   ├── ew-index.js               # Equal-Weight MidSmallcap 400 candlestick chart (EW Index tab)
+│   ├── market-overview.js        # Market Overview tab: index/sector candlestick (NSE_Indices_Combined.csv, fetched directly) + bottom pane of % stocks making 1M/3M/52Wk/ATH highs (from breadth.js _brdHistory); display only
+│   ├── chart-tools.js            # One-shot Measure + Trend Line drawing tools (series primitive) used by the Market Overview chart
 │   ├── industry-charts.js        # Shared full-screen chart popup (Stock Scanner + Industry Analysis): 2x2/1x1 grid, crosshair legend, ADR/Avg MF stats, drag-to-measure tool, stock selection/watchlist
 │   ├── data-quality.js           # Cross-file matching/mismatch report
 │   ├── presets.js                # Screener filter preset save/load/export/import via IndexedDB
@@ -90,6 +92,8 @@ NSE-StockScanner/
     ├── EQUITY_L.csv              # NSE master equity list (downloaded alongside bhavcopy)
     ├── NSE_MarketCap.csv         # NSE's daily market-cap file (mcap*.csv from the PR<ddMMyy>.zip bhavcopy archive), saved as-is by Download-NSE-Bhavcopy.ps1; overwritten each run
     ├── MidSmallcap400_Constituents.csv  # Nifty MidSmallcap 400 constituent symbols (downloaded from NSE API; overwritten each run — no point-in-time history, see Design Decisions)
+    ├── NSE_Indices_Combined.csv  # Daily OHLC/volume/turnover/PE/PB for ~68 broad-market + sector indexes (merged from IndexClose/, ~2 years; downloader only — not yet loaded by the dashboard)
+    ├── IndexClose/               # Raw NSE ind_close_all_YYYYMMDD.csv, one per trading day (skipped if already present)
     ├── TradingViewFullVerification.json  # Latest full "verify all stocks" run — results + resume checkpoint (.prev.json = the last complete run before it) — see "Full Price Verification Against TradingView"
     ├── verification-reports/     # The Markdown + CSV report written at the end of each full run (TradingView-Verification_<date>_<HHMM>[_partial].md/.csv)
     ├── TradingViewVerification.json  # Last "Verify against TradingView" result (per-stock grades, summary, calendar differences) so flags survive reloads/restarts — see "Verifying Adjusted Prices Against TradingView"

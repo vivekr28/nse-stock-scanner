@@ -358,7 +358,7 @@ function brdRenderActiveTab() {
   // visible range to fewer bars than actually exist (confirmed live: fit to
   // only ~277 of 507 bars, with a large empty gap of blank space to their
   // left, on the very first render right after the tab was clicked).
-  requestAnimationFrame(() => brdChart.timeScale().fitContent());
+  requestAnimationFrame(() => ewFitWithRightPad(brdChart));
 }
 
 // "All" view: the four new-high percentages as overlaid lines on the one price scale; the raw-count
@@ -381,5 +381,5 @@ function brdRenderMulti() {
   });
   _brdCounts = [];
   if (brdChart._updateBrdLegend) brdChart._updateBrdLegend(null);
-  requestAnimationFrame(() => brdChart.timeScale().fitContent());
+  requestAnimationFrame(() => ewFitWithRightPad(brdChart));
 }

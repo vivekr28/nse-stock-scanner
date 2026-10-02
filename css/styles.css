@@ -718,6 +718,7 @@ canvas { max-width: 100%; display: block; }
 
 .ic-layout-toggle { display: flex; gap: 4px; }
 .ic-layout-btn { padding: 5px 10px; font-size: 12px; }
+.ic-layout-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .ic-layout-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 
 /* Data Quality tab — sub-tab bar (one report section visible at a time) */
