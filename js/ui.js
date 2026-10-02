@@ -107,6 +107,10 @@ document.querySelectorAll('.tab').forEach(tab => {
     if (tab.dataset.tab === 'ewindex' && typeof renderEWIndexChart === 'function') {
       renderEWIndexChart();
     }
+    // Market Overview chart: same lazy creation (needs a visible, non-zero container).
+    if (tab.dataset.tab === 'overview' && typeof renderMarketOverview === 'function') {
+      renderMarketOverview();
+    }
     // Same lazy-creation reasoning for the Market Breadth tab's chart.
     if (tab.dataset.tab === 'breadth' && typeof brdRenderActiveTab === 'function') {
       brdRenderActiveTab();

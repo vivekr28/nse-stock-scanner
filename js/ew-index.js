@@ -28,6 +28,17 @@ function ewToBusinessDay(dmy) {
   return { year: parseInt(parts[2], 10), month, day: parseInt(parts[0], 10) };
 }
 
+// Fit all bars into view, leaving EW_RIGHT_PAD_BARS empty bar-widths to the right of the last one.
+// fitContent() alone fits to the last bar exactly (flush with the right edge) because it uses the time
+// scale's rightOffset option, so set that first. Letting the chart do the fit also means the extent is the
+// union of every series on it (e.g. an indicator pane with more history than the candles), which counting one
+// series' bars would get wrong and push the newest bars past the right edge.
+const EW_RIGHT_PAD_BARS = 10;
+function ewFitWithRightPad(chart) {
+  chart.timeScale().applyOptions({ rightOffset: EW_RIGHT_PAD_BARS });
+  chart.timeScale().fitContent();
+}
+
 function ewComputeSMA(closes, length) {
   const out = [];
   let sum = 0;
@@ -138,7 +149,7 @@ function renderEWIndexChart() {
   const infoEl = document.getElementById('ewConstituentInfo');
   if (infoEl) infoEl.textContent = `${ew.constituentCount} constituents · ${ew.bars.length} trading days`;
 
-  ewChart.timeScale().fitContent();
+  ewFitWithRightPad(ewChart);
 }
 
 EW_MA_LENGTHS.forEach(len => {

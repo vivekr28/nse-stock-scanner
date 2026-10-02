@@ -465,6 +465,98 @@ catch {
     Write-Host "  Warning: Could not download MidSmallcap 400 list - $($_.Exception.Message)" -ForegroundColor Yellow
 }
 
+# -- Download NSE index closing values (broad-market + sector indexes) ---------
+# NSE publishes one file per trading day with OHLC/volume/turnover/PE/PB for every index. The raw daily files are
+# kept in NSE_DATA\IndexClose (already-downloaded days are skipped), and the indexes listed below are merged into
+# NSE_DATA\NSE_Indices_Combined.csv. Weekends/holidays have no file (404) and are skipped.
+Write-Host "`nDownloading NSE index closing values..." -ForegroundColor Cyan
+$IndexFolder   = Resolve-FolderCI -Parent $MergedFolder -Name "IndexClose"
+$IndexCombined = Join-Path $MergedFolder "NSE_Indices_Combined.csv"
+$IndexBaseUrl  = "https://nsearchives.nseindia.com/content/indices/ind_close_all_{0}.csv"
+$IndexHistoryDays = 730
+if (-not (Test-Path $IndexFolder)) { New-Item -ItemType Directory -Path $IndexFolder -Force | Out-Null }
+
+# Matched case-insensitively against the "Index Name" column (NSE capitalises inconsistently).
+$IndexWanted = @(
+    # Broad market
+    "Nifty 50","Nifty Next 50","Nifty 100","Nifty 200","Nifty 500","Nifty Total Market","Nifty Next 100",
+    "Nifty Midcap 50","Nifty Midcap 100","Nifty Midcap 150","Nifty Midcap Select","Nifty LargeMidcap 250",
+    "Nifty Smallcap 50","Nifty Smallcap 100","Nifty Smallcap 250","Nifty Smallcap 500","Nifty Microcap 250",
+    "Nifty MidSmallcap 400","India VIX",
+    # Sectors
+    "Nifty Auto","Nifty Bank","Nifty Private Bank","Nifty PSU Bank","Nifty Financial Services",
+    "Nifty Financial Services 25/50","Nifty Financial Services Ex-Bank","Nifty IT","Nifty Pharma","Nifty Healthcare Index",
+    "Nifty FMCG","Nifty Metal","Nifty Energy","Nifty Oil & Gas","Nifty Realty","Nifty Media","Nifty Infrastructure",
+    "Nifty PSE","Nifty India Consumption","Nifty Consumer Durables","Nifty Capital Goods","Nifty Chemicals","Nifty Cement",
+    "Nifty Power","Nifty Insurance","Nifty NBFC","Nifty Retail","Nifty India Defence","Nifty India Railways PSU",
+    "Nifty Capital Markets","Nifty Commodities","Nifty Services Sector","Nifty Telecommunications","Nifty Housing",
+    "Nifty Transportation & Logistics","Nifty Construction","Nifty Hospitals","Nifty Housing Finance",
+    "Nifty Sugar & Ethanol","Nifty Consumer Services","Nifty Commercial & Transport Services","Nifty Non-Cyclical Consumer",
+    "Nifty India Manufacturing","Nifty India Digital","Nifty Mobility","Nifty EV & New Age Automotive","Nifty India Tourism",
+    "Nifty Rural","Nifty Small Finance Banks & Microfinance Institutions"
+)
+
+try {
+    $idxStart = (Get-Date).Date.AddDays(-$IndexHistoryDays)
+    $idxNew = 0; $idxSkipped = 0
+    for ($d = $idxStart; $d -le (Get-Date).Date; $d = $d.AddDays(1)) {
+        if ($d.DayOfWeek -eq 'Saturday' -or $d.DayOfWeek -eq 'Sunday') { continue }
+        $idxFile = Join-Path $IndexFolder ("ind_close_all_{0}.csv" -f $d.ToString("yyyyMMdd"))
+        if (Test-Path $idxFile) { continue }
+        try {
+            $null = Invoke-WebRequest -Uri ($IndexBaseUrl -f $d.ToString("ddMMyyyy")) -Headers $Headers `
+                -UseBasicParsing -TimeoutSec 30 -OutFile $idxFile -ErrorAction Stop
+            $idxNew++
+            Start-Sleep -Milliseconds 300
+        }
+        catch {
+            if (Test-Path $idxFile) { Remove-Item $idxFile -Force -ErrorAction SilentlyContinue }
+            $idxSkipped++   # holiday / not yet published
+        }
+    }
+    Write-Host "  Index files: $idxNew new, $idxSkipped weekdays without a file (holidays / not yet published)" -ForegroundColor Green
+
+    if ($idxNew -gt 0 -or -not (Test-Path $IndexCombined)) {
+        $wanted = @{}
+        foreach ($n in $IndexWanted) { $wanted[$n.ToLower()] = $true }
+        $seen = @{}
+        $rows = New-Object System.Collections.Generic.List[object]
+        foreach ($f in (Get-ChildItem -Path $IndexFolder -Filter "ind_close_all_*.csv" | Sort-Object Name)) {
+            foreach ($r in (Import-Csv -Path $f.FullName)) {
+                $name = ([string]$r.'Index Name').Trim()
+                if (-not $wanted.ContainsKey($name.ToLower())) { continue }
+                $seen[$name.ToLower()] = $true
+                $dt = [datetime]::ParseExact(([string]$r.'Index Date').Trim(), "dd-MM-yyyy", $null)
+                $clean = { param($v) $s = ([string]$v).Trim(); if ($s -eq '-') { '' } else { $s } }
+                $rows.Add([pscustomobject]@{
+                    INDEX_NAME = $name
+                    DATE1      = $dt.ToString("dd-MMM-yyyy", [Globalization.CultureInfo]::InvariantCulture)
+                    OPEN       = & $clean $r.'Open Index Value'
+                    HIGH       = & $clean $r.'High Index Value'
+                    LOW        = & $clean $r.'Low Index Value'
+                    CLOSE      = & $clean $r.'Closing Index Value'
+                    CHANGE_PCT = & $clean $r.'Change(%)'
+                    VOLUME     = & $clean $r.Volume
+                    TURNOVER_CR = & $clean $r.'Turnover (Rs. Cr.)'
+                    PE         = & $clean $r.'P/E'
+                    PB         = & $clean $r.'P/B'
+                    DIV_YIELD  = & $clean $r.'Div Yield'
+                    SORTDATE   = $dt
+                })
+            }
+        }
+        $sorted = $rows | Sort-Object INDEX_NAME, SORTDATE
+        $csv = $sorted | Select-Object INDEX_NAME,DATE1,OPEN,HIGH,LOW,CLOSE,CHANGE_PCT,VOLUME,TURNOVER_CR,PE,PB,DIV_YIELD | ConvertTo-Csv -NoTypeInformation
+        $idxChanged = Save-IfChanged $IndexCombined ($csv -join "`n")
+        $missing = @($IndexWanted | Where-Object { -not $seen.ContainsKey($_.ToLower()) })
+        Write-Host "  Indices combined: $($seen.Count) indexes, $($rows.Count) rows $(if ($idxChanged) { 'updated' } else { 'unchanged' })" -ForegroundColor Green
+        if ($missing.Count -gt 0) { Write-Host "  Not found in any NSE file: $($missing -join '; ')" -ForegroundColor Yellow }
+    }
+}
+catch {
+    Write-Host "  Warning: Could not download index data - $($_.Exception.Message)" -ForegroundColor Yellow
+}
+
 # -- Download Corporate Actions (splits/bonuses/rights, for price adjustment) ---------
 # reference-data\CorporateActions.csv is an ARCHIVE, not a mirror of NSE's feed. NSE is asked for a window
 # (default: the last 3 years) and:

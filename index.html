@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NSE EOD Dashboard</title>
-<link rel="stylesheet" href="css/styles.css?v=11">
+<link rel="stylesheet" href="css/styles.css?v=12">
 </head>
 <body>
 
@@ -70,6 +70,7 @@
   <div class="tab active" data-tab="screener">Stock Scanner</div>
   <div class="tab" data-tab="scanner">Stocks</div>
   <div class="tab" data-tab="breadth">Market Breadth</div>
+  <div class="tab" data-tab="overview">Market Overview</div>
   <div class="tab" data-tab="sector">Sector Analysis</div>
   <div class="tab" data-tab="industry">Industry Analysis</div>
   <div class="tab" data-tab="ewindex" style="display:none;">EW Index</div>
@@ -762,6 +763,38 @@
   <div id="ewChartContainer"></div>
 </div>
 
+<!-- Market Overview Panel -->
+<div id="panel-overview" class="panel">
+  <div class="ew-controls">
+    <span class="ew-title">Index / Sector</span>
+    <select id="moIndexSelect" onchange="renderMarketOverview()"></select>
+    <span class="ew-title">Indicator: stocks making</span>
+    <select id="moIndicatorSelect" onchange="renderMarketOverview()">
+      <option value="high1m">1M High</option>
+      <option value="high3m" selected>3M High</option>
+      <option value="high1y">52Wk High</option>
+      <option value="highAth">ATH</option>
+    </select>
+    <label><input type="checkbox" id="moMA20" onchange="renderMarketOverview()"> 20 SMA</label>
+    <label><input type="checkbox" id="moMA50" onchange="renderMarketOverview()"> 50 SMA</label>
+    <label><input type="checkbox" id="moMA200" onchange="renderMarketOverview()"> 200 SMA</label>
+    <span class="ew-title">Draw:</span>
+    <button class="btn btn-secondary ic-layout-btn" id="moToolMeasure" title="Click a start point, then an end point, to measure % change, price change and bars between them (one use per click on this button)">Measure</button>
+    <button class="btn btn-secondary ic-layout-btn" id="moToolTrend" title="Click two points to draw a trend line (one use per click on this button)">Trend Line</button>
+    <button class="btn btn-secondary ic-layout-btn" id="moToolDelete" title="Delete the selected drawing (click a drawing to select it; Delete key also works)" disabled>Delete</button>
+    <button class="btn btn-secondary ic-layout-btn" id="moToolClear" title="Remove all drawings">Clear</button>
+    <span id="moNote" class="ew-info"></span>
+  </div>
+  <div class="chart-container brd-chart-container">
+    <div class="ic-title-line1" style="margin-bottom:2px;">
+      <h3 id="moChartTitle" style="margin:0;"></h3>
+      <span id="moChartOhlc" class="ic-cell-ohlc"></span>
+    </div>
+    <div id="moSubtitle" class="ic-cell-line2" style="margin-bottom:6px;"></div>
+    <div id="moChartContainer" class="brd-chart"></div>
+  </div>
+</div>
+
 <!-- Data Quality Panel -->
 <div id="panel-dataquality" class="panel">
   <div class="card" style="margin-bottom:16px;">
@@ -887,15 +920,17 @@
 <script src="js/data-processor.js?v=2"></script>
 <script src="js/scanner.js?v=2"></script>
 <script src="js/screener.js?v=14"></script>
-<script src="js/breadth.js?v=8"></script>
+<script src="js/breadth.js?v=11"></script>
 <script src="js/sector.js?v=2"></script>
 <script src="js/industry.js?v=10"></script>
 <script src="js/lib/lightweight-charts.standalone.production.js"></script>
-<script src="js/ew-index.js?v=2"></script>
+<script src="js/ew-index.js?v=5"></script>
+<script src="js/chart-tools.js?v=5"></script>
+<script src="js/market-overview.js?v=7"></script>
 <script src="js/industry-charts.js?v=20"></script>
 <script src="js/data-quality.js?v=11"></script>
 <script src="js/presets.js?v=9"></script>
-<script src="js/ui.js?v=9"></script>
+<script src="js/ui.js?v=10"></script>
 <script src="js/nse-download.js?v=4"></script>
 
 </body>
