@@ -358,6 +358,10 @@
     "scrF17Period": "3m",
     "scrF17Lag": "3m",
     "scrF17Val": "0",
+    "scrF18On": false,
+    "scrF18_1m": false,
+    "scrF18_3m": false,
+    "scrF18_52w": false,
     "scrF13On": true,
     "scrF13Val": "5",
     "scrF14On": true,
@@ -368,9 +372,9 @@
     "scrF16On": true,
     "scrF16FromDate": "2026-08-27",
     "scrF16FromField": "high",
-    "scrF16ToDate": "2026-09-29",
+    "scrF16ToDate": "2026-10-01",
     "scrF16ToField": "low",
-    "scrF16Val": "-12",
+    "scrF16Val": "-15",
     "scrAllowPartial": true
   },
   "RagingVolume-MoneyFlow": {
