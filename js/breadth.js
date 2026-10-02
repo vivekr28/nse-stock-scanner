@@ -253,7 +253,7 @@ function brdEnsureChart() {
     layout: { background: { color: BRD_CHART_BG }, textColor },
     grid: { vertLines: { visible: false }, horzLines: { visible: false } },
     rightPriceScale: { borderColor: gridColor },
-    timeScale: { borderColor: gridColor },
+    timeScale: { rightBarStaysOnScroll: true, borderColor: gridColor },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
     autoSize: true,
   });

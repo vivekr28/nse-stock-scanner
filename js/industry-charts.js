@@ -385,7 +385,7 @@ function icCreateChart(container, volumeScaleId, ohlcTarget) {
     layout: { background: { color: IC_CHART_BG }, textColor },
     grid: { vertLines: { visible: false }, horzLines: { visible: false } },
     rightPriceScale: { borderColor: gridColor },
-    timeScale: { borderColor: gridColor, rightOffset: IC_RIGHT_OFFSET },
+    timeScale: { rightBarStaysOnScroll: true, borderColor: gridColor, rightOffset: IC_RIGHT_OFFSET },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
     autoSize: true,
   });
@@ -802,7 +802,7 @@ function icBuildMoneyFlowChart() {
     layout: { background: { color: IC_CHART_BG }, textColor },
     grid: { vertLines: { visible: false }, horzLines: { color: gridColor, style: LightweightCharts.LineStyle.Dotted } },
     rightPriceScale: { borderColor: gridColor },
-    timeScale: { borderColor: gridColor, rightOffset: 4 },
+    timeScale: { rightBarStaysOnScroll: true, borderColor: gridColor, rightOffset: 4 },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
     autoSize: true,
   });
@@ -887,7 +887,7 @@ function icBuildMfRocChart() {
     layout: { background: { color: IC_CHART_BG }, textColor },
     grid: { vertLines: { visible: false }, horzLines: { color: gridColor, style: LightweightCharts.LineStyle.Dotted } },
     rightPriceScale: { borderColor: gridColor },
-    timeScale: { borderColor: gridColor, rightOffset: 4 },
+    timeScale: { rightBarStaysOnScroll: true, borderColor: gridColor, rightOffset: 4 },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
     autoSize: true,
   });
