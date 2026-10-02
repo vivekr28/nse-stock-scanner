@@ -155,18 +155,24 @@ async function openDataFiles() {
       <td style="${td}">${f.label}<div style="color:var(--text2);font-size:11px;">${f.file}</div></td>
       <td style="${td}">${f.exists ? _dfFmtSize(f.size) : '<span style="color:var(--red)">missing</span>'}</td>
       <td style="${td}">${f.exists ? _dfFmtTime(f.modified) : '-'}</td></tr>`).join('');
+    const ix = d.indices;
+    const idxNote = (ix && ix.indexes)
+      ? `<div style="color:var(--text2);font-size:12px;margin-top:8px;">Index closing values: <b style="color:var(--text)">${ix.indexes}</b> indexes (broad market + sectors), ${ix.rows.toLocaleString()} daily rows, ${ix.earliest} → ${ix.latest}.</div>`
+      : '';
     body.innerHTML = `
       <div style="font-size:13px;font-weight:600;margin-bottom:6px;">Daily price files</div>
       <table style="width:100%;border-collapse:collapse;font-size:13px;">
         <tr><th style="${th}">Data</th><th style="${th}">Latest date</th><th style="${th}">Files on disk</th><th style="${th}">Downloaded</th></tr>
         ${dated('Price data (Bhavcopy)', d.bhavcopy)}
         ${dated('Price band', d.priceBand)}
+        ${d.indexClose ? dated('Index closing values (NSE)', d.indexClose) : ''}
       </table>
       <div style="font-size:13px;font-weight:600;margin:18px 0 6px;">Reference &amp; processed files</div>
       <table style="width:100%;border-collapse:collapse;font-size:13px;">
         <tr><th style="${th}">File</th><th style="${th}">Size</th><th style="${th}">Last updated</th></tr>
         ${files}
       </table>
+      ${idxNote}
       <div style="color:var(--text2);font-size:11px;margin-top:12px;">Times are when each file was last written on disk. Files that are only rewritten when their content changes (MidSmallcap 400, corporate actions) show the last actual change, not the last check.</div>`;
   } catch (e) {
     body.innerHTML = '<span style="color:var(--red)">Could not load file info (' + e.message + '). Is the server running the latest code?</span>';

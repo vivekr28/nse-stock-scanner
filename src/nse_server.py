@@ -38,6 +38,10 @@ PROCESSED_FILE = 'processed_data.json'
 # Saved screener presets (server-managed via /api/presets). Lives in a git-tracked folder.
 PRESETS_FILE = 'scanner-presets/presets.json'
 MIDSMALL400_FILE = 'MidSmallcap400_Constituents.csv'
+# NSE index closing values, written by Download-NSE-Bhavcopy.ps1: raw per-day files + the merged file. Display only
+# here (the Data Files popup); the dashboard's Market Overview tab reads the merged CSV directly.
+INDICES_FILE = 'NSE_Indices_Combined.csv'
+INDEX_RAW_SUBDIR = 'IndexClose'
 # reference-data/ is GIT-TRACKED (unlike the bulk, git-ignored NSE_DATA/): it holds data that may not be
 # obtainable from NSE again later - the corporate-actions feed is a rolling ~3-year window overwritten on
 # every download - plus our own TradingView-derived corrections.
@@ -2499,6 +2503,29 @@ def _file_info(path):
     return {'exists': True, 'size': os.path.getsize(path), 'modified': os.path.getmtime(path)}
 
 
+def _index_file_summary(path):
+    """Distinct index count, row count and date range of the merged index file (cheap: ~27k rows)."""
+    out = {'indexes': 0, 'rows': 0, 'latest': None, 'earliest': None}
+    if not os.path.exists(path):
+        return out
+    names, dates, rows = set(), [], 0
+    try:
+        with open(path, newline='', encoding='utf-8-sig') as f:
+            for r in csv.DictReader(f):
+                rows += 1
+                names.add(r.get('INDEX_NAME'))
+                try:
+                    dates.append(datetime.strptime(r.get('DATE1', ''), '%d-%b-%Y'))
+                except ValueError:
+                    pass
+    except (OSError, csv.Error):
+        return out
+    out.update(indexes=len(names), rows=rows)
+    if dates:
+        out.update(latest=max(dates).strftime('%d-%b-%Y'), earliest=min(dates).strftime('%d-%b-%Y'))
+    return out
+
+
 def get_data_files_info(base_dir):
     """Latest downloaded data files and dates, for the dashboard's Data Files popup."""
     data_dir = os.path.join(base_dir, DATA_SUBDIR)
@@ -2508,11 +2535,15 @@ def get_data_files_info(base_dir):
                                       r'BhavCopy_CM_(\d{8})\.csv', '%Y%m%d'),
         'priceBand': _scan_dated_files(os.path.join(data_dir, 'PriceBand'),
                                        r'sec_list_(\d{8})\.csv', '%d%m%Y'),
+        'indexClose': _scan_dated_files(os.path.join(data_dir, INDEX_RAW_SUBDIR),
+                                        r'ind_close_all_(\d{8})\.csv', '%Y%m%d'),
+        'indices': _index_file_summary(os.path.join(data_dir, INDICES_FILE)),
         'files': [
             ref('Bhavcopy (combined)', BHAV_FILE),
             ref('Price band (combined)', BAND_FILE),
             ref('Equity list (ISIN master)', 'EQUITY_L.csv'),
             ref('MidSmallcap 400 constituents', MIDSMALL400_FILE),
+            ref('Index closing values (combined)', INDICES_FILE),
             ref('Corporate actions', CORPACTIONS_FILE, folder=os.path.join(base_dir, REFERENCE_SUBDIR)),
             ref('Sector mapping', SECTOR_FILE),
             ref('Market cap (NSE mcap file)', MARKETCAP_FILE),
