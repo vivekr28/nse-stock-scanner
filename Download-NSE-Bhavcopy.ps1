@@ -16,6 +16,7 @@
 # -- Parameters ----------------------------------------------------------------
 param(
     [string]$StartFrom = "",   # Optional: force start date, e.g. "01-Sep-2024" or "2024-09-01"
+    [string]$IndexStartFrom = "", # Optional: first date of the NSE index closing-value history (default: the last 730 days), e.g. "03-Oct-2024"
     [string]$CorpActionsFrom = "", # Optional: archive corporate actions from this date (one-time backfill), e.g. "01-Jan-2010"
     [switch]$NoPause           # Headless (launched by the dashboard's Refresh Data): no key prompts, no server reprocess call
 )
@@ -498,6 +499,7 @@ $IndexWanted = @(
 
 try {
     $idxStart = (Get-Date).Date.AddDays(-$IndexHistoryDays)
+    if ($IndexStartFrom -ne "") { $idxStart = [DateTime]::Parse($IndexStartFrom).Date }   # explicit start, e.g. to rebuild the same history
     $idxNew = 0; $idxSkipped = 0
     for ($d = $idxStart; $d -le (Get-Date).Date; $d = $d.AddDays(1)) {
         if ($d.DayOfWeek -eq 'Saturday' -or $d.DayOfWeek -eq 'Sunday') { continue }
