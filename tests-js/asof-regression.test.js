@@ -177,8 +177,10 @@ test('only js/presets.js and js/screener.js reference the As of Date module, and
   const allowed = {
     // loadPreset() runs the as-of scan for a preset that has it on
     'js/presets.js': ["if (typeof asOfPresetActive === 'function' && asOfPresetActive()) asOfRun({ keepOpen: true });"],
-    // updateFilterBadge() adds the tab's count to the main Filters badge and refreshes the tab's own badge
+    // updateFilterBadge() adds the tab's count to the main Filters badge and refreshes the tab's own badge; resetScreener() resets the tab
     'js/screener.js': [
+      // resetScreener() (Reset All) also resets the tab's controls
+      "if (typeof asOfReset === 'function') asOfReset(); // the As of Date tab's controls reset with everything else",
       "const asOfCount = typeof asOfActiveCount === 'function' ? asOfActiveCount() : 0; // As of Date tab (js/asof-scan.js)",
       "if (typeof asOfUpdateBadge === 'function') asOfUpdateBadge();",
     ],

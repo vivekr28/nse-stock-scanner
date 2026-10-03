@@ -313,6 +313,8 @@ function asOfShowInMainWindow(passed, scanned, activeFilters, dateStr, keepOpen)
   if (!keepOpen) closeScreenerFilters();
 }
 
+// Put the tab's controls back to their defaults. Run by the screener's Reset All (resetScreener); the tab's own
+// "Reset All" button calls that, so both buttons do the same thing.
 function asOfReset() {
   const set = (id, v) => { asofEl(id).value = v; };
   const chk = (id, v) => { asofEl(id).checked = v; };
