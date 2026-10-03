@@ -179,6 +179,54 @@ def normalize_symbol(s):
     return re.sub(r'[&\-]', '_', s.strip().lower())
 
 
+def build_band_history(band_path):
+    """Price-band history per symbol, for the dashboard's "As of Date" scan (read-only; nothing else uses it).
+
+    Returns {normalized_symbol: [[YYYY-MM-DD, band], ...]} listing only the days the band CHANGED, oldest first, where
+    band is the Band column text ('2', '5', '10', '20', '40', 'No Band'). A day with no row for a symbol keeps the
+    previous day's band (about 1.4% of stock-days have no row), so the band on any date is the last entry on/before it.
+    When a symbol has several rows on one date (EQ and BE) the later row in the file wins."""
+    per_symbol = {}
+    iso_cache = {}
+    if not os.path.exists(band_path):
+        return {}
+    with open(band_path, 'r', encoding='utf-8-sig', newline='') as f:
+        reader = csv.reader(f)
+        header = next(reader, None)
+        if not header:
+            return {}
+        cols = {h.strip(): i for i, h in enumerate(header)}
+        i_sym, i_band, i_date = cols.get('Symbol'), cols.get('Band'), cols.get('Date')
+        if i_sym is None or i_band is None or i_date is None:
+            return {}
+        need = max(i_sym, i_band, i_date)
+        for row in reader:
+            if len(row) <= need:
+                continue
+            sym = normalize_symbol(row[i_sym])
+            if not sym:
+                continue
+            ds = row[i_date].strip()
+            iso = iso_cache.get(ds)
+            if iso is None:
+                d = parse_date_str(ds)
+                iso = iso_cache[ds] = d.strftime('%Y-%m-%d') if d else ''
+            if not iso:
+                continue
+            per_symbol.setdefault(sym, {})[iso] = row[i_band].strip()
+    out = {}
+    for sym, by_date in per_symbol.items():
+        changes, last = [], None
+        for iso in sorted(by_date):
+            band = by_date[iso]
+            if band != last:
+                changes.append([iso, band])
+                last = band
+        out[sym] = changes
+    return out
+
+
+
 # Preference when NSE lists the same symbol under several series (EQ is the main board)
 _MCAP_SERIES_RANK = {'EQ': 0, 'BE': 1, 'BZ': 2, 'SM': 3, 'ST': 4}
 
@@ -1926,6 +1974,10 @@ def run_tv_verify_full(base_dir, port, limit=None, resume=False):
 
 
 # ─── HTTP Server ─────────────────────────────────────────────────────────────
+_band_history_lock = threading.Lock()
+_band_history_cache = {}  # 'v' -> (band file mtime, gzipped JSON)
+
+
 class NSEHandler(http.server.SimpleHTTPRequestHandler):
     """Custom handler for API endpoints + static file serving."""
 
@@ -1961,6 +2013,8 @@ class NSEHandler(http.server.SimpleHTTPRequestHandler):
             self._serve_data(lite=lite)
         elif path == '/api/data/daily':
             self._serve_daily()
+        elif path == '/api/band-history':
+            self._serve_band_history()
         elif path == '/api/presets':
             self._serve_presets()
         elif path == '/api/reprocess':
@@ -2098,6 +2152,30 @@ class NSEHandler(http.server.SimpleHTTPRequestHandler):
             else:
                 gz, etag = NSEHandler._gzipped_data, NSEHandler._gzipped_etag
         self._serve_gzipped(gz, etag)
+
+    def _serve_band_history(self):
+        """GET /api/band-history - per-symbol price-band changes (see build_band_history). Cached until the band
+        file changes. Used only by the As of Date scan, and only when its "Exclude Circuits" filter is ticked."""
+        band_path = os.path.join(self.server.base_dir, DATA_SUBDIR, BAND_FILE)
+        try:
+            stamp = os.path.getmtime(band_path)
+        except OSError:
+            self.send_error(404, 'No price band file')
+            return
+        with _band_history_lock:
+            cached = _band_history_cache.get('v')
+            if cached is None or cached[0] != stamp:
+                body = json.dumps({'bySymbol': build_band_history(band_path)}, separators=(',', ':')).encode('utf-8')
+                cached = _band_history_cache['v'] = (stamp, gzip.compress(body, 5))
+        gz = cached[1]
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Encoding', 'gzip')
+        self.send_header('Content-Length', len(gz))
+        self.send_header('Cache-Control', 'no-cache')
+        self._cors_headers()
+        self.end_headers()
+        self.wfile.write(gz)
 
     def _serve_daily(self):
         """Serve only dailyBySymbol as gzipped JSON (loaded after dashboard shows)."""
