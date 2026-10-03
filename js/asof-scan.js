@@ -153,7 +153,13 @@ function asofBandOn(history, symbol, iso) {
 }
 
 /* ---------- the scan ---------- */
-async function asOfRun() {
+// True when a loaded preset has any As of Date filter switched on (js/presets.js loadPreset() then runs the as-of scan)
+function asOfPresetActive() {
+  return ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K'].some(k => { const el = asofEl('asof' + k + 'On'); return !!(el && el.checked); });
+}
+
+// opts.keepOpen: leave the filters popup open (used when a preset is loaded from its header)
+async function asOfRun(opts) {
   const status = asofEl('asofStatus');
   const dateStr = asofResolveDate();
   if (!dateStr) { status.textContent = 'Pick a date inside the loaded data.'; return; }
@@ -262,12 +268,12 @@ async function asOfRun() {
   passed.sort((a, b) => b.turnover - a.turnover);
   _asofPassed = passed;
   const active = [aOn, bOn, cOn, dOn, eOn, fOn, gOn, hOn, iOn, jOn, kOn].filter(Boolean).length;
-  asOfShowInMainWindow(passed, scanned, active, dateStr);
+  asOfShowInMainWindow(passed, scanned, active, dateStr, !!(opts && opts.keepOpen));
 }
 
 // Show the result in the main Stock Scanner window, the way the other tabs do: fill the screener's result arrays and
 // stats row and let its own table render them (paging, sorting, CSV / TradingView export all work on it).
-function asOfShowInMainWindow(passed, scanned, activeFilters, dateStr) {
+function asOfShowInMainWindow(passed, scanned, activeFilters, dateStr, keepOpen) {
   screenerPassed = passed;
   screenerFailed = [];
   scrShowingFailed = false;
@@ -288,7 +294,7 @@ function asOfShowInMainWindow(passed, scanned, activeFilters, dateStr) {
   updateToggleButton();
   renderScreenerTable();
   asofEl('asofStatus').textContent = '';
-  closeScreenerFilters();
+  if (!keepOpen) closeScreenerFilters();
 }
 
 function asOfReset() {
