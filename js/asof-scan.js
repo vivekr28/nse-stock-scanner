@@ -153,9 +153,25 @@ function asofBandOn(history, symbol, iso) {
 }
 
 /* ---------- the scan ---------- */
+const ASOF_ON_IDS = ['asofAOn', 'asofBOn', 'asofCOn', 'asofDOn', 'asofEOn', 'asofFOn', 'asofGOn', 'asofHOn', 'asofIOn', 'asofJOn', 'asofKOn'];
+
+// How many As of Date filters are switched on (counted in the main Filters button's badge and the tab's own badge)
+function asOfActiveCount() {
+  return ASOF_ON_IDS.filter(id => { const el = asofEl(id); return !!(el && el.checked); }).length;
+}
+
+// The count on the As of Date tab, the same style as the other tabs' badges
+function asOfUpdateBadge() {
+  const badge = asofEl('scrTabAsOfCount');
+  if (!badge) return;
+  const n = asOfActiveCount();
+  badge.textContent = n;
+  badge.style.display = n > 0 ? 'inline-block' : 'none';
+}
+
 // True when a loaded preset has any As of Date filter switched on (js/presets.js loadPreset() then runs the as-of scan)
 function asOfPresetActive() {
-  return ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K'].some(k => { const el = asofEl('asof' + k + 'On'); return !!(el && el.checked); });
+  return asOfActiveCount() > 0;
 }
 
 // opts.keepOpen: leave the filters popup open (used when a preset is loaded from its header)
@@ -300,7 +316,7 @@ function asOfShowInMainWindow(passed, scanned, activeFilters, dateStr, keepOpen)
 function asOfReset() {
   const set = (id, v) => { asofEl(id).value = v; };
   const chk = (id, v) => { asofEl(id).checked = v; };
-  ['asofAOn', 'asofBOn', 'asofCOn', 'asofDOn', 'asofEOn', 'asofFOn', 'asofGOn', 'asofHOn', 'asofIOn', 'asofJOn', 'asofKOn'].forEach(id => chk(id, false));
+  ASOF_ON_IDS.forEach(id => chk(id, false));
   chk('asofA20', true); chk('asofA50', false); chk('asofA200', false); chk('asofAE200', false);
   chk('asofJ2', true); chk('asofJ5', true); chk('asofJ10', true);
   chk('asofI21', false); chk('asofI63', true); chk('asofI252', false);
@@ -314,11 +330,21 @@ function asOfReset() {
   _asofPassed = [];
   asofEl('asofStatus').textContent = '';
   asofEl('asofDateNote').textContent = '';
+  asOfRefreshBadges();
 }
 
 // The screener panel re-runs its own scan whenever an input inside it changes. This tab has its own explicit Scan
 // button, so keep its edits from reaching that listener.
 ['change', 'input'].forEach(type => {
   const pane = asofEl('scrPaneAsOf');
-  if (pane) pane.addEventListener(type, e => e.stopPropagation());
+  if (pane) pane.addEventListener(type, e => {
+    e.stopPropagation();
+    if (type === 'change') asOfRefreshBadges();
+  });
 });
+
+// Refresh the tab's badge and the main Filters button's badge (the latter via the screener's own updateFilterBadge)
+function asOfRefreshBadges() {
+  if (typeof updateFilterBadge === 'function') updateFilterBadge();
+  else asOfUpdateBadge();
+}
