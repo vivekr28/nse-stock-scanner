@@ -172,16 +172,21 @@ test('the existing scanner\'s own state is untouched by merely loading the modul
 
 // ─── existing processing (JS and server) ───────────────────────────────────────
 
-test('only js/presets.js references the As of Date module, and only for the preset hooks', () => {
+test('only js/presets.js and js/screener.js reference the As of Date module, and only for the preset / badge hooks', () => {
+  const callLines = src => src.split(/\r?\n/).filter(l => /asOf[A-Za-z]*\(/.test(l)).map(l => l.trim());
+  const allowed = {
+    // loadPreset() runs the as-of scan for a preset that has it on
+    'js/presets.js': ["if (typeof asOfPresetActive === 'function' && asOfPresetActive()) asOfRun({ keepOpen: true });"],
+    // updateFilterBadge() adds the tab's count to the main Filters badge and refreshes the tab's own badge
+    'js/screener.js': [
+      "const asOfCount = typeof asOfActiveCount === 'function' ? asOfActiveCount() : 0; // As of Date tab (js/asof-scan.js)",
+      "if (typeof asOfUpdateBadge === 'function') asOfUpdateBadge();",
+    ],
+  };
   for (const f of SCRIPTS.filter(s => s !== 'js/asof-scan.js' && !s.includes('/lib/'))) {
     const src = read(f);
-    if (f === 'js/presets.js') {
-      // saving / restoring the tab's controls (asof* ids) and loadPreset() running the as-of scan for a preset that has it on
-      const calls = src.split(/\r?\n/).filter(l => /asOf[A-Za-z]*\(/.test(l));
-      assert.deepEqual(calls.map(l => l.trim()), ["if (typeof asOfPresetActive === 'function' && asOfPresetActive()) asOfRun({ keepOpen: true });"]);
-    } else {
-      assert.ok(!/asof|asOf/i.test(src), `${f} references the As of Date module`);
-    }
+    if (allowed[f]) assert.deepEqual(callLines(src), allowed[f], `${f}: unexpected references to the As of Date module`);
+    else assert.ok(!/asof|asOf/i.test(src), `${f} references the As of Date module`);
   }
 });
 

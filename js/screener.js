@@ -1115,10 +1115,11 @@ function updateFilterBadge() {
 
   const techCount = countChecked(techIds);
   const indCount  = countChecked(indIds);
+  const asOfCount = typeof asOfActiveCount === 'function' ? asOfActiveCount() : 0; // As of Date tab (js/asof-scan.js)
 
   const badge = document.getElementById('scrActiveFilterBadge');
   if (badge) {
-    const total = techCount + indCount;
+    const total = techCount + indCount + asOfCount;
     badge.textContent = total;
     badge.style.display = total > 0 ? '' : 'none';
   }
@@ -1136,6 +1137,8 @@ function updateFilterBadge() {
     indBadge.textContent = indCount;
     indBadge.style.display = indCount > 0 ? 'inline-block' : 'none';
   }
+
+  if (typeof asOfUpdateBadge === 'function') asOfUpdateBadge();
 }
 
 
