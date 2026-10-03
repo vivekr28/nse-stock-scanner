@@ -172,10 +172,16 @@ test('the existing scanner\'s own state is untouched by merely loading the modul
 
 // ─── existing processing (JS and server) ───────────────────────────────────────
 
-test('the existing processing sources only differ from the committed ones by nothing the As of Date work touched', () => {
-  // asof-scan.js must not be required by, or referenced from, any existing module
+test('only js/presets.js references the As of Date module, and only for the preset hooks', () => {
   for (const f of SCRIPTS.filter(s => s !== 'js/asof-scan.js' && !s.includes('/lib/'))) {
-    assert.ok(!/asof|asOf/i.test(read(f)), `${f} references the As of Date module`);
+    const src = read(f);
+    if (f === 'js/presets.js') {
+      // saving / restoring the tab's controls (asof* ids) and loadPreset() running the as-of scan for a preset that has it on
+      const calls = src.split(/\r?\n/).filter(l => /asOf[A-Za-z]*\(/.test(l));
+      assert.deepEqual(calls.map(l => l.trim()), ["if (typeof asOfPresetActive === 'function' && asOfPresetActive()) asOfRun({ keepOpen: true });"]);
+    } else {
+      assert.ok(!/asof|asOf/i.test(src), `${f} references the As of Date module`);
+    }
   }
 });
 

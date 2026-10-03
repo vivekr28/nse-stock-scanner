@@ -71,6 +71,46 @@ const PRESET_FIELDS = [
   { id: 'scrF16ToField', type: 'select' },
   { id: 'scrF16Val', type: 'number' },
   { id: 'scrAllowPartial', type: 'checkbox' },
+  // Stock Scanner 'As of Date' tab (js/asof-scan.js): its own date + filters, saved in presets like the other tabs'
+  { id: 'asofAOn', type: 'checkbox' },
+  { id: 'asofA20', type: 'checkbox' },
+  { id: 'asofA50', type: 'checkbox' },
+  { id: 'asofA200', type: 'checkbox' },
+  { id: 'asofAE200', type: 'checkbox' },
+  { id: 'asofBOn', type: 'checkbox' },
+  { id: 'asofCOn', type: 'checkbox' },
+  { id: 'asofDOn', type: 'checkbox' },
+  { id: 'asofEOn', type: 'checkbox' },
+  { id: 'asofFOn', type: 'checkbox' },
+  { id: 'asofGOn', type: 'checkbox' },
+  { id: 'asofHOn', type: 'checkbox' },
+  { id: 'asofIOn', type: 'checkbox' },
+  { id: 'asofI21', type: 'checkbox' },
+  { id: 'asofI63', type: 'checkbox' },
+  { id: 'asofI252', type: 'checkbox' },
+  { id: 'asofJOn', type: 'checkbox' },
+  { id: 'asofJ2', type: 'checkbox' },
+  { id: 'asofJ5', type: 'checkbox' },
+  { id: 'asofJ10', type: 'checkbox' },
+  { id: 'asofKOn', type: 'checkbox' },
+  { id: 'asofBVal', type: 'number' },
+  { id: 'asofCVal', type: 'number' },
+  { id: 'asofDLen', type: 'number' },
+  { id: 'asofDVal', type: 'number' },
+  { id: 'asofEMult', type: 'number' },
+  { id: 'asofELen', type: 'number' },
+  { id: 'asofFMin', type: 'number' },
+  { id: 'asofFMax', type: 'number' },
+  { id: 'asofGLen', type: 'number' },
+  { id: 'asofGVal', type: 'number' },
+  { id: 'asofHVal', type: 'number' },
+  { id: 'asofKVal', type: 'number' },
+  { id: 'asofHPeriod', type: 'select' },
+  { id: 'asofKFromField', type: 'select' },
+  { id: 'asofKToField', type: 'select' },
+  { id: 'asofDate', type: 'date' },
+  { id: 'asofKFromDate', type: 'date' },
+  { id: 'asofKToDate', type: 'date' },
 ];
 
 // ── Default (all-off) filter state, used when "— Select preset —" is chosen ──
@@ -94,6 +134,15 @@ const DEFAULT_FILTER_STATE = {
   scrF15On: false, scrF15Period: '1m', scrF15Val: '0',
   scrF16On: false, scrF16FromField: 'close', scrF16ToField: 'close', scrF16Val: '0',
   scrAllowPartial: true,
+  // As of Date tab defaults (all off; blank dates - the tab fills in its own default date when opened)
+  asofAOn: false, asofA20: true, asofA50: false, asofA200: false, asofAE200: false,
+  asofBOn: false, asofBVal: '2', asofCOn: false, asofCVal: '5', asofDOn: false, asofDLen: '50', asofDVal: '1',
+  asofEOn: false, asofEMult: '3', asofELen: '50', asofFOn: false, asofFMin: '0', asofFMax: '10',
+  asofGOn: false, asofGLen: '50', asofGVal: '3', asofHOn: false, asofHPeriod: '21', asofHVal: '0',
+  asofIOn: false, asofI21: false, asofI63: true, asofI252: false,
+  asofJOn: false, asofJ2: true, asofJ5: true, asofJ10: true,
+  asofKOn: false, asofKFromDate: '', asofKToDate: '', asofKFromField: 'close', asofKToField: 'close', asofKVal: '0',
+  asofDate: '',
 };
 
 // ── Capture current filter state ──
@@ -347,7 +396,9 @@ function loadPreset() {
   // step the filter would silently keep whatever state the previous preset left it in.
   applyPresetState(DEFAULT_FILTER_STATE);
   applyPresetState(_presets[name]);
-  runScreener();
+  // A preset with As of Date filters switched on runs that scan (asof-scan.js); otherwise the normal latest-day scan
+  if (typeof asOfPresetActive === 'function' && asOfPresetActive()) asOfRun({ keepOpen: true });
+  else runScreener();
   updateFilterBadge();
   if (typeof updateModalPresetName === 'function') updateModalPresetName();
 }
