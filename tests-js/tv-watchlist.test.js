@@ -46,3 +46,29 @@ test('industry names without a comma are unchanged', () => {
   sb.exportTradingViewWatchlist();
   assert.equal(dom.el('tvModalContent').textContent, '###Undefined-Diversified(1),NSE:AAA');
 });
+
+// Every industry name in the project's real sector mapping (the git-tracked copy in reference-data/, so it runs in CI too)
+// exports cleanly - guards against a future name with a comma, or any other separator TradingView would split on.
+const fs = require('node:fs');
+const path = require('node:path');
+const MAPPING = path.join(path.dirname(__dirname), 'reference-data', 'Sector-Stock-Mapping.csv');
+
+test('every real industry name exports as one header (no stray pieces)', { skip: !fs.existsSync(MAPPING) && 'reference-data/Sector-Stock-Mapping.csv not present' }, () => {
+  const lines = fs.readFileSync(MAPPING, 'utf8').replace(/^﻿/, '').split(/\r?\n/).filter(Boolean);
+  const header = lines[0].split(',');
+  // the file is quoted CSV: take the "Basic Industry" column with a small quote-aware split
+  const split = line => { const out = []; let cur = '', q = false; for (const ch of line) { if (ch === '"') q = !q; else if (ch === ',' && !q) { out.push(cur); cur = ''; } else cur += ch; } out.push(cur); return out; };
+  const col = header.indexOf('Basic Industry');
+  assert.ok(col >= 0, 'Basic Industry column not found');
+  const industries = [...new Set(lines.slice(1).map(l => split(l)[col]).filter(Boolean))];
+  assert.ok(industries.length > 50, 'expected many industries');
+  assert.ok(industries.some(i => i.includes(',')), 'expected at least one industry with a comma (the case this guards)');
+
+  const dom = installFakeDom(sb, {});
+  setPassed(industries.map((ind, i) => stock('S' + i, ind)));
+  sb.exportTradingViewWatchlist();
+  const pieces = sections(dom.el('tvModalContent').textContent);
+  const headers = pieces.filter(p => p.startsWith('###'));
+  assert.equal(headers.length, industries.length, 'one header per industry');
+  for (const p of pieces) assert.ok(p.startsWith('###') || p.startsWith('NSE:'), `stray piece: ${p}`);
+});
