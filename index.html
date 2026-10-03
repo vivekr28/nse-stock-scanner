@@ -539,7 +539,7 @@
               </div>
               <div class="scr-filter-row">
                 <input type="checkbox" id="asofKOn"><span class="scr-label">% Change:</span>
-                <div class="scr-inputs" title="From and To are looked up on or before each date (a non-trading day uses the previous trading day). A To date after the scan date is capped at the scan date; blank = the scan date.">
+                <div class="scr-inputs" title="From and To are looked up on or before each date (a non-trading day uses the previous trading day). Independent of the Scan as of date: it uses its own From / To dates over the stock's whole history (the stock must still have traded on the scan date). Blank To = the latest bar.">
                   <span class="scr-unit">From</span> <input type="date" id="asofKFromDate"> <select id="asofKFromField"><option value="open">Open</option><option value="high">High</option><option value="low">Low</option><option value="close" selected>Close</option></select>
                   <span class="scr-unit">to</span> <input type="date" id="asofKToDate"> <select id="asofKToField"><option value="open">Open</option><option value="high">High</option><option value="low">Low</option><option value="close" selected>Close</option></select>
                   <span class="scr-unit">&ge;</span> <input type="number" id="asofKVal" value="0" step="5" style="width:70px;"> <span class="scr-unit">%</span>

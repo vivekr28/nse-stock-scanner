@@ -227,10 +227,10 @@ async function asOfRun(opts) {
       if (band !== null && jExclude.has(band.replace('%', '').trim())) continue;
     }
     if (kOn) {
-      // bars after the scan date are the future: the To date is capped at the scan date (blank = the scan date)
-      const toTs = isNaN(kToRaw) ? parseDate(dateStr) : Math.min(kToRaw, parseDate(dateStr));
+      // independent of the scan date: its own From / To dates over the stock's whole history (blank To = the latest bar)
+      const toTs = isNaN(kToRaw) ? Infinity : kToRaw;
       if (kFromTs > toTs) continue;
-      const fi = asofIdxOnOrBefore(days, kFromTs, end), ti = asofIdxOnOrBefore(days, toTs, end);
+      const fi = asofIdxOnOrBefore(days, kFromTs, days.length - 1), ti = asofIdxOnOrBefore(days, toTs, days.length - 1);
       if (fi < 0 || ti < fi) continue;
       const a = days[fi][kFromField], b = days[ti][kToField];
       if (!(a > 0) || !(b > 0) || !((b - a) / a * 100 >= kVal)) continue;

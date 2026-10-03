@@ -86,10 +86,10 @@ test('Exclude Circuits uses the band in force ON the chosen date (carried forwar
   assert.deepEqual(Array.from(vm.runInContext('_asofPassed', sb), s => s.symbol).sort(), ['DOWN', 'NEWCO']);
 });
 
-test('% change between two dates on chosen O/H/L/C fields, capped at the scan date', () => {
-  const dom = installFakeDom(sb, { asofDate: '2025-02-09' });                  // day index 39: UPTHENDOWN at 139
+test('% change uses its own From / To dates, independent of the scan date', () => {
+  const dom = installFakeDom(sb, { asofDate: '2025-02-09' });                  // scan date: day index 39 (UPTHENDOWN at its peak, 139)
   dom.el('asofKOn').checked = true;
-  dom.el('asofKFromDate').value = '2025-01-01'; dom.el('asofKToDate').value = '2025-03-01';   // To is after the scan date: capped
+  dom.el('asofKFromDate').value = '2025-01-01'; dom.el('asofKToDate').value = '2025-03-01';   // To (day 59) is AFTER the scan date and is still used
   dom.el('asofKFromField').value = 'close'; dom.el('asofKToField').value = 'close'; dom.el('asofKVal').value = '30';
   dom.el('asofHPeriod').value = '21';
   sb.Store.dates = dates; sb.Store.sectorMap = {};
@@ -98,10 +98,33 @@ test('% change between two dates on chosen O/H/L/C fields, capped at the scan da
     DOWN: mk('DOWN', Array.from({ length: N }, (_, i) => 200 - i)),
   };
   sb.asOfRun();
-  assert.deepEqual(Array.from(vm.runInContext('_asofPassed', sb), s => s.symbol), ['UPTHENDOWN']);  // 100 -> 139 = +39%
-  dom.el('asofKVal').value = '40';
+  assert.deepEqual(Array.from(vm.runInContext('_asofPassed', sb), s => s.symbol), []);   // day 0 -> day 59: 100 -> 120 = +20%, not the +39% at the scan date
+  dom.el('asofKVal').value = '15';
   sb.asOfRun();
-  assert.deepEqual(Array.from(vm.runInContext('_asofPassed', sb), s => s.symbol), []);
+  assert.deepEqual(Array.from(vm.runInContext('_asofPassed', sb), s => s.symbol), ['UPTHENDOWN']);
+  // changing the scan date does not change the % Change result (it only decides which stocks are scanned)
+  dom.el('asofDate').value = '2025-01-25';
+  sb.asOfRun();
+  assert.deepEqual(Array.from(vm.runInContext('_asofPassed', sb), s => s.symbol), ['UPTHENDOWN']);
+  dom.el('asofDate').value = '2025-03-05';
+  sb.asOfRun();
+  assert.deepEqual(Array.from(vm.runInContext('_asofPassed', sb), s => s.symbol), ['UPTHENDOWN']);
+});
+
+test('% change: a blank To date means the latest bar; From after To fails; a From date before any bar fails', () => {
+  const run = (from, to, val) => {
+    const dom = installFakeDom(sb, { asofDate: '2025-02-09' });
+    dom.el('asofKOn').checked = true; dom.el('asofKFromDate').value = from; dom.el('asofKToDate').value = to; dom.el('asofKVal').value = val;
+    dom.el('asofHPeriod').value = '21';
+    sb.Store.dates = dates; sb.Store.sectorMap = {};
+    sb.Store.dailyBySymbol = { UP: mk('UP', Array.from({ length: N }, (_, i) => 100 + i)) };
+    sb.asOfRun();
+    return Array.from(vm.runInContext('_asofPassed', sb), s => s.symbol);
+  };
+  assert.deepEqual(run('2025-01-01', '', '60'), ['UP']);              // blank To = latest bar (day 69): 100 -> 169 = +69%
+  assert.deepEqual(run('2025-01-01', '', '70'), []);
+  assert.deepEqual(run('2025-02-01', '2025-01-10', '0'), []);         // From after To
+  assert.deepEqual(run('2024-12-01', '2025-02-01', '0'), []);         // no bar on/before From
 });
 
 // ─── each filter on its own ─────────────────────────────────────────────────────
