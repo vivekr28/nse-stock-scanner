@@ -5,7 +5,7 @@
 This project is an offline, self-contained NSE (National Stock Exchange of India) end-of-day stock analysis system. It consists of:
 
 1. **`Download-NSE-Bhavcopy.ps1`** — PowerShell script to download and merge daily NSE data (CM-UDiFF format)
-2. **Modular Dashboard** — `index.html` + 1 CSS + 15 own JS files + 1 vendored charting library, for analysis (dark theme, server-assisted), plus a standalone `pages/reprocess.html` utility page
+2. **Modular Dashboard** — `index.html` + 1 CSS + 16 own JS files + 1 vendored charting library, for analysis (dark theme, server-assisted), plus a standalone `pages/reprocess.html` utility page
 
 All files live in `C:\Users\vivek\Documents\NSE-StockScanner\` on the user's Windows machine.
 
@@ -37,6 +37,7 @@ NSE-StockScanner/
 │   ├── test_tv_report.py         # Phase 4b: category/primary_cause/corp_action_hints/build_report — pure functions, no I/O
 │   ├── test_market_cap.py        # load_market_caps() (NSE mcap file: rupees->crore, series preference, bad rows) + process_data() priority NSE file > mapping column > 0, and sector/industry defaults
 │   ├── test_screener_classification.py  # src/build_screener_classification.py: industry/company page parsers, EQUITY_L universe + previous-mapping loaders, main() end to end against canned pages (walk, gap-fill, NSE-only symbols, --skip-walk, --max-age-days expiry, fresh clone from the tracked copy)
+│   ├── test_band_history.py      # build_band_history() + GET /api/band-history on an in-process server: band-change lists, out-of-order rows, symbol keys, mtime cache refresh, 404 (the As of Date tab's Exclude Circuits)
 │   └── test_real_data_smoke.py   # Phase 6: one `slow`-marked, opt-in test against the REAL project NSE_DATA/ (skips itself if absent) — never runs in CI
 ├── .github/workflows/tests.yml   # Phase 5: runs the suite (minus `slow` tests) on every push to main and every PR
 ├── tests-js/                     # Phase 7+: JS unit tests, a separate track from tests/ — different language/runtime, run with Node's built-in test runner (`node --test`), not pytest
@@ -45,6 +46,9 @@ NSE-StockScanner/
 │   ├── industry.test.js          # Phase 8: computeRSScores (js/utils.js, shared with screener.js's F9)/computeIndustryMoneyFlow (incl. endOffsetDays)/computeAllPeriodsMoneyFlow/mfPctChange/Money Flow Rate of Change formula (js/industry.js)
 │   ├── industry-charts.test.js   # Phase 8: icComputeIndustryMoneyFlowSeries/icComputeMoneyFlowRocSeries (js/industry-charts.js) — the Industry Money Flow / Rate of Change chart lines
 │   ├── presets.test.js           # capturePresetState/applyPresetState (js/presets.js) for the F17 ROC timeframe (`scrF17Lag`), incl. the old-preset fallback
+│   ├── asof-scan.test.js         # As of Date tab: each filter's maths on hand-built bars, band-on-date
+│   ├── asof-scan-window.test.js  # As of Date tab: hand-off to the main window (+ TV watchlist export), guard rails, tab show/hide, date picker, Reset
+│   ├── asof-regression.test.js   # Pins that adding the As of Date tab changed nothing existing: no global/id clashes, identical existing scan results with the module loaded and after an as-of scan, process_data() untouched
 │   └── data-processor.test.js    # (also covers ETF/fund filtering: isFundIsin, Store.excludedEtfs) Phase 9: processData()/processBandData() (js/data-processor.js) — CSV grouping, computed indicators, stale-stock detection, band merge/circuit-hit math
 ├── pytest.ini                    # testpaths=tests; declares the `slow` marker for future real-data smoke tests
 ├── requirements-dev.txt          # pytest only — dev tooling, never imported by the runtime (which stays stdlib-only)
@@ -78,6 +82,7 @@ NSE-StockScanner/
 │   ├── industry-charts.js        # Shared full-screen chart popup (Stock Scanner + Industry Analysis): 2x2/1x1 grid, crosshair legend, ADR/Avg MF stats, drag-to-measure tool, stock selection/watchlist
 │   ├── data-quality.js           # Cross-file matching/mismatch report
 │   ├── presets.js                # Screener filter preset save/load/export/import via IndexedDB
+│   ├── asof-scan.js              # Stock Scanner popup's "As of Date" tab: own filters + scan for a past trading day, results shown in the main window. Separate module - reads Store only, touches no existing filter/processing code (see "As of Date Tab")
 │   └── lib/
 │       └── lightweight-charts.standalone.production.js  # TradingView Lightweight Charts v5.2.1, vendored (Apache-2.0)
 └── NSE_DATA/
@@ -119,8 +124,9 @@ The scripts use global scope (no ES modules or bundler). They must load in this 
 12. `industry-charts.js` — uses `Store`, `LightweightCharts`, `computeDynADR`/`computeDynSMA` (from screener.js), `escapeHtml`/`fmtCr`/`fmtTurnoverCr`/`fmtPct`/`fmt2`; defines the shared chart popup opened from both `screener.js` (industry/symbol links) and `industry.js` (industry table/heatmap/chart-bar clicks)
 13. `data-quality.js` — uses `Store`, formatters
 14. `presets.js` — uses `DB_NAME`, `DB_STORE`, IndexedDB, screener field IDs
-15. `ui.js` — uses `Store`, calls `runScanner`, `renderBreadth`, `renderSectorAnalysis`, `renderIndustryAnalysis`, `renderDataQuality`, `updateEWIndexTabVisibility`, `renderEWIndexChart`, `clearSelectedStocks`
-16. `nse-download.js` — uses `Store`, `parseCSV`, `cacheCSV`, `processData`, auto-starts two-phase server load
+15. `asof-scan.js` — loaded after `screener.js`/`presets.js`; uses `Store` (read only), `parseDate`, `normalizeSymbol`, `escapeHtml`, and the screener's result globals and the existing `exportTradingViewWatchlist`-compatible row shape; calls `renderScreenerTable`/`updateToggleButton`/`closeScreenerFilters`
+16. `ui.js` — uses `Store`, calls `runScanner`, `renderBreadth`, `renderSectorAnalysis`, `renderIndustryAnalysis`, `renderDataQuality`, `updateEWIndexTabVisibility`, `renderEWIndexChart`, `clearSelectedStocks`
+17. `nse-download.js` — uses `Store`, `parseCSV`, `cacheCSV`, `processData`, auto-starts two-phase server load
 
 ---
 
@@ -271,6 +277,7 @@ HTTP server on port 8765 (Python stdlib `http.server`). Pre-processes 163MB bhav
 - `GET /api/tv-adjust/status` — The shared `_tv_state` (`status`, `step`, `current`/`total`, `adjusted`, `results`, `error`, `warning`) plus `corrections` (every row of `TradingViewAdjustments.csv`), `appliedCount` and `tvPort`. Polled by the Data Quality tab during a run, and fetched once on render to label the list rows.
 - `POST /api/tv-verify/start` / `GET /api/tv-verify/status` — Data Quality tab's "Verify against TradingView" button (see "Verifying Adjusted Prices Against TradingView"). Same `X-Requested-With: nse-dashboard` same-origin rule as `/api/tv-adjust/start`; 409 while a correction run is using the TradingView chart (and vice versa). Status returns the run state (`_tv_verify_state`) plus `last`, the saved result.
 - `POST /api/tv-full/start[?limit=N][&resume=1]` / `POST /api/tv-full/stop` / `GET /api/tv-full/status` / `GET /api/tv-full/results` / `GET /api/tv-full/report?format=md|csv` — Data Quality tab's "Full Price Verification (all stocks vs TradingView)" section (see "Full Price Verification Against TradingView"). Start/stop need the `X-Requested-With: nse-dashboard` header (else 403); 409 while another TradingView run or a reprocess is active.
+- `GET /api/band-history` — Per-symbol price-band CHANGES for the Stock Scanner's As of Date tab (Exclude Circuits): `{"bySymbol": {normalizedSymbol: [[YYYY-MM-DD, band], ...]}}`, gzipped, cached by `NSE_PriceBand_Combined.csv`'s mtime, 404 without that file. Read-only, independent of `process_data()`; fetched by the browser only when the filter is ticked. Needs a server restart to appear.
 - `GET /api/status` — Health check (returns server info, file existence).
 
 **Cache schema version:** `process_data()` writes `schemaVersion` (`PROCESSED_SCHEMA`) as the *first* key of `processed_data.json`, and `needs_processing()` reads the first 64 bytes of the file: an older/missing version means "regenerate", so adding a field to the output no longer needs a manual forced reprocess after the restart (the sequence "fix code, restart, reprocess" documented under "Server restarts" is now automatic for schema changes). Bump `PROCESSED_SCHEMA` whenever the output gains or changes a field the client relies on; keep `schemaVersion` first in the `result` dict.
@@ -559,6 +566,7 @@ At the user's request, the palette and typeface were re-sampled from `wealthlab.
 - `exportScreenerCSV()` / `exportTradingViewWatchlist()` — export functions
 - `openScreenerFilters()` / `closeScreenerFilters()` — filter popup modal open/close
 - `switchFilterTab(tab)` — switch between Technicals and Sector & Industry tabs in popup
+- `asOfShowTab()` / `asOfRun()` / `asOfReset()` (`js/asof-scan.js`) — the As of Date tab: show it, scan as of the chosen date (async: fetches `/api/band-history` first when Exclude Circuits is on), reset its controls
 - `updateFilterBadge()` — update active filter count badge on toolbar button
 - `toggleScannerFilters()` — collapsible filter panel for Stocks tab
 
@@ -844,36 +852,27 @@ Also: F7 (circuit exclusion) needs historical band data per day, which today onl
 
 ---
 
-## Planned: "As of Date" Scan in the Stock Scanner (Analysed 2026-10-03, Not Started)
+## Completed: "As of Date" Tab in the Stock Scanner Filters Popup (PR #37)
 
-**Goal:** keep the same filters and add a date picker, so the Stock Scanner shows which stocks *would have passed* the filters on that past date. Related to, but different from, the per-stock chart overlay planned above (that marks pass/fail per day for ONE stock; this scans the WHOLE market on ONE date). Not a primary feature: any extra data it needs must load **on demand**, never at dashboard start-up.
+**What it does:** a fourth tab ("As of Date") in the Stock Scanner's filters popup. Pick a past trading day and press **Scan as of Date**: the stocks that *would have passed* the tab's filters on that day appear in the **main Stock Scanner window** (same results table, stats row, paging, sorting, CSV and TradingView-watchlist export as any other scan), and the popup closes. A non-trading date uses the nearest earlier trading day. Only stocks that have a bar on that exact day are scanned.
 
-**Status today:** not possible - `runScreener()` only evaluates "as of the latest day". But the data and most of the logic exist.
+**Design rule (user requirement): it is a separate module and changes nothing existing.** `js/asof-scan.js` has its own filters (`asof*` element ids), its own calculations and its own scan function. It does NOT use `runScreener()`, the `scrF<n>` filters, presets, or `processData()`/`process_data()`. It only *reads* `Store` (`Store.dates`, `Store.dailyBySymbol`, `Store.sectorMap`; never writes it). The diff to existing files is additions only: the tab button, pane and `<script>` tag in `index.html`, and one route + helper in `src/nse_server.py`. No existing JS file mentions the module. Its own globals are all prefixed `asof` / `asOf`.
 
-**Approach:** every filter reads the stock's daily price array and treats the LAST bar as "today", so cutting each stock's array at the chosen date (and `Store.dates`) makes them evaluate as of that date with no change to the filter code. The snapshot fields the filters read (`sma20`, `high52w`, `adr`, `changePct`, `monthlyChangePct`, `distFrom52H/L`, `aboveSMA`, ...) are recomputed per stock for that date with the JS indicator maths in `js/data-processor.js` (identical formulas to the server's `process_data()`, kept in step by `tests/test_indicator_parity.py`). Swap `Store.latestBySymbol` / `Store.dailyBySymbol` / `Store.dates` for the as-of versions while the scan runs, then restore them.
+**Hand-off to the main window:** `asOfShowInMainWindow()` assigns the screener's result state (`screenerPassed`, `screenerFailed = []`, `scrShowingFailed = false`, `screenerResults`, `screenerPage`, `scrSortCol`), writes `#screenerStats`, then calls the existing `updateToggleButton()` / `renderScreenerTable()` / `closeScreenerFilters()`. Each result row is shaped like a `Store.latestBySymbol` entry (`isin`, `symbol`, `sector`, `industry`, `marketCap`, `close`, `changePct`, `turnover`, `adr`, `high52w`, `distFrom52H`, `bandPct`...). The table's other columns come from the *Technicals-tab* switches, so those show `-` for as-of rows. The next normal scan (Apply & Scan, or typing in the search box) replaces the as-of results with a latest-day scan. The popup's Apply & Scan / Reset All footer is hidden while the tab is open (they belong to the other tabs); the tab wires itself with its own listeners (`asOfShowTab` / `asOfHideTab`) rather than editing `switchFilterTab()`. Edits inside the pane stop propagating so the screener panel's auto-rescan listener does not fire.
 
-**Per filter** (all use data already loaded unless stated):
-- **Works as is (cut-off history):** F1, F2, F3, F4, F5, F6, F8, F10, F15, F18; F16 is already date-based and unaffected.
-- **Works by recomputing the industry aggregates from the as-of snapshot:** F9 (industry RS), F12 (money flow; `computeIndustryMoneyFlow(period, endOffsetDays)` already takes an offset), F17 (money-flow RoC; `computeIndustryMoneyFlowRocMap` likewise), F13 (stocks per industry = stocks that traded that day).
-- **Static, accepted tradeoff:** F11 sector and the industry labels are today's classification (no history), same as the MidSmallcap 400 list.
-- **Needs on-demand data - F7 (exclude circuits):** the band history is on disk (`NSE_DATA/PriceBand/` has one file per trading day and `NSE_PriceBand_Combined.csv` has a `Date` column; 98.6% of stock-days have a row), but the processed data only keeps the LATEST day's band per stock. The band changes often - 5,928 changes between consecutive days, 1,306 of 2,559 stocks changed band at some point - so today's band is wrong for about half the stocks on a past date. The files hold only the band % (2 / 5 / 10 / 20 / 40 / "No Band"); upper/lower circuit prices are prev close x (1 +- band%) and hit-UC/LC uses the same 0.999 / 1.001 tolerances as `process_data()`. Plan: a small server endpoint that reads the combined band file only when a past date is picked and F7 is ticked and returns each stock's band as a list of changes (a few hundred KB; carry the last band forward over the 1.4% of stock-days with no row), cached in the page afterwards.
-- **Needs on-demand data - stocks that stopped trading:** history is kept only for stocks that traded on the latest day (2,559 now); the 290 stocks that did not (delisted / suspended, e.g. EROSMEDIA, last traded 24-Oct-2024) are recorded as `staleStocks` with NO price history. A past-date scan would silently leave them out (survivorship bias). This is the biggest accuracy gap and should be fixed before trusting dates more than a few months back: an on-demand endpoint that returns their history from the bhavcopy (through the same adjustment pipeline).
-- **Approximate or unavailable - F14 (minimum industry market cap):** only today's market cap is stored. Either scale today's market cap by the price ratio (approximate: share counts change) and label it approximate, or skip the filter for past dates.
+**Filters in the tab** (each has an on/off tick; all AND together; strict history, no "partial history" option): Price Above 20 / 50 / 200 SMA and 200 EMA; Day Change >= %; Turnover > Cr; Avg Turnover (N days) > Cr; Turnover Spike (> x times the N-day average of the days BEFORE it); % from 52W High range (up to 250 bars); ADR% (N days) >; Performance (1W-1Y) >= %; Making New High (1M / 3M / 52W, all ticked must be strict new highs); Exclude Circuits (2 / 5 / 10 %); % Change from date+O/H/L/C to date+O/H/L/C >= % (same idea as the Technicals F16; a To date after the scan date is capped at the scan date, blank = the scan date; From is required). The maths mirror the screener's (same turnover units: `turnover` is in lakhs, Cr x 100).
 
-**Limits to show in the UI:** only ~510 trading days (about 2 years) of daily history are kept per stock and the data starts 02-Sep-2024, so the 52-week (252-day) and 200-day filters are only fully valid for dates in roughly the last 8 months - earlier dates need "Allow partial history". Prices are back-adjusted for splits / bonuses / rights, so ratio-based filters are unaffected but a price is not what was quoted that day. Sector / industry labels are today's.
+**Exclude Circuits uses the real band on the chosen date:** new route `GET /api/band-history` (`build_band_history()` + `_serve_band_history()` in `src/nse_server.py`) reads `NSE_PriceBand_Combined.csv` and returns `{"bySymbol": {normalizedSymbol: [[YYYY-MM-DD, band], ...]}}` listing only the days the band CHANGED (about 260 KB raw, ~40 KB gzipped, ~2 s to build; cached in memory by the file's mtime). The browser fetches it once, only when the filter is ticked (`asofLoadBandHistory()`), and the band on a date is the last change on/before it (`asofBandOn()`), so days with no row carry the previous band forward. A stock with no band history before the date is not excluded. When the filter is on, the table's Band column shows the band that applied on that day. The route is read-only and separate from `process_data()`; the server must be restarted once to pick it up. If it cannot be loaded the tab says so and leaves the current results alone.
 
-**Verification plan (this is what makes it trustworthy):**
-- Scanning "as of the latest date" must return exactly the same stocks as today's scan, for every filter.
-- Counts for any date must equal the Market Breadth tab's per-date history (`computeBreadthHistories`): F18 vs its 1M / 3M / 52W new-high counts, F10 (20 SMA) vs its above-20-SMA count.
-- Unit tests with hand-worked past-date fixtures (the screener tests load `js/screener.js` under Node, see `tests-js/screener-newhigh.test.js`), and a real-data check that cutting the data at a past date and running the Python `process_data()` on the truncated bhavcopy gives the same snapshot as the JS as-of snapshot.
+**Known limits (shown in the tab's footnote):** sector / industry labels and market cap are today's (no history); prices are back-adjusted for splits/bonuses; only ~510 trading days (data starts 02-Sep-2024) so long filters (200 SMA, 52W) fail for early dates; stocks that stopped trading are not in the loaded history (survivorship bias for old dates).
 
-**Effort (estimates, not measured):**
-- Core - date picker + the "works as is" and industry-aggregate filters + tests: about 1-2 days.
-- Real historical price bands for F7 (on-demand endpoint): about 0.5-1 day.
-- Stocks that stopped trading (on-demand history): about 1 day.
-- Optional: a "% return since that date" column for the passed stocks (how past passes did): about half a day.
+**Not built (from the original analysis, still open):**
+- The other screener filters in as-of form: industry RS (F9), industry money flow (F12) and its rate of change (F17), stocks-per-industry (F13), minimum industry market cap (F14, only today's market cap exists), sector (F11), the co-occurrence filter (F4), Close/SMA proximity (F8). The industry ones need the industry aggregates recomputed from the as-of snapshot (`computeIndustryMoneyFlow(period, endOffsetDays)` already takes an offset).
+- On-demand history for stocks that stopped trading (about 290 of them; the biggest accuracy gap for dates more than a few months back).
+- Optional "% return since that date" column for the passed stocks.
+- Verification ideas not yet done: as-of counts vs the Market Breadth tab's per-date history (`computeBreadthHistories`), and a real-data check against the Python `process_data()` run on truncated data.
 
-**Recommended order:** core first (no new data), then the delisted-stock history (accuracy), then F7.
+**Tests:** `tests-js/asof-scan.test.js` (each filter's maths, band-on-date), `tests-js/asof-scan-window.test.js` (hand-off to the main window incl. the TV watchlist export, guard rails, tab show/hide, date picker, Reset), `tests/test_band_history.py` (`build_band_history()` and the `/api/band-history` route on a real in-process server), and `tests-js/asof-regression.test.js` which pins that nothing existing changed: no shared global names, namespacing, the module only assigns the screener result state from its hand-off function, the 18 `scrF<n>On` switches and every id the screener reads still exist, no duplicate ids, the existing scanner returns byte-identical results with the module loaded and after an as-of scan, no existing script references the module, and `process_data()` does not use the band history. Mutation-checked: making the module override an existing function, or clear the results list, fails these tests.
 
 ---
 
