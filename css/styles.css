@@ -204,6 +204,17 @@ select option {
 /* Free up room for inputs in the narrower 2-column cells — the sitewide 180px label
    width was sized for the old full-width single-column rows */
 #scrPaneTechnicals .scr-filter-row .scr-label { min-width: 130px; }
+/* As of Date tab: same 2-column layout as Technicals (the pane has its own ids, so the Technicals rules above do not reach it);
+   the % Change row below the grid is a single full-width row */
+#scrPaneAsOf .scr-asof-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(600px, 1fr));
+  align-items: start;
+  gap: 10px 16px;
+}
+#scrPaneAsOf .scr-filter-row .scr-label { min-width: 130px; }
+#scrPaneAsOf .scr-asof-single { margin-top: 10px; }
+#scrPaneAsOf .scr-multi-wrap > .scr-filter-row { margin-bottom: 10px; }
 .scr-filter-row {
   display: flex;
   align-items: center;
