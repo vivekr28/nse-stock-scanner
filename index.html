@@ -555,7 +555,7 @@
             </div>
             <div style="margin:12px 0;display:flex;gap:10px;align-items:center;">
               <button class="btn btn-primary" onclick="asOfRun()" style="font-size:14px;padding:9px 26px;">Scan as of Date</button>
-              <button class="btn btn-secondary" onclick="asOfReset()">Reset</button>
+              <button class="btn btn-secondary" onclick="resetScreener()" title="Same as Reset All: clears every filter on every tab (including this one), deselects the preset and refreshes the results">Reset All</button>
               <span id="asofStatus" class="scr-multi-status"></span>
             </div>
             <p style="color:var(--text2);font-size:12px;margin:10px 0 0;">Needs enough history before the chosen date (e.g. 50 days for a 50-day average); stocks without it fail. Prices are back-adjusted for splits and bonuses. Sector / industry labels are today's. Stocks that no longer trade may be missing.</p>

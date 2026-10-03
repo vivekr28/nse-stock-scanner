@@ -892,6 +892,7 @@ function resetScreener() {
   document.getElementById('scrF16ToField').value = 'close';
   document.getElementById('scrF16Val').value = '0';
   initF16Dates();
+  if (typeof asOfReset === 'function') asOfReset(); // the As of Date tab's controls reset with everything else
   scrShowingFailed = false;
   document.getElementById('scrSearch').value = '';
   if (typeof _multiPresetActive !== 'undefined') _multiPresetActive = null;
