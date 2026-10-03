@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NSE EOD Dashboard</title>
-<link rel="stylesheet" href="css/styles.css?v=12">
+<link rel="stylesheet" href="css/styles.css?v=13">
 </head>
 <body>
 
@@ -480,63 +480,70 @@
               <span class="scr-label">Scan as of:</span>
               <div class="scr-inputs"><input type="date" id="asofDate"> <span id="asofDateNote" class="scr-unit"></span></div>
             </div>
-            <div class="scr-filters-list" style="padding:0;">
-              <div class="scr-filter-row">
-                <input type="checkbox" id="asofAOn"><span class="scr-label">Price Above:</span>
-                <div class="scr-inputs"><div class="scr-cb-group">
-                  <label><input type="checkbox" id="asofA20" checked> 20 SMA</label>
-                  <label><input type="checkbox" id="asofA50"> 50 SMA</label>
-                  <label><input type="checkbox" id="asofA200"> 200 SMA</label>
-                  <label><input type="checkbox" id="asofAE200"> 200 EMA</label>
-                </div></div>
-              </div>
-              <div class="scr-filter-row">
-                <input type="checkbox" id="asofBOn"><span class="scr-label">Day Change &ge;:</span>
-                <div class="scr-inputs"><input type="number" id="asofBVal" value="2" step="0.5" style="width:70px;"> <span class="scr-unit">%</span></div>
-              </div>
-              <div class="scr-filter-row">
-                <input type="checkbox" id="asofCOn"><span class="scr-label">Turnover &gt;:</span>
-                <div class="scr-inputs"><input type="number" id="asofCVal" value="5" min="0" step="0.5"> <span class="scr-unit">Cr</span></div>
-              </div>
-              <div class="scr-filter-row">
-                <input type="checkbox" id="asofDOn"><span class="scr-label">Avg Turnover:</span>
-                <div class="scr-inputs"><input type="number" id="asofDLen" value="50" min="5" step="1"> <span class="scr-unit">Days &gt;</span> <input type="number" id="asofDVal" value="1" min="0" step="0.5"> <span class="scr-unit">Cr</span></div>
-              </div>
-              <div class="scr-filter-row">
-                <input type="checkbox" id="asofEOn"><span class="scr-label">Turnover Spike:</span>
-                <div class="scr-inputs"><span class="scr-unit">&gt;</span> <input type="number" id="asofEMult" value="3" min="1" step="0.5"> <span class="scr-unit">&times;</span> <input type="number" id="asofELen" value="50" min="5" step="1"> <span class="scr-unit">Day Avg Turnover</span></div>
-              </div>
-              <div class="scr-filter-row">
-                <input type="checkbox" id="asofFOn"><span class="scr-label">% from 52W High:</span>
-                <div class="scr-inputs"><input type="number" id="asofFMin" value="0" step="1"> <span class="scr-unit">-</span> <input type="number" id="asofFMax" value="10" step="1"></div>
-              </div>
-              <div class="scr-filter-row">
-                <input type="checkbox" id="asofGOn"><span class="scr-label">ADR%:</span>
-                <div class="scr-inputs"><input type="number" id="asofGLen" value="50" min="5" step="1"> <span class="scr-unit">Days ADR% &gt;</span> <input type="number" id="asofGVal" value="3" min="0" step="0.5"></div>
-              </div>
-              <div class="scr-filter-row">
-                <input type="checkbox" id="asofHOn"><span class="scr-label">Performance:</span>
-                <div class="scr-inputs">
-                  <select id="asofHPeriod" style="min-width:70px;"><option value="5">1W</option><option value="21" selected>1M</option><option value="63">3M</option><option value="126">6M</option><option value="250">1Y</option></select>
-                  <span class="scr-unit">&ge;</span> <input type="number" id="asofHVal" value="0" step="5" style="width:70px;"> <span class="scr-unit">%</span>
+            <div class="scr-filters-list scr-asof-grid" style="padding:0;">
+              <div class="scr-tech-col">
+                <div class="scr-filter-row">
+                  <input type="checkbox" id="asofAOn"><span class="scr-label">Price Above:</span>
+                  <div class="scr-inputs"><div class="scr-cb-group">
+                    <label><input type="checkbox" id="asofA20" checked> 20 SMA</label>
+                    <label><input type="checkbox" id="asofA50"> 50 SMA</label>
+                    <label><input type="checkbox" id="asofA200"> 200 SMA</label>
+                    <label><input type="checkbox" id="asofAE200"> 200 EMA</label>
+                  </div></div>
+                </div>
+                <div class="scr-filter-row">
+                  <input type="checkbox" id="asofBOn"><span class="scr-label">Day Change &ge;:</span>
+                  <div class="scr-inputs"><input type="number" id="asofBVal" value="2" step="0.5" style="width:70px;"> <span class="scr-unit">%</span></div>
+                </div>
+                <div class="scr-filter-row">
+                  <input type="checkbox" id="asofCOn"><span class="scr-label">Turnover &gt;:</span>
+                  <div class="scr-inputs"><input type="number" id="asofCVal" value="5" min="0" step="0.5"> <span class="scr-unit">Cr</span></div>
+                </div>
+                <div class="scr-filter-row">
+                  <input type="checkbox" id="asofDOn"><span class="scr-label">Avg Turnover:</span>
+                  <div class="scr-inputs"><input type="number" id="asofDLen" value="50" min="5" step="1"> <span class="scr-unit">Days &gt;</span> <input type="number" id="asofDVal" value="1" min="0" step="0.5"> <span class="scr-unit">Cr</span></div>
+                </div>
+                <div class="scr-filter-row">
+                  <input type="checkbox" id="asofEOn"><span class="scr-label">Turnover Spike:</span>
+                  <div class="scr-inputs"><span class="scr-unit">&gt;</span> <input type="number" id="asofEMult" value="3" min="1" step="0.5"> <span class="scr-unit">&times;</span> <input type="number" id="asofELen" value="50" min="5" step="1"> <span class="scr-unit">Day Avg Turnover</span></div>
                 </div>
               </div>
-              <div class="scr-filter-row">
-                <input type="checkbox" id="asofIOn"><span class="scr-label">Making New High:</span>
-                <div class="scr-inputs"><div class="scr-cb-group">
-                  <label><input type="checkbox" id="asofI21"> 1M</label>
-                  <label><input type="checkbox" id="asofI63" checked> 3M</label>
-                  <label><input type="checkbox" id="asofI252"> 52W</label>
-                </div></div>
+              <div class="scr-tech-col">
+                <div class="scr-filter-row">
+                  <input type="checkbox" id="asofFOn"><span class="scr-label">% from 52W High:</span>
+                  <div class="scr-inputs"><input type="number" id="asofFMin" value="0" step="1"> <span class="scr-unit">-</span> <input type="number" id="asofFMax" value="10" step="1"></div>
+                </div>
+                <div class="scr-filter-row">
+                  <input type="checkbox" id="asofGOn"><span class="scr-label">ADR%:</span>
+                  <div class="scr-inputs"><input type="number" id="asofGLen" value="50" min="5" step="1"> <span class="scr-unit">Days ADR% &gt;</span> <input type="number" id="asofGVal" value="3" min="0" step="0.5"></div>
+                </div>
+                <div class="scr-filter-row">
+                  <input type="checkbox" id="asofHOn"><span class="scr-label">Performance:</span>
+                  <div class="scr-inputs">
+                    <select id="asofHPeriod" style="min-width:70px;"><option value="5">1W</option><option value="21" selected>1M</option><option value="63">3M</option><option value="126">6M</option><option value="250">1Y</option></select>
+                    <span class="scr-unit">&ge;</span> <input type="number" id="asofHVal" value="0" step="5" style="width:70px;"> <span class="scr-unit">%</span>
+                  </div>
+                </div>
+                <div class="scr-filter-row">
+                  <input type="checkbox" id="asofIOn"><span class="scr-label">Making New High:</span>
+                  <div class="scr-inputs"><div class="scr-cb-group">
+                    <label><input type="checkbox" id="asofI21"> 1M</label>
+                    <label><input type="checkbox" id="asofI63" checked> 3M</label>
+                    <label><input type="checkbox" id="asofI252"> 52W</label>
+                  </div></div>
+                </div>
+                <div class="scr-filter-row">
+                  <input type="checkbox" id="asofJOn"><span class="scr-label">Exclude Circuits:</span>
+                  <div class="scr-inputs"><div class="scr-cb-group" title="Excludes stocks whose price band ON THE CHOSEN DATE was one of the ticked bands (from the price band history, loaded from the server when needed)">
+                    <label><input type="checkbox" id="asofJ2" checked> 2%</label>
+                    <label><input type="checkbox" id="asofJ5" checked> 5%</label>
+                    <label><input type="checkbox" id="asofJ10" checked> 10%</label>
+                  </div></div>
+                </div>
               </div>
-              <div class="scr-filter-row">
-                <input type="checkbox" id="asofJOn"><span class="scr-label">Exclude Circuits:</span>
-                <div class="scr-inputs"><div class="scr-cb-group" title="Excludes stocks whose price band ON THE CHOSEN DATE was one of the ticked bands (from the price band history, loaded from the server when needed)">
-                  <label><input type="checkbox" id="asofJ2" checked> 2%</label>
-                  <label><input type="checkbox" id="asofJ5" checked> 5%</label>
-                  <label><input type="checkbox" id="asofJ10" checked> 10%</label>
-                </div></div>
-              </div>
+            </div>
+            <!-- % Change: a single full-width row at the bottom -->
+            <div class="scr-filters-list scr-asof-single" style="padding:0;">
               <div class="scr-filter-row">
                 <input type="checkbox" id="asofKOn"><span class="scr-label">% Change:</span>
                 <div class="scr-inputs" title="From and To are looked up on or before each date (a non-trading day uses the previous trading day). A To date after the scan date is capped at the scan date; blank = the scan date.">
