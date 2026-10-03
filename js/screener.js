@@ -978,7 +978,9 @@ function exportTradingViewWatchlist() {
   let industryCount = 0;
   Object.keys(byIndustry).sort((a, b) => byIndustry[b].length - byIndustry[a].length).forEach(ind => {
     const syms = byIndustry[ind];
-    parts.push('###' + ind + '(' + syms.length + ')');
+    // TradingView splits the pasted text on commas, so a comma inside an industry name ("Gems, Jewellery And Watches")
+    // would break the header in two and leave the second half as a red, invalid "symbol"
+    parts.push('###' + ind.replace(/\s*,\s*/g, ' ') + '(' + syms.length + ')');
     syms.forEach(sym => parts.push('NSE:' + sym));
     industryCount++;
   });
