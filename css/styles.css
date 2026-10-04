@@ -673,7 +673,12 @@ canvas { max-width: 100%; display: block; }
   gap: 10px;
   height: 100%;
 }
-.ic-grid.layout-1x1 { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+/* Column/row counts for the 1x1 / 3x3 / 3x4 / 4x4 layouts are set inline by icSetLayout() */
+.ic-grid-dense { gap: 6px; }
+.ic-grid-dense .ic-cell-header { padding: 4px 8px; font-size: 12px; }
+.ic-grid-dense .ic-cell-line1 { flex-wrap: nowrap; gap: 8px; }
+.ic-grid-dense .ic-cell-ohlc { font-size: 10px; gap: 6px; flex: 1 1 0; }
+.ic-grid-dense .ic-cell-line2 { font-size: 9px; }
 .ic-cell {
   display: flex; flex-direction: column;
   background: var(--bg3); border: 1px solid var(--border); border-radius: 10px;
@@ -709,23 +714,6 @@ canvas { max-width: 100%; display: block; }
   pointer-events: none; white-space: nowrap;
 }
 .ic-legend b { color: var(--text); font-weight: 600; }
-
-/* Custom drag-to-measure tool overlay (Measure mode) */
-.ic-measure-box {
-  position: absolute; z-index: 6; pointer-events: none;
-  border: 1px solid var(--accent); background: rgba(59, 130, 246, 0.12);
-}
-.ic-measure-box.positive { border-color: var(--green); background: rgba(5, 223, 114, 0.14); }
-.ic-measure-box.negative { border-color: var(--red); background: rgba(248, 113, 113, 0.14); }
-.ic-measure-label {
-  position: absolute; z-index: 7;
-  display: flex; align-items: center; gap: 8px;
-  font-size: 11px; color: var(--text2);
-  background: rgba(15, 23, 42, 0.9); border: 1px solid var(--border);
-  padding: 4px 8px; border-radius: 4px; white-space: nowrap;
-}
-.ic-measure-close { cursor: pointer; color: var(--text2); font-weight: 700; padding: 0 2px; }
-.ic-measure-close:hover { color: var(--text); }
 
 .ic-layout-toggle { display: flex; gap: 4px; }
 .ic-layout-btn { padding: 5px 10px; font-size: 12px; }

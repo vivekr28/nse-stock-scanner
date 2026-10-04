@@ -608,11 +608,25 @@
         <label><input type="checkbox" id="icPctMode"> % Change</label>
         <label><input type="checkbox" id="icShowADR" checked> 50D ADR</label>
         <label><input type="checkbox" id="icShowAvgMF" checked> 50D Avg MF</label>
-        <label title="Click a start point, then click an end point to measure % change, price change, and trading days between them"><input type="checkbox" id="icMeasureMode"> Measure</label>
+        <div class="ic-layout-toggle" id="icToolsToggle">
+          <button class="btn btn-secondary ic-layout-btn ic-tool-btn" data-tool="measure" onclick="icToolAction('measure')" title="Click a start point, then an end point, to measure % change, price change and bars between them (one use per click on this button; applies to whichever chart you click)">Measure</button>
+          <button class="btn btn-secondary ic-layout-btn ic-tool-btn" data-tool="trend" onclick="icToolAction('trend')" title="Click two points on a chart to draw a trend line (one use per click on this button)">Trend Line</button>
+          <button class="btn btn-secondary ic-layout-btn ic-tool-btn" data-tool="delete" onclick="icToolAction('delete')" title="Delete the selected drawing (click a drawing to select it; Delete key also works)" disabled>Delete</button>
+          <button class="btn btn-secondary ic-layout-btn ic-tool-btn" data-tool="clear" onclick="icToolAction('clear')" title="Remove all drawings">Clear</button>
+        </div>
+        <label id="icSyncCrosshairWrap" title="Hovering one chart moves the crosshair on the other charts to the same date"><input type="checkbox" id="icSyncCrosshair"> Sync Crosshair</label>
         <span id="icSelectedBadge" style="color:var(--text2);font-size:12px;">0 stocks selected</span>
+        <div class="ic-layout-toggle" id="icRangeToggle" title="How much history the charts show (all of it stays scrollable)">
+          <button class="btn btn-secondary ic-layout-btn active" data-range="6m" onclick="icSetRange('6m')">6M</button>
+          <button class="btn btn-secondary ic-layout-btn" data-range="1y" onclick="icSetRange('1y')">1Y</button>
+          <button class="btn btn-secondary ic-layout-btn" data-range="2y" onclick="icSetRange('2y')">2Y</button>
+        </div>
         <div class="ic-layout-toggle" id="icLayoutToggle">
-          <button class="btn btn-secondary ic-layout-btn active" id="icLayout2x2Btn" onclick="icSetLayout('2x2')" title="2x2 grid">2×2</button>
-          <button class="btn btn-secondary ic-layout-btn" id="icLayout1x1Btn" onclick="icSetLayout('1x1')" title="Single chart">1×1</button>
+          <button class="btn btn-secondary ic-layout-btn active" data-layout="2x2" onclick="icSetLayout('2x2')" title="2 rows x 2 columns (4 charts)">2×2</button>
+          <button class="btn btn-secondary ic-layout-btn" data-layout="3x3" onclick="icSetLayout('3x3')" title="3 rows x 3 columns (9 charts)">3×3</button>
+          <button class="btn btn-secondary ic-layout-btn" data-layout="3x4" onclick="icSetLayout('3x4')" title="3 rows x 4 columns (12 charts)">3×4</button>
+          <button class="btn btn-secondary ic-layout-btn" data-layout="4x4" onclick="icSetLayout('4x4')" title="4 rows x 4 columns (16 charts)">4×4</button>
+          <button class="btn btn-secondary ic-layout-btn" data-layout="1x1" onclick="icSetLayout('1x1')" title="Single chart">1×1</button>
         </div>
         <div class="ic-pagination" id="icPaginationWrap">
           <button class="btn btn-secondary" id="icPrevBtn" onclick="icPrevPage()">&lt; Prev</button>
@@ -653,6 +667,13 @@
             <button class="btn btn-secondary ic-layout-btn" data-lag="3m" onclick="icSetMfRocLag('3m')">3M</button>
             <button class="btn btn-secondary ic-layout-btn" data-lag="6m" onclick="icSetMfRocLag('6m')">6M</button>
           </div>
+          <span class="ic-mf-toolbar-label" style="margin-left:18px;">Draw:</span>
+          <div class="ic-layout-toggle">
+            <button class="btn btn-secondary ic-layout-btn ic-tool-btn" data-tool="measure" onclick="icToolAction('measure')" title="Click a start point, then an end point, on either chart to measure the change in points and bars between them (one use per click on this button)">Measure</button>
+            <button class="btn btn-secondary ic-layout-btn ic-tool-btn" data-tool="trend" onclick="icToolAction('trend')" title="Click two points on either chart to draw a trend line (one use per click on this button)">Trend Line</button>
+            <button class="btn btn-secondary ic-layout-btn ic-tool-btn" data-tool="delete" onclick="icToolAction('delete')" title="Delete the selected drawing (click a drawing to select it; Delete key also works)" disabled>Delete</button>
+            <button class="btn btn-secondary ic-layout-btn ic-tool-btn" data-tool="clear" onclick="icToolAction('clear')" title="Remove all drawings">Clear</button>
+          </div>
         </div>
         <div class="ic-mf-charts-row">
           <div class="ic-mf-chart-col">
@@ -691,6 +712,13 @@
     <div class="ic-title-line1" style="margin-bottom:2px;">
       <h3 id="brdChartTitle" style="margin:0;">% Stocks Above 20 SMA</h3>
       <span id="brdChartOhlc" class="ic-cell-ohlc"></span>
+      <span class="ew-controls" style="margin-left:auto;padding:0;">
+        <span class="ew-title">Draw:</span>
+        <button class="btn btn-secondary ic-layout-btn" id="brdToolMeasure" title="Click a start point, then an end point, to measure the change in points and bars between them (one use per click on this button)">Measure</button>
+        <button class="btn btn-secondary ic-layout-btn" id="brdToolTrend" title="Click two points to draw a trend line (one use per click on this button)">Trend Line</button>
+        <button class="btn btn-secondary ic-layout-btn" id="brdToolDelete" title="Delete the selected drawing (click a drawing to select it; Delete key also works)" disabled>Delete</button>
+        <button class="btn btn-secondary ic-layout-btn" id="brdToolClear" title="Remove all drawings">Clear</button>
+      </span>
     </div>
     <div id="brdUniverseNote" class="ic-cell-line2" style="margin-bottom:6px;"></div>
     <div id="brdChartContainer" class="brd-chart"></div>
@@ -862,6 +890,11 @@
     <label><input type="checkbox" id="ewMA20"> 20 SMA</label>
     <label><input type="checkbox" id="ewMA50"> 50 SMA</label>
     <label><input type="checkbox" id="ewMA200"> 200 SMA</label>
+    <span class="ew-title">Draw:</span>
+    <button class="btn btn-secondary ic-layout-btn" id="ewToolMeasure" title="Click a start point, then an end point, to measure % change, price change and bars between them (one use per click on this button)">Measure</button>
+    <button class="btn btn-secondary ic-layout-btn" id="ewToolTrend" title="Click two points to draw a trend line (one use per click on this button)">Trend Line</button>
+    <button class="btn btn-secondary ic-layout-btn" id="ewToolDelete" title="Delete the selected drawing (click a drawing to select it; Delete key also works)" disabled>Delete</button>
+    <button class="btn btn-secondary ic-layout-btn" id="ewToolClear" title="Remove all drawings">Clear</button>
     <span id="ewConstituentInfo" class="ew-info"></span>
   </div>
   <div id="ewChartContainer"></div>
@@ -1024,14 +1057,14 @@
 <script src="js/data-processor.js?v=2"></script>
 <script src="js/scanner.js?v=2"></script>
 <script src="js/screener.js?v=16"></script>
-<script src="js/breadth.js?v=11"></script>
+<script src="js/breadth.js?v=12"></script>
 <script src="js/sector.js?v=2"></script>
 <script src="js/industry.js?v=10"></script>
 <script src="js/lib/lightweight-charts.standalone.production.js"></script>
-<script src="js/ew-index.js?v=5"></script>
-<script src="js/chart-tools.js?v=5"></script>
+<script src="js/ew-index.js?v=6"></script>
+<script src="js/chart-tools.js?v=6"></script>
 <script src="js/market-overview.js?v=7"></script>
-<script src="js/industry-charts.js?v=20"></script>
+<script src="js/industry-charts.js?v=21"></script>
 <script src="js/data-quality.js?v=11"></script>
 <script src="js/presets.js?v=11"></script>
 <script src="js/asof-scan.js?v=1"></script>

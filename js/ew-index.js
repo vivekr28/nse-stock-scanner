@@ -3,6 +3,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 let ewChart = null;
+let ewTools = null; // one-shot Measure / Trend Line drawing tools (chart-tools.js)
 let ewCandleSeries = null;
 let ewVolumeSeries = null;
 let ewUpColor = '#05df72';
@@ -100,6 +101,14 @@ function ewEnsureChart() {
       priceLineVisible: false,
       lastValueVisible: false,
     });
+  });
+
+  // One-shot Measure / Trend Line tools (chart-tools.js), same as the Market Overview chart
+  ewTools = new ChartTools(ewChart, [{ series: ewCandleSeries }], container, {
+    measure: document.getElementById('ewToolMeasure'),
+    trend: document.getElementById('ewToolTrend'),
+    clear: document.getElementById('ewToolClear'),
+    remove: document.getElementById('ewToolDelete'),
   });
 }
 

@@ -11,14 +11,17 @@ const { loadScripts } = require('./load');
 const sb = loadScripts(['js/chart-tools.js']);
 const ChartTools = vm.runInContext('ChartTools', sb); // class declarations are not properties of the sandbox
 
-function setup() {
+function setup(hooks) {
   const keyHandlers = [];
   sb.document.addEventListener = (type, fn) => { if (type === 'keydown') keyHandlers.push(fn); };
+  sb.document.removeEventListener = (type, fn) => { const i = keyHandlers.indexOf(fn); if (type === 'keydown' && i >= 0) keyHandlers.splice(i, 1); };
 
   const handlers = { click: null, move: null };
   const chart = {
     subscribeClick: (fn) => { handlers.click = fn; },
     subscribeCrosshairMove: (fn) => { handlers.move = fn; },
+    unsubscribeClick: (fn) => { if (handlers.click === fn) handlers.click = null; },
+    unsubscribeCrosshairMove: (fn) => { if (handlers.move === fn) handlers.move = null; },
     timeScale: () => ({ logicalToCoordinate: (l) => l * 10 }),
   };
   const makeSeries = (paneIndex) => {
@@ -27,6 +30,7 @@ function setup() {
       coordinateToPrice: (y) => 1000 - y,
       priceToCoordinate: (p) => 1000 - p,
       attachPrimitive(p) { s.primitive = p; p.attached({ chart, series: s, requestUpdate: () => {} }); },
+      detachPrimitive(p) { if (s.primitive === p) s.primitive = null; },
     };
     return s;
   };
@@ -37,13 +41,13 @@ function setup() {
   };
   const buttons = { measure: makeButton(), trend: makeButton(), clear: makeButton(), remove: makeButton() };
   const price = makeSeries(0), indicator = makeSeries(1);
-  const tools = new ChartTools(chart, [{ series: price }, { series: indicator, unit: 'pts' }], { style: {} }, buttons);
+  const tools = new ChartTools(chart, [{ series: price }, { series: indicator, unit: 'pts' }], { style: {} }, buttons, hooks);
 
   // a click at screen (x, price-pane y) in the given pane
   const click = (x, y, paneIndex = 0) => handlers.click({ point: { x, y }, logical: x / 10, paneIndex });
   const hover = (x, y, paneIndex = 0) => handlers.move({ point: { x, y }, logical: x / 10, paneIndex });
   const key = (k, target = {}) => keyHandlers.forEach(fn => fn({ key: k, target, preventDefault() {} }));
-  return { tools, buttons, click, hover, key, price, indicator };
+  return { tools, buttons, click, hover, key, price, indicator, keyHandlers, handlers };
 }
 
 // a trend line from (100, y500 = price 500) to (300, y300 = price 700)
@@ -217,4 +221,65 @@ test('clearing a pane also drops a selection that was in it', () => {
   drawTrend(t); t.click(200, 404);
   t.tools.clear(0);
   assert.equal(t.tools.selected, null);
+});
+
+test('onChange hook: fires when a tool is armed, when the first point lands, and when the drawing completes', () => {
+  const seen = [];
+  const t = setup({ onChange: tools => seen.push([tools.armed, !!tools.pending]) });
+  seen.length = 0;
+  t.tools.arm('trend');
+  t.click(100, 500);
+  t.click(300, 300);
+  assert.deepEqual(seen, [['trend', false], ['trend', true], [null, false]]);
+});
+
+test('onChange hook: fires when a drawing is selected and when it is deleted', () => {
+  const seen = [];
+  const t = setup({ onChange: tools => seen.push(!!tools.selected) });
+  drawTrend(t);
+  seen.length = 0;
+  t.click(200, 400); // on the line
+  t.key('Delete');
+  assert.deepEqual(seen, [true, false]);
+});
+
+test('destroy: drops the drawing layer, the key / chart listeners and any armed state', () => {
+  const t = setup();
+  drawTrend(t);
+  t.tools.arm('measure');
+  t.tools.destroy();
+  assert.equal(t.price.primitive, null);
+  assert.equal(t.handlers.click, null);
+  assert.equal(t.handlers.move, null);
+  assert.equal(t.keyHandlers.length, 0);
+  assert.equal(t.tools.drawings.length, 0);
+  assert.equal(t.tools.armed, null);
+  assert.equal(t.buttons.measure.active, false);
+});
+
+// ── Measure label text, per series unit ──────────────────────────────────────
+// Draws one measure box (price 500 -> 520, 4 bars apart) through a fake canvas context and returns the label text.
+function measureLabel(unit) {
+  const t = setup();
+  const entry = { series: t.price, unit: unit || null };
+  const prim = new (vm.runInContext('ChartToolsPrimitive', sb))(t.tools, entry);
+  prim._chart = { timeScale: () => ({ logicalToCoordinate: l => l * 10 }) };
+  prim._series = t.price;
+  const texts = [];
+  const ctx = {
+    canvas: { clientWidth: 1000 }, save() {}, restore() {}, fillRect() {}, strokeRect() {},
+    measureText: s => ({ width: s.length * 6 }), fillText: s => texts.push(s),
+  };
+  const A = { x: 100, y: 500 }, B = { x: 140, y: 480 };
+  prim._drawMeasure(ctx, A, B, { a: { l: 10, p: 500 }, b: { l: 14, p: 520 } });
+  return texts[0];
+}
+
+test('measure label: a price series reads as % change, price change and bars', () => {
+  assert.equal(measureLabel(null), '+4.00% (+20) · 4 bars');
+});
+
+test('measure label: a series that is already a % reads in its own unit (pts / pp), never as a % of a %', () => {
+  assert.equal(measureLabel('pts'), '+20 pts · 4 bars');
+  assert.equal(measureLabel('pp'), '+20 pp · 4 bars');
 });

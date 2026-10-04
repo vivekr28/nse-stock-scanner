@@ -18,10 +18,18 @@ let icChartInstances = []; // stock-tab chart instances: [{chart, candleSeries, 
 let icIndustryChartInst = null; // single big-chart instance (industry index OR single-stock mode)
 let icSingleList = [];   // the Stock Scanner results the single-stock view was opened from
 let icSingleIndex = -1;  // current stock's position within icSingleList
-let icLayout = '2x2';    // '2x2' (4 cells) | '1x1' (one chart at a time) — Stock Charts tab only
-let icMeasureMode = false; // when on, dragging on a chart measures instead of panning it
+let icLayout = '2x2';    // key of IC_LAYOUTS (default '2x2') — Stock Charts tab only
+let icRange = '6m';        // '6m' | '1y' | '2y' - visible window of the per-stock charts (grid + single-stock)
+let icSyncCrosshair = false; // Stock Charts 2x2 grid only: hovering one chart moves the crosshair on the others to the same date
 
-const IC_PAGE_SIZE = 4;
+// Stock Charts grid layouts: rows x columns of charts per page ('3x4' = 3 rows of 4).
+const IC_LAYOUTS = {
+  '1x1': { rows: 1, cols: 1 },
+  '2x2': { rows: 2, cols: 2 },
+  '3x3': { rows: 3, cols: 3 },
+  '3x4': { rows: 3, cols: 4 },
+  '4x4': { rows: 4, cols: 4 },
+};
 const IC_UP_COLOR = '#18eee7';
 const IC_DOWN_COLOR = '#ff1616';
 const IC_SMA_COLORS = { 10: '#15ff00', 20: '#ff9800', 50: '#ff1616' };
@@ -37,23 +45,60 @@ const IC_VOLUME_SMA_COLOR = '#08c9c2';
 const IC_VOLUME_SMA_HIGH_COLOR = '#00ffda';
 const IC_VOLUME_SMA_HIGH_LOOKBACK = 65; // trading days
 const IC_RIGHT_OFFSET = 10; // empty candle-widths of space kept to the right of the last bar
-const IC_STOCK_VISIBLE_CANDLES = 126; // ~6 trading months of candles (plus the right margin on top)
+// Default visible window of the per-stock charts, by range button (plus the right margin on top).
+const IC_RANGE_CANDLES = { '6m': 126, '1y': 252, '2y': 504 }; // ~trading days in 6 months / 1 year / 2 years
 const IC_INDUSTRY_VISIBLE_CANDLES = 252 - IC_RIGHT_OFFSET; // ~1 trading year, minus the right margin
-const IC_MEASURE_DRAG_THRESHOLD = 4; // px — a mouse-up past this distance from mouse-down is a chart
-                                      // drag (pans as usual), not a measure-tool click
 
-// Native pan/zoom always stays on, including in Measure mode - the measure tool
-// is click-click (see icCreateChart), so it never competes with dragging to pan.
-// Turning Measure mode off just clears any in-progress/pinned measurements.
-function icApplyMeasureMode() {
-  const instances = icIndustryChartInst ? [...icChartInstances, icIndustryChartInst] : icChartInstances;
-  instances.forEach(inst => {
-    if (!icMeasureMode) {
-      if (inst.clearMeasure) inst.clearMeasure();
-      if (inst.cancelPendingMeasure) inst.cancelPendingMeasure();
-    }
+// ── One-shot Measure / Trend Line tools (chart-tools.js) ──────────────────────
+// The header Draw buttons (and the Money Flow tab's own copy of them) drive EVERY chart on screen
+// at once: clicking Measure / Trend Line arms them all, the first click lands on whichever chart
+// the user picks (the others disarm), and the tool disarms itself after one drawing - same
+// one-shot behaviour as the Market Overview chart. Drawings belong to a chart, so they go when
+// the chart is rebuilt (paging, layout / tab change).
+let icToolSet = []; // ChartTools of every chart currently on screen
+
+function icAttachTools(chart, panes, container) {
+  const tools = new ChartTools(chart, panes, container, null, { onChange: icOnToolsChange });
+  icToolSet.push(tools);
+  return tools;
+}
+
+function icDropTools(tools) {
+  if (!tools) return;
+  tools.destroy();
+  icToolSet = icToolSet.filter(t => t !== tools);
+  icSyncToolButtons();
+}
+
+function icOnToolsChange(t) {
+  if (t.pending) icToolSet.forEach(o => { if (o !== t && (o.armed || o.pending)) o.disarm(); });
+  if (t.selected) icToolSet.forEach(o => { if (o !== t && o.selected) o._select(null); });
+  icSyncToolButtons();
+}
+
+function icSyncToolButtons() {
+  const armed = new Set(icToolSet.map(t => t.armed).filter(Boolean));
+  const anySelected = icToolSet.some(t => t.selected);
+  document.querySelectorAll('.ic-tool-btn').forEach(btn => {
+    const tool = btn.dataset.tool;
+    if (tool === 'measure' || tool === 'trend') btn.classList.toggle('active', armed.has(tool));
+    else if (tool === 'delete') btn.disabled = !anySelected;
   });
 }
+
+function icToolAction(tool) {
+  if (tool === 'measure' || tool === 'trend') {
+    const on = icToolSet.some(t => t.armed === tool); // clicking the armed button again cancels
+    icToolSet.forEach(t => (on ? t.disarm() : t.arm(tool)));
+  } else if (tool === 'delete') {
+    icToolSet.forEach(t => t.removeSelected());
+  } else if (tool === 'clear') {
+    icToolSet.forEach(t => t.clear());
+  }
+}
+
+// True while a tool is armed / mid-drawing or a drawing is selected - Esc then cancels that instead of closing the popup.
+function icToolsBusy() { return icToolSet.some(t => t.armed || t.pending || t.selected); }
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SELECTED STOCKS — a pick-list built while browsing chart popups from either the
@@ -206,7 +251,7 @@ function icRenderSingleStock() {
   if (!container || days.length === 0 || typeof LightweightCharts === 'undefined') return;
   const { candleData, volumeData, closes } = icBuildBarsFromDays(days);
   icIndustryChartInst = icCreateChart(container, 'icVolumeSingle', document.getElementById('icSingleOhlc'));
-  icSetChartData(icIndustryChartInst, candleData, volumeData, closes, IC_STOCK_VISIBLE_CANDLES);
+  icSetChartData(icIndustryChartInst, candleData, volumeData, closes, IC_RANGE_CANDLES[icRange]);
 }
 
 function closeIndustryCharts() {
@@ -228,6 +273,8 @@ function icUpdateControlVisibility() {
   const singleStats = document.getElementById('icSingleStats');
   const singleOhlc = document.getElementById('icSingleOhlc');
   const layoutToggle = document.getElementById('icLayoutToggle');
+  const rangeToggle = document.getElementById('icRangeToggle');
+  const syncWrap = document.getElementById('icSyncCrosshairWrap');
   const mfWrap = document.getElementById('icMoneyFlowWrap');
   const modalBox = document.querySelector('#industryChartsModal .ic-modal-box');
 
@@ -246,6 +293,7 @@ function icUpdateControlVisibility() {
     if (singleStats) singleStats.style.display = '';
     if (singleOhlc) singleOhlc.style.display = '';
     if (layoutToggle) layoutToggle.style.display = 'none';
+    if (rangeToggle) rangeToggle.style.display = '';
   } else {
     tabbar.style.display = '';
     singlePagination.style.display = 'none';
@@ -258,7 +306,10 @@ function icUpdateControlVisibility() {
     bigChartWrap.style.display = icActiveTab === 'industry' ? '' : 'none';
     if (mfWrap) mfWrap.style.display = icActiveTab === 'moneyflow' ? '' : 'none';
     if (layoutToggle) layoutToggle.style.display = showGrid ? '' : 'none';
+    if (rangeToggle) rangeToggle.style.display = showGrid ? '' : 'none';
   }
+  // Crosshair sync links the grid's charts, so it only means something with several on screen
+  if (syncWrap) syncWrap.style.display = icMode !== 'single' && icActiveTab === 'stocks' && icLayout !== '1x1' ? '' : 'none';
 }
 
 // ── Tabs (industry mode only) ─────────────────────────────────────────────────
@@ -289,7 +340,7 @@ function icSwitchTab(tab) {
 }
 
 // ── Pagination (4 stocks per page in 2x2, 1 in 1x1 — sorted by market cap) ────
-function icPageSize() { return icLayout === '1x1' ? 1 : IC_PAGE_SIZE; }
+function icPageSize() { return IC_LAYOUTS[icLayout].rows * IC_LAYOUTS[icLayout].cols; }
 function icTotalPages() { return Math.max(1, Math.ceil(icStocks.length / icPageSize())); }
 
 function icPrevPage() { if (icPage > 0) { icPage--; icRenderPage(); } }
@@ -302,9 +353,14 @@ function icSetLayout(layout) {
   const firstVisibleIndex = icPage * icPageSize();
   icLayout = layout;
   icPage = Math.floor(firstVisibleIndex / icPageSize());
-  document.getElementById('icGrid').classList.toggle('layout-1x1', icLayout === '1x1');
-  document.getElementById('icLayout2x2Btn').classList.toggle('active', icLayout === '2x2');
-  document.getElementById('icLayout1x1Btn').classList.toggle('active', icLayout === '1x1');
+  const grid = document.getElementById('icGrid');
+  grid.style.gridTemplateColumns = `repeat(${IC_LAYOUTS[icLayout].cols}, minmax(0, 1fr))`;
+  grid.style.gridTemplateRows = `repeat(${IC_LAYOUTS[icLayout].rows}, minmax(0, 1fr))`;
+  grid.classList.toggle('ic-grid-dense', IC_LAYOUTS[icLayout].cols >= 3);
+  document.querySelectorAll('#icLayoutToggle .ic-layout-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.layout === icLayout);
+  });
+  icUpdateControlVisibility();
   icRenderPage();
 }
 
@@ -364,7 +420,45 @@ function icRenderPage() {
     const { candleData, volumeData, closes } = icBuildBarsFromDays(days);
     const inst = icCreateChart(container, 'icVolume' + i, document.getElementById('icOhlc' + i));
     icChartInstances.push(inst);
-    icSetChartData(inst, candleData, volumeData, closes, IC_STOCK_VISIBLE_CANDLES);
+    icSetChartData(inst, candleData, volumeData, closes, IC_RANGE_CANDLES[icRange]);
+  });
+  icWireStockCrosshairSync();
+}
+
+// Links the crosshairs of the grid's charts by DATE: hovering one moves the crosshair
+// (and the OHLC legend) on every other chart to the same trading day, or clears it
+// there when that stock has no bar on that date. Only acts while the "Sync Crosshair"
+// checkbox is on. Rebuilt on every page render, since chart.remove() drops the old
+// subscriptions. _icStockCrosshairSyncing guards against the charts re-triggering each
+// other when setCrosshairPosition itself fires a crosshairMove event.
+let _icStockCrosshairSyncing = false;
+function icWireStockCrosshairSync() {
+  const insts = icChartInstances;
+  if (insts.length < 2) return;
+
+  const timeKey = t => `${t.year}-${t.month}-${t.day}`;
+  insts.forEach(inst => {
+    inst.indexByDate = new Map(inst.candleData.map((c, i) => [timeKey(c.time), i]));
+  });
+
+  insts.forEach(source => {
+    source.chart.subscribeCrosshairMove(param => {
+      if (!icSyncCrosshair || _icStockCrosshairSyncing) return;
+      _icStockCrosshairSyncing = true;
+      insts.forEach(target => {
+        if (target === source) return;
+        const idx = param.time ? target.indexByDate.get(timeKey(param.time)) : undefined;
+        if (idx !== undefined) {
+          const bar = target.candleData[idx];
+          target.chart.setCrosshairPosition(bar.close, bar.time, target.candleSeries);
+          target.updateLegend(idx);
+        } else {
+          target.chart.clearCrosshairPosition();
+          target.updateLegend(null);
+        }
+      });
+      _icStockCrosshairSyncing = false;
+    });
   });
 }
 
@@ -443,7 +537,7 @@ function icCreateChart(container, volumeScaleId, ohlcTarget) {
   // of every candle whose day matches the flagged combo (see icComputeMFDotMarkers).
   const markersPlugin = LightweightCharts.createSeriesMarkers(candleSeries, []);
 
-  // Needed for both the fallback OHLC overlay below and the measure tool's overlay elements.
+  // Needed for the fallback OHLC overlay below.
   container.style.position = container.style.position || 'relative';
 
   // ── TradingView-style OHLC / change% / money-flow legend, driven by the crosshair ──
@@ -482,111 +576,9 @@ function icCreateChart(container, volumeScaleId, ohlcTarget) {
     inst.updateLegend(idx >= 0 ? idx : null);
   });
 
-  // ── Custom click-click measure tool (Measure mode) ──────────────────────────
-  // Click once to place the start point; the box then follows the pointer live
-  // (like the old drag version) as it moves, with no button held; click again
-  // to drop the end point and pin the measurement. Native pan/zoom is left on
-  // the whole time (see icApplyMeasureMode), so an actual drag always pans the
-  // chart as usual; only a stationary mouse-down/up (within
-  // IC_MEASURE_DRAG_THRESHOLD) counts as a measure-tool click.
-  const measureBox = document.createElement('div');
-  measureBox.className = 'ic-measure-box';
-  measureBox.style.display = 'none';
-  const measureLabel = document.createElement('div');
-  measureLabel.className = 'ic-measure-label';
-  measureLabel.style.display = 'none';
-  measureLabel.innerHTML = '<span class="ic-measure-text"></span><span class="ic-measure-close" title="Remove">&times;</span>';
-  container.appendChild(measureBox);
-  container.appendChild(measureLabel);
-  const measureText = measureLabel.querySelector('.ic-measure-text');
-
-  let measurePending = null; // {x, y} of the start click, until the end click arrives
-
-  function clearMeasure() {
-    measureBox.style.display = 'none';
-    measureLabel.style.display = 'none';
-  }
-  inst.clearMeasure = clearMeasure;
-  inst.cancelPendingMeasure = () => { measurePending = null; };
-
-  measureLabel.querySelector('.ic-measure-close').addEventListener('click', e => {
-    e.stopPropagation();
-    clearMeasure();
-  });
-
-  function renderMeasure(x0, y0, x1, y1) {
-    const price0 = candleSeries.coordinateToPrice(y0);
-    const price1 = candleSeries.coordinateToPrice(y1);
-    const logical0 = chart.timeScale().coordinateToLogical(x0);
-    const logical1 = chart.timeScale().coordinateToLogical(x1);
-    if (price0 == null || price1 == null || logical0 == null || logical1 == null) return;
-
-    const bars = Math.abs(Math.round(logical1) - Math.round(logical0));
-    const delta = price1 - price0;
-    const chg = price0 !== 0 ? (delta / price0) * 100 : NaN;
-    const up = delta >= 0;
-
-    measureBox.style.left = Math.min(x0, x1) + 'px';
-    measureBox.style.top = Math.min(y0, y1) + 'px';
-    measureBox.style.width = Math.abs(x1 - x0) + 'px';
-    measureBox.style.height = Math.abs(y1 - y0) + 'px';
-    measureBox.classList.toggle('positive', up);
-    measureBox.classList.toggle('negative', !up);
-    measureBox.style.display = '';
-
-    const sign = up ? '+' : '';
-    measureText.innerHTML =
-      `<span class="${up ? 'positive' : 'negative'}">${sign}${chg.toFixed(2)}%</span>` +
-      ` (${sign}${delta.toFixed(2)}) · ${bars} ${bars === 1 ? 'day' : 'days'}`;
-    measureLabel.style.left = x1 + 10 + 'px';
-    measureLabel.style.top = Math.max(0, Math.min(y0, y1) - 4) + 'px';
-    measureLabel.style.display = '';
-  }
-
-  // Live-follow: once a start point is placed, redraw the box/label to the
-  // current pointer position on every plain hover move (no button held) -
-  // ignored while a button is down so it doesn't fight the click/drag
-  // detection below or a genuine chart-pan drag in progress.
-  container.addEventListener('mousemove', e => {
-    if (!icMeasureMode || !measurePending || e.buttons !== 0) return;
-    const r = container.getBoundingClientRect();
-    renderMeasure(measurePending.x, measurePending.y, e.clientX - r.left, e.clientY - r.top);
-  });
-
-  // A mouse-down/up pair is treated as a measure-tool "click" only if the mouse
-  // barely moved between them; anything past IC_MEASURE_DRAG_THRESHOLD is a real
-  // drag and is left alone so the chart's own pan handles it.
-  container.addEventListener('mousedown', e => {
-    if (!icMeasureMode || e.button !== 0) return;
-    const rect = container.getBoundingClientRect();
-    const downX = e.clientX - rect.left, downY = e.clientY - rect.top;
-    let moved = false;
-
-    const onMove = moveEvt => {
-      if (Math.abs((moveEvt.clientX - rect.left) - downX) > IC_MEASURE_DRAG_THRESHOLD ||
-          Math.abs((moveEvt.clientY - rect.top) - downY) > IC_MEASURE_DRAG_THRESHOLD) {
-        moved = true;
-      }
-    };
-    const onUp = upEvt => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      if (moved) return; // a real drag - the chart already panned, not a measure click
-
-      const r = container.getBoundingClientRect();
-      const x = upEvt.clientX - r.left, y = upEvt.clientY - r.top;
-      if (!measurePending) {
-        clearMeasure(); // starting a fresh measurement replaces any pinned one
-        measurePending = { x, y };
-        renderMeasure(x, y, x, y); // zero-size box that the hover handler above immediately grows
-      } else {
-        renderMeasure(measurePending.x, measurePending.y, x, y);
-        measurePending = null;
-      }
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  });
+  // One-shot Measure / Trend Line tools (chart-tools.js), driven by the header Draw buttons.
+  // Only the candle pane takes drawings; the turnover pane below does not.
+  inst.tools = icAttachTools(chart, [{ series: candleSeries }], container);
 
   return inst;
 }
@@ -633,12 +625,30 @@ function icSetChartData(inst, candleData, volumeData, closes, visibleCandles) {
   icUpdateInstanceMFDots(inst);
   icApplyPriceScaleMode(inst);
   inst.updateLegend();
+  icApplyVisibleRange(inst, visibleCandles);
+}
 
-  if (candleData.length > visibleCandles) {
-    inst.chart.timeScale().setVisibleLogicalRange({ from: candleData.length - visibleCandles, to: candleData.length - 1 + IC_RIGHT_OFFSET });
+// Shows the last `visibleCandles` bars (plus the right margin); shorter histories fit whole.
+function icApplyVisibleRange(inst, visibleCandles) {
+  const n = inst.candleData.length;
+  if (n > visibleCandles) {
+    inst.chart.timeScale().setVisibleLogicalRange({ from: n - visibleCandles, to: n - 1 + IC_RIGHT_OFFSET });
   } else {
     inst.chart.timeScale().fitContent();
   }
+}
+
+// 6M / 1Y / 2Y buttons: the full history is already loaded in every chart (the SMAs
+// need it), so this only moves the visible window - no re-render, and each chart's
+// own zoom/scroll is reset to the chosen range. Industry Chart tab keeps its own 1Y.
+function icSetRange(range) {
+  if (!IC_RANGE_CANDLES[range]) return;
+  icRange = range;
+  document.querySelectorAll('#icRangeToggle .ic-layout-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.range === range);
+  });
+  const insts = icMode === 'single' && icIndustryChartInst ? [icIndustryChartInst] : icChartInstances;
+  insts.forEach(inst => icApplyVisibleRange(inst, IC_RANGE_CANDLES[range]));
 }
 
 function icBuildBarsFromDays(days) {
@@ -658,7 +668,11 @@ function icBuildBarsFromDays(days) {
 }
 
 function icDisposeCharts() {
-  icChartInstances.forEach(inst => { if (inst && inst.chart) { try { inst.chart.remove(); } catch (e) {} } });
+  icChartInstances.forEach(inst => {
+    if (!inst) return;
+    icDropTools(inst.tools);
+    if (inst.chart) { try { inst.chart.remove(); } catch (e) {} }
+  });
   icChartInstances = [];
 }
 
@@ -731,6 +745,7 @@ function icBuildIndustryChart() {
 
 function icDisposeIndustryChart() {
   if (icIndustryChartInst && icIndustryChartInst.chart) {
+    icDropTools(icIndustryChartInst.tools);
     try { icIndustryChartInst.chart.remove(); } catch (e) {}
   }
   icIndustryChartInst = null;
@@ -855,11 +870,14 @@ function icBuildMoneyFlowChart() {
     updateLegend(point && point.value !== undefined ? { time: param.time, value: point.value } : null);
   });
 
-  icMfChartInst = { chart, series, sizeWatcher, data, updateLegend };
+  // The line is already a % (change in turnover), so a measurement reads in percentage points
+  const tools = icAttachTools(chart, [{ series, unit: 'pp' }], container);
+  icMfChartInst = { chart, series, sizeWatcher, data, updateLegend, tools };
 }
 
 function icDisposeMoneyFlowChart() {
   if (icMfChartInst && icMfChartInst.chart) {
+    icDropTools(icMfChartInst.tools);
     try { icMfChartInst.sizeWatcher.disconnect(); } catch (e) {}
     try { icMfChartInst.chart.remove(); } catch (e) {}
   }
@@ -935,11 +953,13 @@ function icBuildMfRocChart() {
     updateLegend(point && point.value !== undefined ? { time: param.time, value: point.value } : null);
   });
 
-  icMfRocChartInst = { chart, series, sizeWatcher, data, updateLegend };
+  const tools = icAttachTools(chart, [{ series, unit: 'pp' }], container);
+  icMfRocChartInst = { chart, series, sizeWatcher, data, updateLegend, tools };
 }
 
 function icDisposeMfRocChart() {
   if (icMfRocChartInst && icMfRocChartInst.chart) {
+    icDropTools(icMfRocChartInst.tools);
     try { icMfRocChartInst.sizeWatcher.disconnect(); } catch (e) {}
     try { icMfRocChartInst.chart.remove(); } catch (e) {}
   }
@@ -1095,10 +1115,12 @@ document.getElementById('icShowMFDots').addEventListener('change', icUpdateAllMF
 document.getElementById('icShowADR').addEventListener('change', icRefreshCurrentView);
 document.getElementById('icShowAvgMF').addEventListener('change', icRefreshCurrentView);
 
-// ── Measure mode toggle ───────────────────────────────────────────────────────
-document.getElementById('icMeasureMode').addEventListener('change', () => {
-  icMeasureMode = document.getElementById('icMeasureMode').checked;
-  icApplyMeasureMode();
+// ── Sync Crosshair toggle (grid only; the handlers live in icWireStockCrosshairSync) ──
+document.getElementById('icSyncCrosshair').addEventListener('change', () => {
+  icSyncCrosshair = document.getElementById('icSyncCrosshair').checked;
+  if (!icSyncCrosshair) {
+    icChartInstances.forEach(inst => { inst.chart.clearCrosshairPosition(); inst.updateLegend(null); });
+  }
 });
 
 // ── % Change toggle (TradingView-style percentage price scale, relative to the
@@ -1128,7 +1150,10 @@ document.getElementById('screenerBody').addEventListener('click', e => {
 // ── Keyboard: Down = next stock/page, Up = previous stock/page (single and grid views); Escape = close ──────────────────────────
 document.addEventListener('keydown', e => {
   if (!document.getElementById('industryChartsModal').classList.contains('active')) return;
-  if (e.key === 'Escape') { e.preventDefault(); closeIndustryCharts(); return; }
+  if (e.key === 'Escape') {
+    if (icToolsBusy()) return; // chart-tools.js cancels the armed tool / deselects the drawing instead
+    e.preventDefault(); closeIndustryCharts(); return;
+  }
   if (icMode === 'single') {
     if (e.key === 'ArrowDown') { e.preventDefault(); icNextStock(); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); icPrevStock(); }
