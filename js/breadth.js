@@ -60,6 +60,26 @@ function brdIsMulti() {
 let brdChart = null, brdCandleSeries = null, brdLineSeries = null, brdCountSeries = null;
 let brdMultiSeries = [], _brdMultiData = {};
 let _brdCandles = [], _brdCounts = []; // currently-displayed series data, for the crosshair legend below
+let brdTools = null, _brdToolsSeries = null, _brdToolsKey = null; // one-shot Measure / Trend Line tools (chart-tools.js), the series they draw on and the metric they were drawn for
+
+// Drawings are anchored to a metric's values on one series (candles, a line, or the first overlay line, which
+// two metrics can share), so the tools are rebuilt - dropping any drawings - whenever the metric or its series
+// changes, i.e. on a tab / dropdown switch. A plain data refresh of the same metric keeps them.
+function brdRefreshTools() {
+  const series = brdIsMulti() ? brdMultiSeries[0]
+    : (BRD_METRICS[brdActiveMetricKey()].line ? brdLineSeries : brdCandleSeries);
+  const key = brdActiveMetricKey();
+  if (brdTools && _brdToolsSeries === series && _brdToolsKey === key) return;
+  if (brdTools) brdTools.destroy();
+  _brdToolsSeries = series; _brdToolsKey = key;
+  // values are already a % of stocks, so a measurement reads in percentage points, not as a % of a %
+  brdTools = new ChartTools(brdChart, [{ series, unit: 'pp' }], document.getElementById('brdChartContainer'), {
+    measure: document.getElementById('brdToolMeasure'),
+    trend: document.getElementById('brdToolTrend'),
+    clear: document.getElementById('brdToolClear'),
+    remove: document.getElementById('brdToolDelete'),
+  });
+}
 
 function renderBreadth() {
   let above = 0, below = 0, advancing = 0, declining = 0, unchanged = 0;
@@ -354,6 +374,7 @@ function brdRenderActiveTab() {
   _brdCandles = candles;
   _brdCounts = counts;
   if (brdChart._updateBrdLegend) brdChart._updateBrdLegend(); // show the latest bar by default, like the stock-chart popup does
+  brdRefreshTools();
 
   // Run after the current layout/paint pass, not synchronously right after a
   // tab just became visible: `fitContent()` right after `display:none` ->
@@ -385,5 +406,6 @@ function brdRenderMulti() {
   });
   _brdCounts = [];
   if (brdChart._updateBrdLegend) brdChart._updateBrdLegend(null);
+  brdRefreshTools();
   requestAnimationFrame(() => ewFitWithRightPad(brdChart));
 }

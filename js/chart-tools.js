@@ -77,9 +77,9 @@ class ChartToolsPrimitive {
     const sign = up ? '+' : '';
     const dStr = delta.toLocaleString('en-IN', { maximumFractionDigits: 2 });
     const barStr = `${bars} ${bars === 1 ? 'bar' : 'bars'}`;
-    // A series already in % (the indicator pane) is measured in points, not as a % of a %.
-    const text = this._entry.unit === 'pts'
-      ? `${sign}${dStr} pts · ${barStr}`
+    // A series already in % (the indicator pane) is measured in points ('pts' / 'pp'), not as a % of a %.
+    const text = this._entry.unit
+      ? `${sign}${dStr} ${this._entry.unit} · ${barStr}`
       : `${sign}${pct.toFixed(2)}% (${sign}${dStr}) · ${barStr}`;
     ctx.font = '11px -apple-system, Segoe UI, sans-serif';
     const tw = ctx.measureText(text).width;
@@ -95,18 +95,22 @@ class ChartToolsPrimitive {
 
 class ChartTools {
   // panes: [{ series, unit? }] - one entry per pane that accepts drawings (unit 'pts' for a series already in %)
-  // buttons: { measure, trend, clear } DOM elements (any may be omitted)
-  constructor(chart, panes, container, buttons) {
-    this.chart = chart; this.container = container; this.buttons = buttons || {};
+  // buttons: { measure, trend, clear, remove } DOM elements (any may be omitted)
+  // hooks: { onChange(tools) } - called whenever the armed / pending / selected state changes, for a caller that
+  //   drives several charts from one shared toolbar (the Industry / Stock Charts popup) instead of passing buttons
+  constructor(chart, panes, container, buttons, hooks) {
+    this.chart = chart; this.container = container; this.buttons = buttons || {}; this.hooks = hooks || {};
     this.entries = panes.map(p => ({ series: p.series, unit: p.unit || null }));
     this.drawings = []; this.selected = null; this.armed = null; this.pending = null; this.preview = null;
     this.entries.forEach(e => { e.primitive = new ChartToolsPrimitive(this, e); e.series.attachPrimitive(e.primitive); });
 
-    if (this.buttons.measure) this.buttons.measure.addEventListener('click', () => this.arm('measure'));
-    if (this.buttons.trend) this.buttons.trend.addEventListener('click', () => this.arm('trend'));
-    if (this.buttons.clear) this.buttons.clear.addEventListener('click', () => this.clear());
-    if (this.buttons.remove) this.buttons.remove.addEventListener('click', () => this.removeSelected());
-    document.addEventListener('keydown', e => {
+    this._btnHandlers = [];
+    const bind = (btn, fn) => { if (btn) { btn.addEventListener('click', fn); this._btnHandlers.push([btn, fn]); } };
+    bind(this.buttons.measure, () => this.arm('measure'));
+    bind(this.buttons.trend, () => this.arm('trend'));
+    bind(this.buttons.clear, () => this.clear());
+    bind(this.buttons.remove, () => this.removeSelected());
+    this._onKey = e => {
       if (e.key === 'Escape') { this.disarm(); this._select(null); return; }
       if ((e.key === 'Delete' || e.key === 'Backspace') && this.selected) {
         const tag = (e.target && e.target.tagName) || '';
@@ -114,11 +118,31 @@ class ChartTools {
         e.preventDefault();
         this.removeSelected();
       }
-    });
+    };
+    document.addEventListener('keydown', this._onKey);
     this._syncButtons();
 
-    chart.subscribeClick(param => this._onClick(param));
-    chart.subscribeCrosshairMove(param => this._onMove(param));
+    this._clickHandler = param => this._onClick(param);
+    this._moveHandler = param => this._onMove(param);
+    chart.subscribeClick(this._clickHandler);
+    chart.subscribeCrosshairMove(this._moveHandler);
+  }
+
+  // For a chart that is rebuilt or disposed while the page lives on: drops the document key listener
+  // and the chart subscriptions, and detaches the drawing layer, so nothing keeps reacting to a dead chart.
+  destroy() {
+    document.removeEventListener('keydown', this._onKey);
+    this._btnHandlers.forEach(([btn, fn]) => { if (btn.removeEventListener) btn.removeEventListener('click', fn); });
+    try { this.chart.unsubscribeClick(this._clickHandler); } catch (e) {}
+    try { this.chart.unsubscribeCrosshairMove(this._moveHandler); } catch (e) {}
+    this.entries.forEach(e => { try { e.series.detachPrimitive(e.primitive); } catch (err) {} });
+    this.drawings = []; this.selected = this.armed = this.pending = this.preview = null;
+    this.container.style.cursor = '';
+    this.hooks = {};
+    const b = this.buttons;
+    if (b.measure) b.measure.classList.toggle('active', false);
+    if (b.trend) b.trend.classList.toggle('active', false);
+    if (b.remove) b.remove.disabled = true;
   }
 
   _refresh() { this.entries.forEach(e => { if (e.primitive.requestUpdate) e.primitive.requestUpdate(); }); }
@@ -128,6 +152,7 @@ class ChartTools {
     if (this.buttons.trend) this.buttons.trend.classList.toggle('active', this.armed === 'trend');
     this.container.style.cursor = this.armed ? 'crosshair' : '';
     if (this.buttons.remove) this.buttons.remove.disabled = !this.selected;
+    if (this.hooks.onChange) this.hooks.onChange(this);
   }
 
   _select(d) {
@@ -199,7 +224,7 @@ class ChartTools {
     if (!this.armed) { this._select(this._pick(param)); return; }
     const pt = this._pointOf(param, this.pending && this.pending.entry);
     if (!pt) return;
-    if (!this.pending) { this.pending = pt; this.preview = pt; this._refresh(); return; }
+    if (!this.pending) { this.pending = pt; this.preview = pt; this._syncButtons(); this._refresh(); return; }
     // one measurement at a time (per pane)
     if (this.armed === 'measure') this.drawings = this.drawings.filter(d => !(d.kind === 'measure' && d.entry === pt.entry));
     this.drawings.push({ kind: this.armed, a: this.pending, b: pt, entry: pt.entry });
