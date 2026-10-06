@@ -148,7 +148,8 @@ async function tryAutoFetchCSV() {
             Store.sectorMap[normalizeSymbol(sym)] = {
               sector: r['Sector'] || r['SECTOR'] || '',
               industry: r['Basic Industry'] || r['Industry'] || r['INDUSTRY'] || '',
-              marketCap: parseNum(r['Market Cap'] || r['MARKET_CAP'] || 0)
+              marketCap: parseNum(r['Market Cap'] || r['MARKET_CAP'] || 0),
+              listingDate: listingDateToIso(r['Listing Date'])
             };
           }
         });

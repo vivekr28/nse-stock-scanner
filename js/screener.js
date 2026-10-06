@@ -360,6 +360,9 @@ function runScreener() {
   const f16ToTs = isNaN(f16ToRaw) ? Infinity : f16ToRaw; // blank To date = latest bar
   const f16Label = `${SCR_FIELD_LETTER[f16FromField]}→${SCR_FIELD_LETTER[f16ToField]}`;
 
+  const f19On = document.getElementById('scrF19On').checked;
+  const f19Date = document.getElementById('scrF19Date').value; // 'YYYY-MM-DD'; a blank date restricts nothing
+
   // Pre-compute industry RS map if needed
   let indRSMap = {};
   if (f9On) {
@@ -623,6 +626,15 @@ function runScreener() {
       }
     }
 
+    // F19: Listed on or after the chosen date (ISO strings compare as dates)
+    if (f19On && f19Date) {
+      if (!s.listingDate) {
+        failReasons.push('F19: No listing date on record');
+      } else if (s.listingDate < f19Date) {
+        failReasons.push(`F19: Listed ${s.listingDate} before ${f19Date}`);
+      }
+    }
+
     // F18: Making a new 1M / 3M / 52W high today (every ticked window must be one)
     if (f18On) {
       const results = {};
@@ -700,6 +712,7 @@ function renderScreenerTable() {
   const f16On = document.getElementById('scrF16On').checked;
   const f17On = document.getElementById('scrF17On').checked;
   const f18On = document.getElementById('scrF18On').checked;
+  const f19On = document.getElementById('scrF19On').checked && !!document.getElementById('scrF19Date').value;
 
   const cols = [
     { key: 'symbol', label: 'Symbol', fmt: (v, row) => `<a href="#" class="stock-link" data-isin="${escapeHtml(row.isin)}">${escapeHtml(v)}</a>` },
@@ -783,6 +796,9 @@ function renderScreenerTable() {
       const longest = ticked.reduce((a, b) => (SCR_NEW_HIGH_DAYS[b] > SCR_NEW_HIGH_DAYS[a] ? b : a));
       cols.push({ key: '_priorHigh', label: `Prior ${SCR_NEW_HIGH_LABELS[longest]} High`, fmt: v => isNaN(v) ? '-' : fmt2(v) });
     }
+  }
+  if (f19On) {
+    cols.push({ key: 'listingDate', label: 'Listed On', fmt: v => v || '-' });
   }
   cols.push({ key: 'marketCap', label: 'MCap(Cr)', fmt: v => fmtCr(v) });
 
@@ -892,6 +908,8 @@ function resetScreener() {
   document.getElementById('scrF16ToField').value = 'close';
   document.getElementById('scrF16Val').value = '0';
   initF16Dates();
+  document.getElementById('scrF19On').checked = false;
+  document.getElementById('scrF19Date').value = '';
   if (typeof asOfReset === 'function') asOfReset(); // the As of Date tab's controls reset with everything else
   scrShowingFailed = false;
   document.getElementById('scrSearch').value = '';
@@ -1110,7 +1128,7 @@ function updateApplyBtn() {
 }
 
 function updateFilterBadge() {
-  const techIds = ['scrF1On','scrF2On','scrF3On','scrF4On','scrF5On','scrF6On','scrF7On','scrF8On','scrF10On','scrF15On','scrF16On','scrF18On'];
+  const techIds = ['scrF1On','scrF2On','scrF3On','scrF4On','scrF5On','scrF6On','scrF7On','scrF8On','scrF10On','scrF15On','scrF16On','scrF18On','scrF19On'];
   const indIds  = ['scrF9On','scrF11On','scrF12On','scrF13On','scrF14On','scrF17On'];
   const countChecked = ids => ids.filter(id => { const el = document.getElementById(id); return el && el.checked; }).length;
 

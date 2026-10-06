@@ -76,6 +76,18 @@ function parseNum(v) {
   return n;
 }
 
+// ── Listing Date ─────────────────────────────────────────────────────────────
+// Sector-Stock-Mapping's `Listing Date` ('06-OCT-2008') -> 'YYYY-MM-DD', or '' when blank / unreadable. ISO strings compare
+// as dates, so they can be checked against a date input's value directly (mirrors parse_listing_date in src/nse_server.py).
+function listingDateToIso(s) {
+  s = (s || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const m = /^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/.exec(s);
+  if (!m) return '';
+  const mon = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'].indexOf(m[2].toLowerCase());
+  return mon < 0 ? '' : `${m[3]}-${String(mon + 1).padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+}
+
 // ── Column Name Resolution ───────────────────────────────────────────────────
 function findCol(obj, candidates) {
   for (const c of candidates) {

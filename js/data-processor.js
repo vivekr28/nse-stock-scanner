@@ -131,7 +131,7 @@ function processData() {
     const distFromSMA = !isNaN(sma20) && sma20 > 0 ? ((latest.close - sma20) / sma20 * 100) : NaN;
 
     // Sector info
-    const sInfo = Store.sectorMap[normalizeSymbol(latest.symbol)] || { sector: '-', industry: '-', marketCap: 0 };
+    const sInfo = Store.sectorMap[normalizeSymbol(latest.symbol)] || { sector: '-', industry: '-', marketCap: 0, listingDate: '' };
 
     // Monthly change % (22 trading sessions); if fewer days available, use change since listing
     const monthRef = days.length >= 22 ? days[days.length - 22] : days[0];
@@ -146,6 +146,7 @@ function processData() {
       sector: (sInfo.sector && sInfo.sector !== '-') ? sInfo.sector : 'Undefined-Diversified',
       industry: (sInfo.industry && sInfo.industry !== '-') ? sInfo.industry : 'Undefined-Diversified',
       marketCap: sInfo.marketCap || 0,
+      listingDate: sInfo.listingDate || '',
       aboveSMA: !isNaN(sma20) && latest.close > sma20,
       tradingDays: days.length
     };
