@@ -34,6 +34,7 @@ BAND_FILE = 'NSE_PriceBand_Combined.csv'
 SECTOR_FILE = 'Sector-Stock-Mapping.csv'
 # NSE's daily market-cap file (mcap*.csv from the PR<date>.zip bhavcopy archive), saved as-is by Download-NSE-Bhavcopy.ps1
 MARKETCAP_FILE = 'NSE_MarketCap.csv'
+EQUITY_LIST_FILE = 'EQUITY_L.csv'  # NSE's list of listed equities (refreshed daily); source of each stock's listing date
 PROCESSED_FILE = 'processed_data.json'
 # Saved screener presets (server-managed via /api/presets). Lives in a git-tracked folder.
 PRESETS_FILE = 'scanner-presets/presets.json'
@@ -64,7 +65,7 @@ FULL_VERIFY_PREV_FILE = 'TradingViewFullVerification.prev.json'
 REPORTS_SUBDIR = 'verification-reports'
 # Bump whenever processed_data.json gains/changes a field the client relies on: startup then
 # reprocesses an older cache by itself instead of silently serving output missing the new field.
-PROCESSED_SCHEMA = 4
+PROCESSED_SCHEMA = 6
 CORRECTION_COLUMNS = ['ISIN', 'SYMBOL', 'EXDATE', 'FACTOR', 'STATUS', 'CHECKED_AT', 'NOTE']
 
 # ─── TradingView correction run state (polled by the Data Quality tab) ───────
@@ -170,6 +171,32 @@ def is_fund_isin(isin):
     """ETFs / mutual-fund units carry ISINs starting `INF`; company shares start `INE`. This dashboard is stocks
     only, so rows with an INF ISIN are left out (and listed on the Data Quality tab instead)."""
     return (isin or '').upper().startswith('INF')
+
+
+def parse_listing_date(v):
+    """Sector-Stock-Mapping's `Listing Date` ('06-OCT-2008') -> 'YYYY-MM-DD', or '' when blank / unreadable.
+    ISO strings sort and compare as dates, which is what the scanner's Listed Date filter relies on."""
+    v = (v or '').strip()
+    for fmt in ('%d-%b-%Y', '%Y-%m-%d'):
+        try:
+            return datetime.strptime(v, fmt).strftime('%Y-%m-%d')
+        except ValueError:
+            pass
+    return ''
+
+
+def load_listing_dates(path):
+    """NSE's EQUITY_L.csv -> {normalized symbol: 'YYYY-MM-DD'} from its DATE OF LISTING column (header names carry stray
+    spaces). It is refreshed daily, so it knows stocks listed since Sector-Stock-Mapping.csv was last rebuilt. {} when absent."""
+    if not os.path.exists(path):
+        return {}
+    out = {}
+    for r in read_csv_file(path):
+        row = {(k or '').strip(): (v or '').strip() for k, v in r.items()}
+        iso = parse_listing_date(row.get('DATE OF LISTING'))
+        if row.get('SYMBOL') and iso:
+            out[normalize_symbol(row['SYMBOL'])] = iso
+    return out
 
 
 def normalize_symbol(s):
@@ -864,6 +891,7 @@ def process_data(base_dir, progress_cb=None):
     band_path = os.path.join(data_dir, BAND_FILE)
     sector_path = os.path.join(data_dir, SECTOR_FILE)
     marketcap_path = os.path.join(data_dir, MARKETCAP_FILE)
+    equity_list_path = os.path.join(data_dir, EQUITY_LIST_FILE)
 
     if not os.path.exists(bhav_path):
         print(f"  [!] Bhavcopy not found: {bhav_path}")
@@ -1009,8 +1037,14 @@ def process_data(base_dir, progress_cb=None):
                     'sector': r.get('Sector') or r.get('SECTOR') or '',
                     'industry': r.get('Basic Industry') or r.get('Industry') or r.get('INDUSTRY') or '',
                     'marketCap': parse_num(r.get('Market Cap') or r.get('MARKET_CAP') or '0') or 0,
+                    'listingDate': parse_listing_date(r.get('Listing Date')),
                 }
         print(f"    {len(sector_map)} stocks mapped")
+
+    # Listing date: NSE's daily EQUITY_L.csv wins over the mapping's `Listing Date` (which lags behind new listings)
+    listing_dates = load_listing_dates(equity_list_path)
+    if listing_dates:
+        print(f"    {len(listing_dates)} listing dates from {EQUITY_LIST_FILE}")
 
     # Market cap: NSE's daily file wins over the (static) sector-mapping column; covers stocks the mapping lacks
     market_caps = load_market_caps(marketcap_path)
@@ -1061,7 +1095,7 @@ def process_data(base_dir, progress_cb=None):
         dist_from_sma = ((latest['close'] - sma20) / sma20 * 100) if sma20 and sma20 > 0 else None
 
         # Sector info
-        s_info = sector_map.get(normalize_symbol(latest['symbol']), {'sector': '', 'industry': '', 'marketCap': 0})
+        s_info = sector_map.get(normalize_symbol(latest['symbol']), {'sector': '', 'industry': '', 'marketCap': 0, 'listingDate': ''})
         market_cap = market_caps.get(normalize_symbol(latest['symbol']), s_info['marketCap'])
 
         # Monthly change % (22 trading sessions)
@@ -1085,6 +1119,7 @@ def process_data(base_dir, progress_cb=None):
             'sector': sector,
             'industry': industry,
             'marketCap': market_cap,
+            'listingDate': listing_dates.get(normalize_symbol(latest['symbol'])) or s_info.get('listingDate', ''),
             'aboveSMA': (latest['close'] > sma20) if sma20 else False,
             'tradingDays': len(days),
         }
@@ -1347,7 +1382,7 @@ def needs_processing(base_dir):
         return True
 
     json_mtime = os.path.getmtime(json_path)
-    watched = [os.path.join(data_dir, f) for f in (BHAV_FILE, BAND_FILE, SECTOR_FILE, MARKETCAP_FILE, MIDSMALL400_FILE)]
+    watched = [os.path.join(data_dir, f) for f in (BHAV_FILE, BAND_FILE, SECTOR_FILE, MARKETCAP_FILE, MIDSMALL400_FILE, EQUITY_LIST_FILE)]
     watched += [os.path.join(base_dir, REFERENCE_SUBDIR, f) for f in (CORPACTIONS_FILE, CORRECTIONS_FILE)]
     for csv_path in watched:
         if os.path.exists(csv_path) and os.path.getmtime(csv_path) > json_mtime:
