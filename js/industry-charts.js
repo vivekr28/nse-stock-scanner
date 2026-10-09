@@ -8,6 +8,7 @@
 let icIndustry = null;
 let icStocks = [];       // stocks in the clicked industry, sorted by market cap desc
 let icPage = 0;
+let icActiveCell = 0;    // Stock Charts grid: position (0 = first) of the chart the X / R keys act on; click a chart to move it
 let icMode = 'industry'; // 'industry' (tabs + grid + pagination) | 'single' (one stock, no tabs/pagination)
 let icActiveTab = 'stocks'; // 'stocks' | 'industry' | 'moneyflow' — only meaningful in 'industry' mode
 let icMfChartInst = null;   // Industry Money Flow Chart tab: {chart, series, sizeWatcher}
@@ -19,7 +20,9 @@ let icIndustryChartInst = null; // single big-chart instance (industry index OR 
 let icSingleList = [];   // the Stock Scanner results the single-stock view was opened from
 let icSingleIndex = -1;  // current stock's position within icSingleList
 let icLayout = '2x2';    // key of IC_LAYOUTS (default '2x2') — Stock Charts tab only
-let icRange = '6m';        // '6m' | '1y' | '2y' - visible window of the per-stock charts (grid + single-stock)
+let icRange = '6m';        // '6m' | '1y' | '2y' | 'custom' - visible window of the per-stock charts (grid + single-stock)
+let icCustomCandles = 0;   // bars shown when icRange is 'custom' (the user zoomed a chart by hand); carried to every next chart
+let icRightOffset = 10;    // where the last bar sits: empty bar-widths to its right (negative = the user scrolled back in time); = IC_RIGHT_OFFSET until the user pans/zooms by hand
 let icSyncCrosshair = false; // Stock Charts 2x2 grid only: hovering one chart moves the crosshair on the others to the same date
 
 // Stock Charts grid layouts: rows x columns of charts per page ('3x4' = 3 rows of 4).
@@ -47,6 +50,7 @@ const IC_VOLUME_SMA_HIGH_LOOKBACK = 65; // trading days
 const IC_RIGHT_OFFSET = 10; // empty candle-widths of space kept to the right of the last bar
 // Default visible window of the per-stock charts, by range button (plus the right margin on top).
 const IC_RANGE_CANDLES = { '6m': 126, '1y': 252, '2y': 504 }; // ~trading days in 6 months / 1 year / 2 years
+const IC_MIN_CUSTOM_CANDLES = 5;
 const IC_INDUSTRY_VISIBLE_CANDLES = 252 - IC_RIGHT_OFFSET; // ~1 trading year, minus the right margin
 
 // ── One-shot Measure / Trend Line tools (chart-tools.js) ──────────────────────
@@ -116,6 +120,19 @@ function toggleStockSelection(isin) {
   updateSelectedUI();
 }
 
+// Keyboard shortcut helper: sets (not toggles) the selection, so pressing X twice or R on an
+// unselected stock changes nothing, and keeps the open popup's checkbox for that stock in step.
+function icSetStockSelected(isin, on) {
+  if (!isin || selectedStocks.has(isin) === on) return;
+  if (on) selectedStocks.add(isin); else selectedStocks.delete(isin);
+  updateSelectedUI();
+  const cell = [...document.querySelectorAll('#icGrid .ic-cell')].find(c => c.dataset.isin === isin);
+  const cb = cell ? cell.querySelector('.ic-select-cb') : null;
+  if (cb) cb.checked = on;
+  const single = document.getElementById('icSingleSelectCb');
+  if (icMode === 'single' && icSingleList[icSingleIndex] && icSingleList[icSingleIndex].isin === isin && single) single.checked = on;
+}
+
 function clearSelectedStocks() {
   selectedStocks.clear();
   updateSelectedUI();
@@ -176,6 +193,7 @@ function openIndustryCharts(industryName) {
   }
   icStocks.sort((a, b) => (b.marketCap || 0) - (a.marketCap || 0));
   icPage = 0;
+  icActiveCell = 0;
 
   const n = icStocks.length;
   const pct = count => n > 0 ? (count / n * 100).toFixed(0) : '0';
@@ -251,7 +269,8 @@ function icRenderSingleStock() {
   if (!container || days.length === 0 || typeof LightweightCharts === 'undefined') return;
   const { candleData, volumeData, closes } = icBuildBarsFromDays(days);
   icIndustryChartInst = icCreateChart(container, 'icVolumeSingle', document.getElementById('icSingleOhlc'));
-  icSetChartData(icIndustryChartInst, candleData, volumeData, closes, IC_RANGE_CANDLES[icRange]);
+  icWatchManualRange(icIndustryChartInst, container);
+  icSetChartData(icIndustryChartInst, candleData, volumeData, closes, icVisibleCandles(), icRightOffset);
 }
 
 function closeIndustryCharts() {
@@ -343,8 +362,8 @@ function icSwitchTab(tab) {
 function icPageSize() { return IC_LAYOUTS[icLayout].rows * IC_LAYOUTS[icLayout].cols; }
 function icTotalPages() { return Math.max(1, Math.ceil(icStocks.length / icPageSize())); }
 
-function icPrevPage() { if (icPage > 0) { icPage--; icRenderPage(); } }
-function icNextPage() { if (icPage < icTotalPages() - 1) { icPage++; icRenderPage(); } }
+function icPrevPage() { if (icPage > 0) { icPage--; icActiveCell = 0; icRenderPage(); } }
+function icNextPage() { if (icPage < icTotalPages() - 1) { icPage++; icActiveCell = 0; icRenderPage(); } }
 
 // Switching layout keeps whichever stock was first-visible in view, instead of
 // jumping back to the start of the list.
@@ -352,6 +371,7 @@ function icSetLayout(layout) {
   if (layout === icLayout) return;
   const firstVisibleIndex = icPage * icPageSize();
   icLayout = layout;
+  icActiveCell = 0;
   icPage = Math.floor(firstVisibleIndex / icPageSize());
   const grid = document.getElementById('icGrid');
   grid.style.gridTemplateColumns = `repeat(${IC_LAYOUTS[icLayout].cols}, minmax(0, 1fr))`;
@@ -386,12 +406,16 @@ function icRenderPage() {
   const pageSize = icPageSize();
   const start = icPage * pageSize;
   const pageStocks = icStocks.slice(start, start + pageSize);
+  if (icActiveCell >= pageStocks.length) icActiveCell = 0; // e.g. the last, partly filled page
 
   grid.innerHTML = '';
   for (let i = 0; i < pageSize; i++) {
     const s = pageStocks[i];
     const cell = document.createElement('div');
     cell.className = 'ic-cell';
+    if (s) cell.dataset.isin = s.isin;
+    cell.dataset.idx = i;
+    if (i === icActiveCell && pageSize > 1) cell.classList.add('ic-cell-active'); // 1x1: the one chart is always the active one
     if (!s) { cell.classList.add('ic-cell-empty'); grid.appendChild(cell); continue; }
     const days = Store.dailyBySymbol[s.isin] || [];
     const statsLine = icStatsLine(days);
@@ -420,7 +444,8 @@ function icRenderPage() {
     const { candleData, volumeData, closes } = icBuildBarsFromDays(days);
     const inst = icCreateChart(container, 'icVolume' + i, document.getElementById('icOhlc' + i));
     icChartInstances.push(inst);
-    icSetChartData(inst, candleData, volumeData, closes, IC_RANGE_CANDLES[icRange]);
+    icWatchManualRange(inst, container);
+    icSetChartData(inst, candleData, volumeData, closes, icVisibleCandles(), icRightOffset);
   });
   icWireStockCrosshairSync();
 }
@@ -596,7 +621,7 @@ function icComputeVolumeScaleCap(volumeData) {
 
 // Feed the full history (correct SMA lookback), but default the visible window to
 // `visibleCandles` — the user can still scroll back further.
-function icSetChartData(inst, candleData, volumeData, closes, visibleCandles) {
+function icSetChartData(inst, candleData, volumeData, closes, visibleCandles, rightOffset) {
   inst.candleData = candleData;
   inst.volumeData = volumeData; // true, uncapped values - used everywhere except the bars' own rendering
   inst.closes = closes;
@@ -625,17 +650,29 @@ function icSetChartData(inst, candleData, volumeData, closes, visibleCandles) {
   icUpdateInstanceMFDots(inst);
   icApplyPriceScaleMode(inst);
   inst.updateLegend();
-  icApplyVisibleRange(inst, visibleCandles);
+  icApplyVisibleRange(inst, visibleCandles, rightOffset);
 }
 
 // Shows the last `visibleCandles` bars (plus the right margin); shorter histories fit whole.
-function icApplyVisibleRange(inst, visibleCandles) {
+function icApplyVisibleRange(inst, visibleCandles, rightOffset = IC_RIGHT_OFFSET) {
   const n = inst.candleData.length;
   if (n > visibleCandles) {
-    inst.chart.timeScale().setVisibleLogicalRange({ from: n - visibleCandles, to: n - 1 + IC_RIGHT_OFFSET });
+    const to = n - 1 + rightOffset;
+    inst.chart.timeScale().setVisibleLogicalRange({ from: to - (visibleCandles - 1 + IC_RIGHT_OFFSET), to });
   } else {
     inst.chart.timeScale().fitContent();
   }
+}
+
+// Bars the per-stock charts show right now: the chosen 6M / 1Y / 2Y button, or the width the user zoomed to.
+function icVisibleCandles() {
+  return icRange === 'custom' ? icCustomCandles : IC_RANGE_CANDLES[icRange];
+}
+
+function icSyncRangeButtons() {
+  document.querySelectorAll('#icRangeToggle .ic-layout-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.range === icRange);
+  });
 }
 
 // 6M / 1Y / 2Y buttons: the full history is already loaded in every chart (the SMAs
@@ -644,11 +681,56 @@ function icApplyVisibleRange(inst, visibleCandles) {
 function icSetRange(range) {
   if (!IC_RANGE_CANDLES[range]) return;
   icRange = range;
-  document.querySelectorAll('#icRangeToggle .ic-layout-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.range === range);
-  });
+  icRightOffset = IC_RIGHT_OFFSET; // a button puts the last bar back at the default spot
+  icSyncRangeButtons();
   const insts = icMode === 'single' && icIndustryChartInst ? [icIndustryChartInst] : icChartInstances;
   insts.forEach(inst => icApplyVisibleRange(inst, IC_RANGE_CANDLES[range]));
+}
+
+// Manual zoom: once the user changes how much history a per-stock chart shows (wheel / pinch /
+// dragging the time axis), that width becomes the range for every chart opened after it (next page,
+// next stock, other layout) and the 6M / 1Y / 2Y buttons are all deselected. Panning keeps the
+// width (and the buttons) but its placement of the last bar is remembered the same way. Only changes made DURING a user gesture count - the library also
+// fires its range event for our own setVisibleLogicalRange and for resizes.
+function icWatchManualRange(inst, container) {
+  const widthNow = () => {
+    const r = inst.chart.timeScale().getVisibleLogicalRange();
+    return r ? r.to - r.from : null;
+  };
+  const begin = () => {
+    if (inst.userGesture) return;
+    inst.userGesture = true;
+    inst.gestureBaseWidth = widthNow();
+    const r = inst.chart.timeScale().getVisibleLogicalRange();
+    inst.gestureBaseTo = r ? r.to : null;
+  };
+  const end = () => { inst.userGesture = false; };
+  let wheelTimer = null;
+  container.addEventListener('wheel', () => {
+    begin();
+    clearTimeout(wheelTimer);
+    wheelTimer = setTimeout(end, 300);
+  }, { passive: true });
+  container.addEventListener('pointerdown', () => {
+    begin();
+    window.addEventListener('pointerup', end, { once: true });
+    window.addEventListener('pointercancel', end, { once: true });
+  });
+  inst.chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+    if (inst.userGesture) icNoteManualRange(inst, range);
+  });
+}
+
+function icNoteManualRange(inst, range) {
+  if (!range || inst.gestureBaseWidth == null) return;
+  const width = range.to - range.from;
+  const zoomed = Math.abs(width - inst.gestureBaseWidth) >= 0.5;
+  const panned = inst.gestureBaseTo == null || Math.abs(range.to - inst.gestureBaseTo) >= 0.5;
+  if (panned || zoomed) icRightOffset = range.to - (inst.candleData.length - 1);
+  if (!zoomed) return;
+  icCustomCandles = Math.max(IC_MIN_CUSTOM_CANDLES, Math.round(width - IC_RIGHT_OFFSET + 1));
+  icRange = 'custom';
+  icSyncRangeButtons();
 }
 
 function icBuildBarsFromDays(days) {
@@ -1137,6 +1219,15 @@ function icUpdateAllPriceScaleMode() {
   if (icIndustryChartInst) icApplyPriceScaleMode(icIndustryChartInst);
 }
 
+// Clicking a chart in the Stock Charts grid makes it the active one (highlighted border).
+function icOnGridPointerDown(e) {
+  const cell = e.target.closest && e.target.closest('.ic-cell');
+  if (!cell || cell.dataset.idx === undefined || !cell.dataset.isin) return;
+  icActiveCell = Number(cell.dataset.idx);
+  if (icPageSize() > 1) document.querySelectorAll('#icGrid .ic-cell').forEach(c => c.classList.toggle('ic-cell-active', c === cell));
+}
+document.getElementById('icGrid').addEventListener('pointerdown', icOnGridPointerDown);
+
 document.getElementById('icPctMode').addEventListener('change', icUpdateAllPriceScaleMode);
 
 // ── Industry / Symbol column links (event delegation — table body is re-rendered often) ──
@@ -1147,13 +1238,36 @@ document.getElementById('screenerBody').addEventListener('click', e => {
   if (stockLink) { e.preventDefault(); openStockChart(stockLink.dataset.isin); }
 });
 
-// ── Keyboard: Down = next stock/page, Up = previous stock/page (single and grid views); Escape = close ──────────────────────────
+// X selects / R deselects the stock you are looking at: the single-stock chart, or in the Stock Charts
+// grid the active chart (the first one, or the one last clicked). Returns true when the key was used.
+function icHandleSelectKey(e) {
+  if (e.ctrlKey || e.metaKey || e.altKey) return false;
+  const key = (e.key || '').toLowerCase();
+  if (key !== 'x' && key !== 'r') return false;
+  const t = e.target;
+  if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName || ''))) return false;
+  let isin = null;
+  if (icMode === 'single') {
+    const stock = icSingleList[icSingleIndex];
+    isin = stock && stock.isin;
+  } else if (icActiveTab === 'stocks') {
+    const size = icPageSize();
+    const stock = icStocks[icPage * size + (size > 1 ? icActiveCell : 0)];
+    isin = stock && stock.isin;
+  }
+  if (!isin) return false;
+  icSetStockSelected(isin, key === 'x');
+  return true;
+}
+
+// ── Keyboard: Down = next stock/page, Up = previous stock/page (single and grid views); X / R = select / deselect; Escape = close ──────────────────────────
 document.addEventListener('keydown', e => {
   if (!document.getElementById('industryChartsModal').classList.contains('active')) return;
   if (e.key === 'Escape') {
     if (icToolsBusy()) return; // chart-tools.js cancels the armed tool / deselects the drawing instead
     e.preventDefault(); closeIndustryCharts(); return;
   }
+  if (icHandleSelectKey(e)) { e.preventDefault(); return; }
   if (icMode === 'single') {
     if (e.key === 'ArrowDown') { e.preventDefault(); icNextStock(); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); icPrevStock(); }

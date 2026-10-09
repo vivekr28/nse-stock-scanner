@@ -6,6 +6,7 @@
 function makeFakeChart() {
   const handlers = { click: [], move: [] };
   const calls = { crosshair: [], cleared: 0, visibleRange: null, fit: 0 };
+  const rangeHandlers = [];
   const drop = (list, fn) => { const i = list.indexOf(fn); if (i >= 0) list.splice(i, 1); };
   const chart = {
     subscribeClick: fn => handlers.click.push(fn),
@@ -18,6 +19,8 @@ function makeFakeChart() {
       logicalToCoordinate: l => l * 10,
       setVisibleLogicalRange: r => { calls.visibleRange = r; },
       fitContent: () => { calls.fit++; },
+      getVisibleLogicalRange: () => calls.visibleRange,
+      subscribeVisibleLogicalRangeChange: fn => rangeHandlers.push(fn),
     }),
   };
   const makeSeries = (paneIndex = 0) => {
@@ -34,7 +37,9 @@ function makeFakeChart() {
   // A click / hover at screen (x, y) in a pane, as the library would report it.
   const click = (x, y, paneIndex = 0) => handlers.click.slice().forEach(fn => fn({ point: { x, y }, logical: x / 10, paneIndex }));
   const hover = (x, y, paneIndex = 0) => handlers.move.slice().forEach(fn => fn({ point: { x, y }, logical: x / 10, paneIndex }));
-  return { chart, handlers, calls, makeSeries, click, hover };
+  // The library fires its visible-range event on any change; a test calls this to mimic one.
+  const setRange = r => { calls.visibleRange = r; rangeHandlers.slice().forEach(fn => fn(r)); };
+  return { chart, handlers, calls, setRange, makeSeries, click, hover };
 }
 
 module.exports = { makeFakeChart };

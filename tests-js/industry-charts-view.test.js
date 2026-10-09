@@ -135,6 +135,375 @@ test('icSetRange: the Industry Chart tab\'s own chart keeps its window (industry
   run("icSetRange('6m'); icIndustryChartInst = null");
 });
 
+// ── Manual zoom becomes the range (6M / 1Y / 2Y deselected) ──────────────────
+
+// A grid chart wired as icRenderPage does, with a fake container whose DOM events the test can fire.
+function makeWatched(bars = 600) {
+  const inst = makeInst(Array.from({ length: bars }, (_, i) => i + 1));
+  const listeners = {};
+  const container = { addEventListener: (type, fn) => { listeners[type] = fn; } };
+  sb.__inst = inst; sb.__container = container;
+  run('icWatchManualRange(__inst, __container)');
+  return { inst, listeners };
+}
+if (!sb.addEventListener) { sb.addEventListener = () => {}; sb.removeEventListener = () => {}; } // window === the sandbox
+sb.setTimeout = () => 0; sb.clearTimeout = () => {}; // the wheel gesture's end timer never fires here
+const resetRange = () => run("icRange = '6m'; icCustomCandles = 0; icRightOffset = IC_RIGHT_OFFSET");
+
+test('manual zoom: a range change during a user gesture becomes the custom range for the next charts', () => {
+  resetRange();
+  const { inst, listeners } = makeWatched();
+  run("icApplyVisibleRange(__inst, 126)"); // programmatic, no gesture
+  assert.equal(run('icRange'), '6m');
+  listeners.wheel();
+  inst.fake.setRange({ from: 400, to: 599 + 10 }); // zoomed in to 209 wide
+  assert.equal(run('icRange'), 'custom');
+  assert.equal(run('icCustomCandles'), 209 - 10 + 1);
+  assert.equal(run('icVisibleCandles()'), 200);
+  // a chart built afterwards shows the same number of bars
+  const next = makeInst(Array.from({ length: 600 }, (_, i) => i + 1));
+  sb.__next = next;
+  run('icApplyVisibleRange(__next, icVisibleCandles())');
+  assert.equal(next.fake.calls.visibleRange.from, 600 - 200);
+  resetRange();
+});
+
+test('manual zoom: range events with no user gesture (our own apply, a resize) are not a custom range', () => {
+  resetRange();
+  const { inst } = makeWatched();
+  inst.fake.setRange({ from: 100, to: 400 });
+  assert.equal(run('icRange'), '6m');
+  assert.equal(run('icVisibleCandles()'), 126);
+});
+
+test('manual zoom: panning (same width) keeps the chosen button but the last bar placement is remembered', () => {
+  resetRange();
+  const { inst, listeners } = makeWatched();
+  inst.fake.setRange({ from: 474, to: 609 });
+  listeners.pointerdown();
+  inst.fake.setRange({ from: 400, to: 535 }); // dragged back in time: last bar (index 599) is 64 bars left of the right edge
+  assert.equal(run('icRange'), '6m');
+  assert.equal(run('icRightOffset'), 535 - 599);
+  // the next chart is placed the same way, with the same width
+  const next = makeInst(Array.from({ length: 600 }, (_, i) => i + 1));
+  sb.__next = next;
+  run('icApplyVisibleRange(__next, icVisibleCandles(), icRightOffset)');
+  assert.deepEqual({ ...next.fake.calls.visibleRange }, { from: 400, to: 535 });
+  resetRange();
+});
+
+test('manual zoom: a zoom also remembers where the last bar sits; the range buttons put it back to the default', () => {
+  resetRange();
+  const { inst, listeners } = makeWatched();
+  inst.fake.setRange({ from: 474, to: 609 });
+  listeners.wheel();
+  inst.fake.setRange({ from: 300, to: 560 });
+  assert.equal(run('icRightOffset'), 560 - 599);
+  run("icMode = 'industry'; icChartInstances = []");
+  run("icSetRange('1y')");
+  assert.equal(run('icRightOffset'), run('IC_RIGHT_OFFSET'));
+  resetRange();
+});
+
+test('manual zoom: the 6M / 1Y / 2Y buttons are all deselected while custom, and clicking one takes over again', () => {
+  resetRange();
+  const btns = ['6m', '1y', '2y'].map(r => ({ dataset: { range: r }, active: r === '6m', classList: { toggle(c, on) { this.owner.active = on; }, owner: null } }));
+  btns.forEach(b => { b.classList.owner = b; });
+  const realQsa = sb.document.querySelectorAll;
+  sb.document.querySelectorAll = () => btns;
+  const { inst, listeners } = makeWatched();
+  inst.fake.setRange({ from: 474, to: 609 });
+  listeners.wheel();
+  inst.fake.setRange({ from: 300, to: 609 });
+  assert.deepEqual(btns.map(b => b.active), [false, false, false]);
+  run("icMode = 'industry'; icChartInstances = []");
+  run("icSetRange('1y')");
+  assert.equal(run('icRange'), '1y');
+  assert.deepEqual(btns.map(b => b.active), [false, true, false]);
+  resetRange();
+  sb.document.querySelectorAll = realQsa;
+});
+
+test('manual zoom: the custom width never drops below a few bars', () => {
+  resetRange();
+  const { inst, listeners } = makeWatched();
+  inst.fake.setRange({ from: 0, to: 100 });
+  listeners.wheel();
+  inst.fake.setRange({ from: 599, to: 600 });
+  assert.equal(run('icCustomCandles'), run('IC_MIN_CUSTOM_CANDLES'));
+  resetRange();
+});
+
+// ── X / R keys select / deselect the stock being looked at ───────────────────
+
+function withGridCheckbox(isin, fn) {
+  const cb = { checked: false };
+  const cell = { dataset: { isin }, querySelector: () => cb };
+  const realQsa = sb.document.querySelectorAll;
+  sb.document.querySelectorAll = sel => (sel === '#icGrid .ic-cell' ? [cell] : []);
+  try { fn(cb); } finally { sb.document.querySelectorAll = realQsa; }
+}
+const key = (k, extra = {}) => { sb.__e = { key: k, target: { tagName: 'DIV' }, ...extra }; return run('icHandleSelectKey(__e)'); };
+const picked = () => Array.from(run('Array.from(selectedStocks)'));
+const gridOf = (n, size = '2x2') => run(`selectedStocks.clear(); icMode = 'industry'; icActiveTab = 'stocks'; icLayout = '${size}'; icPage = 0; icActiveCell = 0; icStocks = Array.from({ length: ${n} }, (_, i) => ({ isin: 'S' + i }))`);
+
+test('X / R keys: in the grid they act on the active chart - the first one until another is clicked', () => {
+  gridOf(10);
+  withGridCheckbox('S0', cb => {
+    assert.equal(key('x'), true);
+    assert.deepEqual(picked(), ['S0']);
+    assert.equal(cb.checked, true);
+    key('X'); // pressing it again keeps it selected, it does not toggle
+    assert.deepEqual(picked(), ['S0']);
+    assert.equal(key('r'), true);
+    assert.deepEqual(picked(), []);
+    assert.equal(cb.checked, false);
+    key('r');
+    assert.deepEqual(picked(), []);
+  });
+  run('icActiveCell = 2'); // a click on the third chart
+  key('x');
+  assert.deepEqual(picked(), ['S2']);
+  run('icPage = 1'); // second page: positions 4..7
+  key('x');
+  assert.deepEqual(picked(), ['S2', 'S6']);
+});
+
+test('X / R keys: paging or changing layout makes the first chart active again', () => {
+  gridOf(10);
+  run('var __realRender = icRenderPage, __realVis = icUpdateControlVisibility; icRenderPage = () => {}; icUpdateControlVisibility = () => {}'); // no DOM to render into here
+  run('icActiveCell = 3; icNextPage()');
+  assert.equal(run('icActiveCell'), 0);
+  run('icActiveCell = 3; icPrevPage()');
+  assert.equal(run('icActiveCell'), 0);
+  run('icActiveCell = 3; icSetLayout("3x3")');
+  assert.equal(run('icActiveCell'), 0);
+  run("icSetLayout('2x2'); icRenderPage = __realRender; icUpdateControlVisibility = __realVis");
+});
+
+test('X / R keys: in 1x1 the single chart is always the active one, whatever was active before', () => {
+  gridOf(5, '1x1');
+  run('icActiveCell = 3; icPage = 2');
+  key('x');
+  assert.deepEqual(picked(), ['S2']);
+  run("icLayout = '2x2'");
+});
+
+test('X / R keys: nothing happens in a text field or with Ctrl held, or on a page with no such chart', () => {
+  gridOf(10);
+  assert.equal(key('x', { target: { tagName: 'INPUT' } }), false);
+  assert.equal(key('r', { ctrlKey: true }), false);
+  assert.equal(key('a'), false);
+  run('icPage = 5'); // past the end: no stock there
+  assert.equal(key('x'), false);
+  assert.deepEqual(picked(), []);
+});
+
+test('X / R keys: in single-stock mode they act on the stock shown, wherever the mouse is', () => {
+  run("selectedStocks.clear(); icMode = 'single'; icSingleList = [{ isin: 'A', symbol: 'A' }, { isin: 'B', symbol: 'B' }]; icSingleIndex = 1");
+  assert.equal(key('x'), true);
+  assert.deepEqual(picked(), ['B']);
+  key('r');
+  assert.deepEqual(picked(), []);
+  run("icMode = 'industry'; icSingleList = []; icSingleIndex = -1");
+});
+
+// ── Active chart in the grid: rendering, clicking, selection sync ─────────────
+
+// A minimal DOM for icRenderPage: a grid that collects the cells it is given.
+function fakeGrid() {
+  const cells = [];
+  const grid = { style: {}, classList: { toggle() {}, add() {}, remove() {} }, appendChild: c => cells.push(c), set innerHTML(_) { cells.length = 0; } };
+  const realGet = sb.document.getElementById, realCreate = sb.document.createElement;
+  const fakeEl = () => ({ style: {}, classList: { toggle() {}, add() {}, remove() {}, contains: () => false }, addEventListener() {} });
+  sb.document.getElementById = id => (id === 'icGrid' ? grid : fakeEl());
+  sb.document.createElement = () => {
+    const classes = new Set();
+    return { dataset: {}, classList: { add: c => classes.add(c), contains: c => classes.has(c) }, set innerHTML(_) {}, className: '' };
+  };
+  return { cells, restore() { sb.document.getElementById = realGet; sb.document.createElement = realCreate; } };
+}
+const withGrid = fn => {
+  const g = fakeGrid();
+  sb.Store.dailyBySymbol = {}; // no price history: cells are built, no charts
+  try { fn(g.cells); } finally { g.restore(); }
+};
+const activeCells = cells => cells.map((c, i) => (c.classList.contains('ic-cell-active') ? i : -1)).filter(i => i >= 0);
+
+test('icRenderPage: the active chart gets the highlight class, and every cell knows its position and stock', () => {
+  gridOf(10);
+  withGrid(cells => {
+    run('icActiveCell = 2; icRenderPage()');
+    assert.equal(cells.length, 4);
+    assert.deepEqual(activeCells(cells), [2]);
+    assert.deepEqual(cells.map(c => Number(c.dataset.idx)), [0, 1, 2, 3]);
+    assert.deepEqual(cells.map(c => c.dataset.isin), ['S0', 'S1', 'S2', 'S3']);
+  });
+});
+
+test('icRenderPage: the first chart is highlighted by default', () => {
+  gridOf(10);
+  withGrid(cells => {
+    run('icRenderPage()');
+    assert.deepEqual(activeCells(cells), [0]);
+  });
+});
+
+test('icRenderPage: a last page with fewer charts than the active position falls back to the first chart', () => {
+  gridOf(6); // 2x2: the second page holds only S4 and S5
+  withGrid(cells => {
+    run('icPage = 1; icActiveCell = 3; icRenderPage()');
+    assert.equal(run('icActiveCell'), 0);
+    assert.deepEqual(activeCells(cells), [0]);
+    assert.equal(cells[3].dataset.isin, undefined, 'the empty filler cell has no stock');
+  });
+});
+
+test('icRenderPage: 1x1 shows no highlight (the one chart is always the active one)', () => {
+  gridOf(5, '1x1');
+  withGrid(cells => {
+    run('icPage = 3; icRenderPage()');
+    assert.equal(cells.length, 1);
+    assert.deepEqual(activeCells(cells), []);
+    assert.equal(cells[0].dataset.isin, 'S3');
+  });
+  run("icLayout = '2x2'");
+});
+
+test('icRenderPage: re-rendering the same page (e.g. ADR / Avg MF toggled) keeps the active chart', () => {
+  gridOf(10);
+  withGrid(cells => {
+    run('icActiveCell = 1; icRefreshCurrentView()');
+    assert.equal(run('icActiveCell'), 1);
+    assert.deepEqual(activeCells(cells), [1]);
+  });
+});
+
+// A chart cell as the grid builds it; the first one starts highlighted.
+function fakeCell(idx, isin) {
+  const classes = new Set(idx === 0 ? ['ic-cell-active'] : []);
+  return { dataset: { idx: String(idx), isin }, classList: { toggle: (c, on) => (on ? classes.add(c) : classes.delete(c)), contains: c => classes.has(c) } };
+}
+// A click whose target is inside `cell` (e.target.closest('.ic-cell') finds it), or outside every cell when null.
+function clickOn(cells, cell) {
+  const realQsa = sb.document.querySelectorAll;
+  sb.document.querySelectorAll = sel => (sel === '#icGrid .ic-cell' ? cells : []);
+  try { sb.__ev = { target: { closest: sel => (sel === '.ic-cell' ? cell : null) } }; run('icOnGridPointerDown(__ev)'); }
+  finally { sb.document.querySelectorAll = realQsa; }
+}
+
+test('clicking a chart makes it the active one: the highlight moves and X / R then act on it', () => {
+  gridOf(10);
+  const cells = [0, 1, 2, 3].map(i => fakeCell(i, 'S' + i));
+  clickOn(cells, cells[3]);
+  assert.equal(run('icActiveCell'), 3);
+  assert.deepEqual(activeCells(cells), [3]);
+  key('x');
+  assert.deepEqual(picked(), ['S3']);
+  clickOn(cells, cells[1]);
+  assert.deepEqual(activeCells(cells), [1]);
+  key('x');
+  assert.deepEqual(picked().sort(), ['S1', 'S3']);
+});
+
+test('clicking outside any chart, or on an empty filler cell, leaves the active chart alone', () => {
+  gridOf(10);
+  run('icActiveCell = 2');
+  const cells = [0, 1, 2, 3].map(i => fakeCell(i, 'S' + i));
+  clickOn(cells, null);
+  assert.equal(run('icActiveCell'), 2);
+  clickOn(cells, { dataset: { idx: '3' } }); // empty cell: no stock
+  assert.equal(run('icActiveCell'), 2);
+});
+
+test('clicking a chart in 1x1 does not add a highlight', () => {
+  gridOf(5, '1x1');
+  const cells = [fakeCell(0, 'S0')];
+  cells[0].classList.toggle('ic-cell-active', false);
+  clickOn(cells, cells[0]);
+  assert.deepEqual(activeCells(cells), []);
+  run("icLayout = '2x2'");
+});
+
+test('icSetStockSelected: keeps the count label and the single-stock checkbox in step', () => {
+  run("selectedStocks.clear(); icMode = 'single'; icSingleList = [{ isin: 'A' }, { isin: 'B' }]; icSingleIndex = 0");
+  const badge = { textContent: '' }, singleCb = { checked: false };
+  const realGet = sb.document.getElementById;
+  sb.document.getElementById = id => (id === 'icSelectedBadge' ? badge : id === 'icSingleSelectCb' ? singleCb : { style: {}, classList: { toggle() {} } });
+  try {
+    key('x');
+    assert.equal(badge.textContent, '1 stock selected');
+    assert.equal(singleCb.checked, true);
+    run("icSetStockSelected('B', true)"); // another stock: the shown stock's checkbox is untouched
+    assert.equal(badge.textContent, '2 stocks selected');
+    assert.equal(singleCb.checked, true);
+    key('r');
+    assert.equal(badge.textContent, '1 stock selected');
+    assert.equal(singleCb.checked, false);
+  } finally { sb.document.getElementById = realGet; }
+  run("selectedStocks.clear(); icMode = 'industry'; icSingleList = []; icSingleIndex = -1");
+});
+
+test('icSetStockSelected: an empty ISIN is ignored', () => {
+  run('selectedStocks.clear()');
+  run("icSetStockSelected('', true); icSetStockSelected(null, true)");
+  assert.deepEqual(picked(), []);
+});
+
+test('X / R keys: only in the Stock Charts tab - the Industry Chart and Money Flow tabs ignore them', () => {
+  gridOf(10);
+  ['industry', 'moneyflow'].forEach(tab => {
+    run(`icActiveTab = '${tab}'`);
+    assert.equal(key('x'), false);
+  });
+  run("icActiveTab = 'stocks'");
+  assert.deepEqual(picked(), []);
+});
+
+// ── Right-bar placement is remembered along with the range ──────────────────
+
+test('placement: it starts at the default gap; a scrolled-back or wider-gap chart keeps the same width', () => {
+  resetRange();
+  assert.equal(run('icRightOffset'), run('IC_RIGHT_OFFSET'));
+  const at = offset => {
+    const inst = makeInst(Array.from({ length: 600 }, (_, i) => i + 1));
+    sb.__inst = inst;
+    run(`icApplyVisibleRange(__inst, 126, ${offset})`);
+    return inst.fake.calls.visibleRange;
+  };
+  const def = at(10), back = at(-50), ahead = at(30);
+  assert.equal(def.to - def.from, back.to - back.from);
+  assert.equal(def.to - def.from, ahead.to - ahead.from);
+  assert.equal(back.to, 600 - 1 - 50);
+  assert.equal(ahead.to, 600 - 1 + 30);
+});
+
+test('placement: a zoom with the right edge untouched keeps the default placement', () => {
+  resetRange();
+  const { inst, listeners } = makeWatched();
+  inst.fake.setRange({ from: 474, to: 609 });
+  listeners.wheel();
+  inst.fake.setRange({ from: 400, to: 609 }); // wider, same right edge
+  assert.equal(run('icRightOffset'), 10);
+  assert.equal(run('icRange'), 'custom');
+  resetRange();
+});
+
+test('placement: a chart opened after a manual zoom + pan gets the remembered width and placement', () => {
+  resetRange();
+  const { inst, listeners } = makeWatched();
+  inst.fake.setRange({ from: 474, to: 609 });
+  listeners.wheel();
+  inst.fake.setRange({ from: 300, to: 540 });
+  const next = makeInst(Array.from({ length: 700 }, (_, i) => i + 1));
+  sb.__next = next;
+  run('icApplyVisibleRange(__next, icVisibleCandles(), icRightOffset)');
+  const r = next.fake.calls.visibleRange;
+  assert.equal(r.to, 700 - 1 + (540 - 599));
+  assert.equal(r.to - r.from, 540 - 300);
+  resetRange();
+});
+
 // ── Crosshair sync (by date) ────────────────────────────────────────────────
 
 function wireSync(insts, on = true) {
