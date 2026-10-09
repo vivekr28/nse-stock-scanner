@@ -86,3 +86,39 @@ test('breadth tools: the old series loses its drawing layer when the metric chan
   assert.equal(sb.__line.primitive, null);
   assert.ok(sb.__candle.primitive);
 });
+
+// The single "Stocks Above SMA" tab: a checkbox per SMA picks the line(s) drawn.
+function tickSmas(s20, s50) {
+  dom.el('brdSma20').checked = s20;
+  dom.el('brdSma50').checked = s50;
+}
+
+test('breadth SMA tab: 20 only / 50 only draw one line series, both ticked overlay the multi lines', () => {
+  setupChart();
+  showTab('aboveSma');
+  tickSmas(true, false);
+  assert.equal(run('brdActiveMetricKey()'), 'above20');
+  tickSmas(false, true);
+  assert.equal(run('brdActiveMetricKey()'), 'above50');
+  tickSmas(true, true);
+  assert.equal(run('brdActiveMetricKey()'), 'aboveBoth');
+  run('brdRefreshTools()');
+  assert.equal(run('_brdToolsSeries === __multi[0]'), true);
+  assert.equal(run('brdMultiLines().map(l => l.key).join()'), 'above20,above50');
+});
+
+test('breadth SMA tab: nothing ticked falls back to the 20 SMA', () => {
+  setupChart();
+  showTab('aboveSma');
+  tickSmas(false, false);
+  assert.equal(run('brdActiveMetricKey()'), 'above20');
+});
+
+test('breadth SMA tab: unticking the last box re-ticks it', () => {
+  setupChart();
+  showTab('aboveSma');
+  tickSmas(false, false);
+  run("document.getElementById('brdChartTitle').textContent = ''; brdRenderActiveTab = () => {}");
+  run("brdSmaChanged(document.getElementById('brdSma20'))");
+  assert.equal(dom.el('brdSma20').checked, true);
+});
