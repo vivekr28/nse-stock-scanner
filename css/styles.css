@@ -763,6 +763,9 @@ canvas { max-width: 100%; display: block; }
 }
 .brd-tab:hover { color: var(--text); border-color: rgba(59,130,246,0.45); }
 .brd-tab.active { color: #fff; background: var(--accent); border-color: var(--accent); }
+.brd-sma-checks { display: inline-flex; align-items: center; gap: 12px; margin-left: 8px; }
+.brd-sma-checks label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--text); cursor: pointer; }
+.brd-sma-checks input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); }
 .brd-chart-container { display: flex; flex-direction: column; }
 .brd-chart { height: calc(100vh - 340px); min-height: 480px; }
 

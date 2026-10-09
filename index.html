@@ -704,12 +704,15 @@
 <div id="panel-breadth" class="panel">
   <div class="stats-row" id="breadthStats"></div>
   <div class="brd-tabbar" id="brdTabbar">
-    <button class="brd-tab active" data-tab="above20" onclick="brdSwitchTab('above20')">Above 20 SMA</button>
-    <button class="brd-tab" data-tab="above50" onclick="brdSwitchTab('above50')">Above 50 SMA</button>
+    <button class="brd-tab active" data-tab="aboveSma" onclick="brdSwitchTab('aboveSma')">Stocks Above SMA</button>
     <button class="brd-tab" data-tab="move4d" onclick="brdSwitchTab('move4d')">4%+ Move (Day)</button>
     <button class="brd-tab" data-tab="move10w" onclick="brdSwitchTab('move10w')">10%+ Move (Week)</button>
     <button class="brd-tab" data-tab="move20m" onclick="brdSwitchTab('move20m')">20%+ Move (Month)</button>
     <button class="brd-tab" data-tab="newhighs" onclick="brdSwitchTab('newhighs')">Stocks Making New Highs</button>
+    <span id="brdSmaChecks" class="brd-sma-checks">
+      <label><input type="checkbox" id="brdSma20" checked onchange="brdSmaChanged(this)"> 20 SMA</label>
+      <label><input type="checkbox" id="brdSma50" onchange="brdSmaChanged(this)"> 50 SMA</label>
+    </span>
     <select id="brdHighSelect" onchange="brdHighSelectChanged()" style="display:none;margin-left:8px;">
       <option value="high1m">1 Month High</option>
       <option value="high3m">3 Month High</option>
@@ -1067,7 +1070,7 @@
 <script src="js/data-processor.js?v=2"></script>
 <script src="js/scanner.js?v=2"></script>
 <script src="js/screener.js?v=16"></script>
-<script src="js/breadth.js?v=12"></script>
+<script src="js/breadth.js?v=13"></script>
 <script src="js/sector.js?v=2"></script>
 <script src="js/industry.js?v=10"></script>
 <script src="js/lib/lightweight-charts.standalone.production.js"></script>

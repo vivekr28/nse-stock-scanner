@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // BREADTH — stat cards + a shared TradingView candlestick chart, tabbed across
-// 5 breadth metrics (% above 20/50 SMA, % with a big day/week/month move).
+// 5 breadth metrics (% above 20/50 SMA - one tab with a checkbox per SMA, % with a big day/week/month move).
 // Each candle's O/H/L/C is a REAL, independently-computed breadth percentage,
 // not a synthetic yesterday-vs-today body: for every stock, its own Open/High/
 // Low/Close is tested against a reference (the stock's own SMA for the two SMA
@@ -34,6 +34,8 @@ const BRD_METRICS = {
   highAth: { label: '% Stocks Making ATH', prefix: 'highAth', line: true, countKey: 'highAthCloseCount' },
   // All four new-high lines overlaid on one chart (no single OHLC/count; see brdRenderActiveTab).
   highAll: { label: '% Stocks Making New Highs (All)', multi: true },
+  // Both SMA lines overlaid, when the "Above SMA" tab has the 20 and 50 SMA boxes both ticked.
+  aboveBoth: { label: '% Stocks Above 20 / 50 SMA', multi: true },
 };
 const BRD_HIGH_LINES = [
   { key: 'high1m', name: '1M', color: '#18eee7' },
@@ -41,15 +43,33 @@ const BRD_HIGH_LINES = [
   { key: 'high1y', name: '1Y', color: '#a78bfa' },
   { key: 'highAth', name: 'ATH', color: '#ff1616' },
 ];
+const BRD_SMA_LINES = [
+  { key: 'above20', name: '20 SMA', color: '#18eee7' },
+  { key: 'above50', name: '50 SMA', color: '#f59e0b' },
+];
 // Trailing-window lengths in trading days. ATH has no window: it is the highest high in all data loaded.
 const BRD_HIGH_WINDOWS = { high1m: 21, high3m: 63, high1y: 252 };
 const BRD_ATH_MIN_BARS = 252; // ATH only counts stocks with >= 1y of history, so early bars of the dataset don't all read as "new highs"
 
 let _brdHistory = [];       // cached per renderBreadth() call - [{date, above20Pct, above20Count, ...}]
-let _brdActiveTab = 'above20';
+let _brdActiveTab = 'aboveSma';
 
-// The "newhighs" tab shows whichever metric its dropdown selects; every other tab maps 1:1 to a BRD_METRICS key.
+// The SMA lengths ticked on the "Above SMA" tab, in 20 / 50 order. Never empty: with no box ticked it falls back to 20.
+function brdSelectedSmas() {
+  const on = BRD_SMA_LINES.filter(l => { const cb = document.getElementById('brdSma' + l.key.slice(5)); return cb && cb.checked; });
+  return on.length ? on : [BRD_SMA_LINES[0]];
+}
+// The overlay lines drawn by the active multi-line metric.
+function brdMultiLines() {
+  return brdActiveMetricKey() === 'aboveBoth' ? BRD_SMA_LINES : BRD_HIGH_LINES;
+}
+// The "newhighs" tab shows whichever metric its dropdown selects, the "aboveSma" tab whichever SMA boxes are ticked;
+// every other tab maps 1:1 to a BRD_METRICS key.
 function brdActiveMetricKey() {
+  if (_brdActiveTab === 'aboveSma') {
+    const sel = brdSelectedSmas();
+    return sel.length > 1 ? 'aboveBoth' : sel[0].key;
+  }
   if (_brdActiveTab !== 'newhighs') return _brdActiveTab;
   const sel = document.getElementById('brdHighSelect');
   return (sel && BRD_METRICS[sel.value]) ? sel.value : 'high1m';
@@ -240,13 +260,24 @@ function computeBreadthHistories(numDays) {
 
 // ── Tab switching ─────────────────────────────────────────────────────────
 function brdSwitchTab(tab) {
-  if (!BRD_METRICS[tab] && tab !== 'newhighs') return;
+  if (!BRD_METRICS[tab] && tab !== 'newhighs' && tab !== 'aboveSma') return;
   _brdActiveTab = tab;
   const sel = document.getElementById('brdHighSelect');
   if (sel) sel.style.display = tab === 'newhighs' ? '' : 'none';
+  const smaBox = document.getElementById('brdSmaChecks');
+  if (smaBox) smaBox.style.display = tab === 'aboveSma' ? '' : 'none';
   document.querySelectorAll('#brdTabbar .brd-tab').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.tab === tab);
   });
+  document.getElementById('brdChartTitle').textContent = BRD_METRICS[brdActiveMetricKey()].label;
+  brdRenderActiveTab();
+}
+
+// A box was (un)ticked on the "Above SMA" tab. At least one stays ticked: unticking the last one re-ticks it.
+function brdSmaChanged(changed) {
+  if (changed && !changed.checked && !BRD_SMA_LINES.some(l => document.getElementById('brdSma' + l.key.slice(5)).checked)) {
+    changed.checked = true;
+  }
   document.getElementById('brdChartTitle').textContent = BRD_METRICS[brdActiveMetricKey()].label;
   brdRenderActiveTab();
 }
@@ -322,9 +353,10 @@ function brdEnsureChart() {
     const cnt = _brdCounts[i];
     if (!bar) { legendEl.innerHTML = ''; return; }
     if (brdIsMulti()) {
-      legendEl.innerHTML = BRD_HIGH_LINES.map(l => {
+      const suffix = brdActiveMetricKey() === 'aboveBoth' ? '' : ' High';
+      legendEl.innerHTML = brdMultiLines().map(l => {
         const v = _brdMultiData[l.key] && _brdMultiData[l.key][i];
-        return `<span><i style="display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;background:${l.color}"></i>${l.name} High <b style="color:${l.color}">${v ? v.value.toFixed(1) : '0.0'}%</b></span>`;
+        return `<span><i style="display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;background:${l.color}"></i>${l.name}${suffix} <b style="color:${l.color}">${v ? v.value.toFixed(1) : '0.0'}%</b></span>`;
       }).join('');
       return;
     }
@@ -368,6 +400,8 @@ function brdRenderActiveTab() {
   });
 
   const isLine = !!metric.line;
+  if (isLine && brdActiveMetricKey() === 'above50') brdLineSeries.applyOptions({ color: BRD_SMA_LINES[1].color });
+  else if (isLine) brdLineSeries.applyOptions({ color: BRD_UP_COLOR });
   brdCandleSeries.setData(isLine ? [] : candles);
   brdLineSeries.setData(isLine ? candles.map(c => ({ time: c.time, value: c.close })) : []);
   brdCountSeries.setData(counts);
@@ -386,21 +420,24 @@ function brdRenderActiveTab() {
   requestAnimationFrame(() => ewFitWithRightPad(brdChart));
 }
 
-// "All" view: the four new-high percentages as overlaid lines on the one price scale; the raw-count
-// pane is left empty since the four counts don't share a single meaningful bar.
+// Overlay view (all four new-high percentages, or the 20 + 50 SMA percentages) as lines on the one price scale;
+// the raw-count pane is left empty since the counts don't share a single meaningful bar.
 function brdRenderMulti() {
   brdCandleSeries.setData([]);
   brdLineSeries.setData([]);
   brdCountSeries.setData([]);
   _brdMultiData = {};
   _brdCandles = [];
-  BRD_HIGH_LINES.forEach((l, idx) => {
+  const lines = brdMultiLines();
+  brdMultiSeries.forEach(sr => sr.setData([])); // the SMA overlay uses fewer series than the new-highs one
+  lines.forEach((l, idx) => {
     const data = [];
     _brdHistory.forEach(d => {
       const time = ewToBusinessDay(d.date);
       if (time) data.push({ time, value: d[l.key + 'OHLC'].close });
     });
     _brdMultiData[l.key] = data;
+    brdMultiSeries[idx].applyOptions({ color: l.color });
     brdMultiSeries[idx].setData(data);
     if (idx === 0) _brdCandles = data.map(p => ({ time: p.time })); // time axis for the crosshair lookup
   });
