@@ -685,6 +685,7 @@ canvas { max-width: 100%; display: block; }
   overflow: hidden; min-height: 0; min-width: 0;
 }
 .ic-cell-empty { background: transparent; border: 1px dashed var(--border); }
+.ic-cell-active { border-color: var(--accent); }
 .ic-cell-header {
   padding: 8px 12px; font-weight: 600; font-size: 13px;
   border-bottom: 1px solid var(--border);
