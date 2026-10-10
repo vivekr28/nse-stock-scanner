@@ -49,6 +49,42 @@ def _clean(fragment):
     return html.unescape(re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', '', fragment))).strip()
 
 
+def replace_with_retry(tmp, path, attempts=5):
+    """os.replace(), retried for a few seconds: on Windows it raises PermissionError while another process (an
+    Excel window, a virus scan, the dashboard reading the file) has the target open."""
+    for n in range(attempts):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if n == attempts - 1:
+                raise
+            time.sleep(0.5)
+
+
+def write_atomic(path, write, binary=False):
+    """Fill a temp file next to `path` through write(file), then swap it in with os.replace(). A crash, Stop or error
+    part-way leaves `path` as it was - the old complete file - never a truncated one. The temp file is removed on
+    failure (a hard kill can leave a stale `<path>.tmp`; the next run just overwrites it)."""
+    tmp = path + '.tmp'
+    try:
+        if binary:
+            f = open(tmp, 'wb')
+        else:
+            f = open(tmp, 'w', encoding='utf-8', newline='')
+        with f:
+            write(f)
+            f.flush()
+            os.fsync(f.fileno())
+        replace_with_retry(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def fetch(path, delay):
     """GET a Screener page; returns text, or None on 404 / repeated failure."""
     for _ in range(3):
@@ -132,7 +168,7 @@ def main():
     today = date.today().isoformat()
 
     def write_mapping():
-        with open(mapping_path, 'w', encoding='utf-8', newline='') as f:
+        def fill(f):
             writer = csv.DictWriter(f, fieldnames=OUT_COLUMNS)
             writer.writeheader()
             for symbol, listed in universe.items():
@@ -141,6 +177,7 @@ def main():
                 writer.writerow({'Stock Name': symbol, 'Listing Date': listed, 'Basic Industry': industry,
                                  'Sector': sector, 'Macro Sector': macro, 'Industry Group': group,
                                  'Source': entry['src'] if entry else '', 'Fetched': entry['at'] if entry else ''})
+        write_atomic(mapping_path, fill)    # whole file or nothing: an interrupted run never leaves a cut-off CSV
 
     if not args.skip_walk:
         index = fetch('/market/', args.delay)
@@ -185,7 +222,11 @@ def main():
     unresolved = [s for s in universe if s not in state]
     print(f'Wrote {len(universe) - len(unresolved)} of {len(universe)} stocks to {MAPPING_FILE}')
     os.makedirs(reference_dir, exist_ok=True)
-    shutil.copyfile(mapping_path, os.path.join(reference_dir, MAPPING_FILE))
+
+    def copy_mapping(f):
+        with open(mapping_path, 'rb') as src:
+            shutil.copyfileobj(src, f)
+    write_atomic(os.path.join(reference_dir, MAPPING_FILE), copy_mapping, binary=True)
     print(f'Copied to {REFERENCE_SUBDIR}/{MAPPING_FILE} (git-tracked; commit it when it changes)')
     if unresolved:
         print('No classification found (shown as Undefined-Diversified):', ', '.join(unresolved))

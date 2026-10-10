@@ -49,8 +49,6 @@
     Latest: <span class="count" id="latestDate">-</span>
   </div>
   <button class="btn btn-secondary" style="margin-left:auto;font-size:12px;padding:6px 14px;" onclick="openDataFiles()" title="Latest downloaded bhavcopy / price band dates and reference file update times">Data Files</button>
-  <button class="btn btn-primary" style="margin-left:8px;font-size:12px;padding:6px 14px;" onclick="location.href='pages/reprocess.html?refresh=1'" title="Download any new data from NSE, reprocess it, then reload the dashboard">Refresh Data</button>
-  <button class="btn btn-secondary" style="margin-left:8px;font-size:12px;padding:6px 14px;" onclick="location.href='pages/reprocess.html'" title="Re-run the server's CSV -&gt; JSON processing pipeline (splits/bonuses, indicators, indices) without re-downloading data">Reprocess Data</button>
 </div>
 
 <!-- Loading progress (shown during auto-fetch from server) -->
@@ -973,6 +971,7 @@
     <button class="dq-tab" data-tab="dqCorpAction" onclick="dqSwitchTab('dqCorpAction')">Recent Corporate Actions Not Price-Adjusted</button>
     <button class="dq-tab" data-tab="dqAdjusted" onclick="dqSwitchTab('dqAdjusted')">Price Adjustments Applied</button>
     <button class="dq-tab" data-tab="dqFull" onclick="dqSwitchTab('dqFull')">Full Price Verification (all stocks vs TradingView) <span id="dqFullBadge" style="font-size:12px;margin-left:6px;"></span></button>
+    <button class="dq-tab" data-tab="dqRefresh" onclick="dqSwitchTab('dqRefresh')">Refresh Data <span id="dqRefreshBadge" style="font-size:12px;margin-left:6px;"></span></button>
   </div>
   <div class="card dq-section-body" id="dqNoSectorBody">
     <p style="color:var(--text2);font-size:12px;margin:8px 0;">These stocks are assigned to "Undefined-Diversified" sector/industry.</p>
@@ -1060,6 +1059,36 @@
       </label>
     </div>
     <div class="table-wrap"><table id="dqFullTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
+  </div>
+  <div class="card dq-section-body" id="dqRefreshBody" style="display:none;">
+    <h3 class="dq-h">NSE price data</h3>
+    <p style="color:var(--text2);font-size:12px;margin:8px 0;"><b>Refresh Data</b> downloads any new bhavcopy, price-band, market-cap and corporate-actions files from NSE, reprocesses everything, then reloads the dashboard. <b>Reprocess Data</b> re-runs only the processing (split/bonus/rights adjustments, indicators, indices) on the files already on disk &mdash; use it after a code change, or after you edit a reference file such as <code>CorporateActions.csv</code>.</p>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:10px 0;">
+      <button id="dqRefreshBtn" class="btn btn-primary" onclick="dqGoReprocess(true)" title="Download any new data from NSE, reprocess it, then reload the dashboard">Refresh Data</button>
+      <button id="dqReprocessBtn" class="btn btn-secondary" onclick="dqGoReprocess(false)" title="Re-run the server's CSV -&gt; JSON processing pipeline without re-downloading data">Reprocess Data</button>
+      <span id="dqRefreshHint" style="font-size:12px;color:var(--text2);"></span>
+    </div>
+
+    <h3 class="dq-h" style="margin-top:22px;">Stock sector mapping</h3>
+    <p style="color:var(--text2);font-size:12px;margin:8px 0;">Each stock's sector and industry come from <code>Sector-Stock-Mapping.csv</code>, which is rebuilt from Screener.in's copy of NSE's industry classification &mdash; it is <b>not</b> updated by Refresh Data. NSE reclassifies rarely, so monthly is enough, or when new listings show up as &ldquo;In Bhavcopy but NOT in Sector Mapping&rdquo;. A full refresh walks Screener's industry pages (about 4 minutes) and then fetches company pages for anything missing or expired (up to ~20 minutes from scratch); <b>Quick</b> skips the walk and only fills gaps. It makes about one request per second, only when you click, and changes nothing the dashboard shows until you Reprocess Data afterwards.</p>
+    <div id="dqSectorSummary" style="font-size:12px;margin:8px 0;"></div>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:10px 0;">
+      <button id="dqSectorBtn" class="btn btn-primary" onclick="dqRunSectorMapping()">Refresh sector mapping</button>
+      <button id="dqSectorStopBtn" class="btn btn-secondary" style="display:none;" onclick="dqStopSectorMapping()">Stop</button>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);font-weight:400;cursor:pointer;">
+        <input type="checkbox" id="dqSectorQuick"> Quick: only new, unclassified or expired stocks (skip the industry walk)
+      </label>
+      <span id="dqSectorStatus" style="font-size:12px;color:var(--text2);"></span>
+    </div>
+    <div id="dqSectorProgress" style="display:none;margin:6px 0 10px;">
+      <div class="progress-track"><div class="progress-fill" id="dqSectorFill"></div></div>
+      <div class="progress-detail" id="dqSectorDetail"></div>
+    </div>
+    <div id="dqSectorResult" style="font-size:12px;margin:8px 0 4px;"></div>
+    <div id="dqSectorReprocess" style="display:none;margin:10px 0;padding:10px 14px;border:1px solid var(--orange);border-radius:8px;font-size:13px;">
+      <div id="dqSectorReprocessText" style="margin-bottom:8px;"></div>
+      <button class="btn btn-primary" onclick="dqGoReprocess(false)">Reprocess Data now</button>
+    </div>
   </div>
 </div>
 

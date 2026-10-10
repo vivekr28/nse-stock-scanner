@@ -124,7 +124,12 @@ async function startReprocess() {
   updateElapsed();
 
   try {
-    await fetch(REFRESH ? '/api/reprocess/start?download=1' : '/api/reprocess/start');
+    const resp = await fetch(REFRESH ? '/api/reprocess/start?download=1' : '/api/reprocess/start');
+    const j = await resp.json().catch(() => ({}));
+    if (j && j.ok === false) {   // e.g. the sector mapping is being rebuilt - nothing was started
+      showError({ error: j.error || 'The server refused to start.' });
+      return;
+    }
   } catch (e) {
     // server may be momentarily unreachable right at request time - poll anyway
   }

@@ -25,8 +25,14 @@ function showDashboard() {
   // Auto-run screener since Stock Scanner is the default tab
   if (typeof runScreener === 'function') runScreener();
 
-  // Come back to the tab we were on if the page was reloaded by an in-app action (the
-  // Data Quality "Adjust prices from TradingView" button reloads after correcting prices).
+  reopenSavedTab();
+}
+
+// Come back to the tab we were on if the page was reloaded or left by an in-app action: the Data Quality
+// "Adjust prices from TradingView" button reloads after correcting prices (nseReopenTab + nseReopenDqCorp), and
+// the Refresh Data tab's Refresh / Reprocess buttons go through pages/reprocess.html and back (nseReopenTab +
+// nseReopenDqTab = the Data Quality sub-tab to show).
+function reopenSavedTab() {
   try {
     const reopen = sessionStorage.getItem('nseReopenTab');
     if (reopen) {
@@ -36,6 +42,11 @@ function showDashboard() {
       if (sessionStorage.getItem('nseReopenDqCorp')) {
         sessionStorage.removeItem('nseReopenDqCorp');
         if (typeof dqSwitchTab === 'function') dqSwitchTab('dqCorpAction');
+      }
+      const dqTab = sessionStorage.getItem('nseReopenDqTab');
+      if (dqTab) {
+        sessionStorage.removeItem('nseReopenDqTab');
+        if (typeof dqSwitchTab === 'function') dqSwitchTab(dqTab);
       }
     }
   } catch (e) { /* sessionStorage unavailable - stay on the default tab */ }

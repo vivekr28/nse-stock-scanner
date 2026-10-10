@@ -133,6 +133,32 @@ _reprocess_state = {
 }
 DOWNLOAD_SCRIPT = 'Download-NSE-Bhavcopy.ps1'
 
+# ─── Sector-mapping rebuild state (Data Quality -> "Refresh Data" tab) ───────────────
+# src/build_screener_classification.py scrapes Screener.in (4-20 min), so it runs as a child process in a
+# background thread, with its stdout parsed into live progress. Never started automatically; it rewrites
+# NSE_DATA/Sector-Stock-Mapping.csv, a watched input - so it is refused while a reprocess is reading it, and a
+# reprocess is refused while it is writing it.
+SECTOR_BUILD_SCRIPT = os.path.join('src', 'build_screener_classification.py')
+SECTOR_MAX_AGE_DAYS = 30    # the script's own --max-age-days default: company-page entries older than this are re-fetched
+_sector_lock = threading.Lock()
+_sector_state = {
+    'status': 'idle',   # 'idle' | 'running' | 'done' | 'error'
+    'step': '',
+    'phase': '',        # 'walk' | 'company' | ''
+    'current': 0,
+    'total': 0,
+    'quick': False,     # --skip-walk
+    'startedAt': None,
+    'finishedAt': None,
+    'error': None,
+    'stopping': False,
+    'stopped': False,   # ended by Stop: what was fetched so far is kept
+    'log': [],          # last few lines of the script's output
+    'result': None,     # {added, changed, removed, changedSymbols, unresolved} of the last run vs. the mapping before it
+}
+_sector_stop = threading.Event()
+_sector_proc = None
+
 # Guards processed_data.json + the gzipped response caches. The server is
 # multi-threaded (see ThreadingNSEServer), so without this two requests could
 # both rebuild the caches, or read the JSON while a reprocess is writing it.
@@ -2008,6 +2034,163 @@ def run_tv_verify_full(base_dir, port, limit=None, resume=False):
         st['finishedAt'] = time.time()
 
 
+# ─── Sector-mapping rebuild (see SECTOR_BUILD_SCRIPT) ────────────────────────────────
+def sector_snapshot(path):
+    """Sector-Stock-Mapping.csv -> {symbol: (macro sector, sector, industry group, basic industry)} for the rows that
+    have a classification. {} when the file is absent."""
+    out = {}
+    for r in read_csv_file(path):
+        sym, sector, industry = r.get('Stock Name', ''), r.get('Sector', ''), r.get('Basic Industry', '')
+        if sym and sector and industry:
+            out[sym] = (r.get('Macro Sector', ''), sector, r.get('Industry Group', ''), industry)
+    return out
+
+
+def diff_sector_snapshots(before, after, limit=15):
+    """What a rebuild changed: stocks newly classified (`added`), whose classification differs (`changed`) and ones that
+    lost theirs (`removed`), plus up to `limit` readable 'SYMBOL: old -> new' examples of the changed ones. The label
+    uses the finest tier that differs (Basic Industry first)."""
+    def label(sym):
+        for i in (3, 1, 2, 0):
+            if before[sym][i] != after[sym][i]:
+                return f'{sym}: {before[sym][i] or "-"} → {after[sym][i] or "-"}'
+        return sym
+    changed = sorted(s for s in after if s in before and after[s] != before[s])
+    return {'added': sum(1 for s in after if s not in before),
+            'removed': sum(1 for s in before if s not in after),
+            'changed': len(changed),
+            'changedSymbols': [label(s) for s in changed[:limit]]}
+
+
+def summarize_sector_mapping(base_dir, today=None):
+    """State of NSE_DATA/Sector-Stock-Mapping.csv for the Data Quality "Refresh Data" tab: how many stocks it
+    classifies, whether a rebuild is due (new listings missing from it, entries older than SECTOR_MAX_AGE_DAYS) and
+    whether it is newer than the processed data (i.e. a Reprocess is needed for it to take effect)."""
+    data_dir = os.path.join(base_dir, DATA_SUBDIR)
+    path = os.path.join(data_dir, SECTOR_FILE)
+    processed_path = os.path.join(data_dir, PROCESSED_FILE)
+    today = today or datetime.now().date()
+    processed_at = os.path.getmtime(processed_path) if os.path.exists(processed_path) else None
+    if not os.path.exists(path):
+        return {'exists': False, 'processedAt': processed_at, 'reprocessNeeded': False, 'suggest': 'full',
+                'advice': {'level': 'due', 'text': 'There is no sector mapping yet - run a full refresh (about 20 minutes).'}}
+    rows = read_csv_file(path)
+    listed = {r.get('SYMBOL', '') for r in read_csv_file(os.path.join(data_dir, EQUITY_LIST_FILE))} - {''}
+    in_mapping = {r.get('Stock Name', '') for r in rows}
+    classified = sum(1 for r in rows if r.get('Sector') and r.get('Basic Industry'))
+    cutoff = (today - timedelta(days=SECTOR_MAX_AGE_DAYS)).isoformat()
+    expired = sum(1 for r in rows if r.get('Source') == 'company' and r.get('Fetched') and r['Fetched'] < cutoff)
+    fetched = [r['Fetched'] for r in rows if r.get('Fetched')]
+    last_fetched = max(fetched) if fetched else None
+    try:
+        age_days = (today - datetime.strptime(last_fetched, '%Y-%m-%d').date()).days if last_fetched else None
+    except ValueError:
+        age_days = None
+    missing = len(listed - in_mapping)
+    updated_at = os.path.getmtime(path)
+
+    reasons = []
+    if missing:
+        reasons.append(f'{missing} newly listed stock{"s are" if missing != 1 else " is"} not in the mapping yet')
+    if expired:
+        reasons.append(f'{expired} classification{"s are" if expired != 1 else " is"} older than {SECTOR_MAX_AGE_DAYS} days')
+    if age_days is not None and age_days > SECTOR_MAX_AGE_DAYS:
+        reasons.append(f'it was last rebuilt {age_days} days ago')
+    # A stale mapping (no run for a month) wants the full walk; otherwise filling gaps is enough.
+    if age_days is None or age_days > SECTOR_MAX_AGE_DAYS:
+        suggest = 'full'
+    else:
+        suggest = 'quick' if reasons else None
+    if reasons:
+        advice = {'level': 'due', 'text': 'A refresh is due: ' + '; '.join(reasons) + '.'}
+    else:
+        when = 'today' if age_days == 0 else f'{age_days} day{"s" if age_days != 1 else ""} ago'
+        advice = {'level': 'ok', 'text': 'Up to date' + (f' - last rebuilt {when}.' if age_days is not None else '.')}
+    return {'exists': True, 'stocks': len(rows), 'classified': classified, 'unclassified': len(rows) - classified,
+            'missing': missing, 'expired': expired, 'lastFetched': last_fetched, 'ageDays': age_days,
+            'updatedAt': updated_at, 'processedAt': processed_at,
+            'reprocessNeeded': processed_at is None or updated_at > processed_at,
+            'suggest': suggest, 'advice': advice}
+
+
+def parse_sector_progress(line):
+    """One line of build_screener_classification.py's output -> the _sector_state fields it implies, or None."""
+    line = line.strip()
+    m = re.match(r'(\d+) leaf industries', line)
+    if m:
+        return {'phase': 'walk', 'current': 0, 'total': int(m.group(1)), 'step': 'Walking Screener\'s industry pages'}
+    m = re.match(r'walked (\d+)/(\d+)', line)
+    if m:
+        return {'phase': 'walk', 'current': int(m.group(1)), 'total': int(m.group(2)),
+                'step': 'Walking Screener\'s industry pages'}
+    m = re.match(r'(\d+) stocks need a company page', line)
+    if m:
+        n = int(m.group(1))
+        return {'phase': 'company', 'current': 0, 'total': n,
+                'step': 'Fetching company pages' if n else 'No company pages to fetch'}
+    m = re.fullmatch(r'(\d+)/(\d+)', line)
+    if m:
+        return {'phase': 'company', 'current': int(m.group(1)), 'total': int(m.group(2)), 'step': 'Fetching company pages'}
+    if line.startswith('Wrote '):
+        return {'step': 'Saving the mapping'}
+    return None
+
+
+def run_sector_mapping(base_dir, quick):
+    """Background worker behind POST /api/sector-mapping/start: run build_screener_classification.py (--skip-walk when
+    `quick`), mirror its output into _sector_state, then record how the classification changed. Stop terminates the
+    child; the script saves every 50 stocks, so what was fetched so far is kept (the git-tracked copy in
+    reference-data/ is only refreshed by a run that completes)."""
+    global _sector_proc
+    st = _sector_state
+    data_dir = os.path.join(base_dir, DATA_SUBDIR)
+    mapping_path = os.path.join(data_dir, SECTOR_FILE)
+    try:
+        script = os.path.join(base_dir, SECTOR_BUILD_SCRIPT)
+        if not os.path.exists(script):
+            raise RuntimeError(f'{SECTOR_BUILD_SCRIPT} not found')
+        if not os.path.exists(os.path.join(data_dir, EQUITY_LIST_FILE)):
+            raise RuntimeError(f"{EQUITY_LIST_FILE} is missing from {DATA_SUBDIR} - run Refresh Data first (the rebuild "
+                               "starts from NSE's list of listed stocks).")
+        before = sector_snapshot(mapping_path) or sector_snapshot(os.path.join(base_dir, REFERENCE_SUBDIR, SECTOR_FILE))
+        cmd = [sys.executable, '-u', script, '--dir', base_dir] + (['--skip-walk'] if quick else [])
+        st['step'] = 'Contacting Screener.in...'
+        try:
+            proc = subprocess.Popen(cmd, cwd=base_dir, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace',
+                                    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        except OSError as e:
+            raise RuntimeError(f'Could not start the rebuild: {e}')
+        _sector_proc = proc
+        if _sector_stop.is_set():       # Stop arrived before the child existed
+            proc.terminate()
+        for line in proc.stdout:
+            line = line.strip()
+            if not line:
+                continue
+            print(f'  [sector-mapping] {line}')
+            st['log'] = (st['log'] + [line[:200]])[-8:]
+            update = parse_sector_progress(line)
+            if update:
+                st.update(update)
+        rc = proc.wait()
+        stopped = _sector_stop.is_set()
+        if rc != 0 and not stopped:
+            tail = ' | '.join(st['log'][-3:]) or f'exit code {rc}'
+            raise RuntimeError('The sector-mapping rebuild failed: ' + tail)
+        st['result'] = diff_sector_snapshots(before, sector_snapshot(mapping_path))
+        st['stopped'] = stopped
+        st['step'] = 'Stopped - what was fetched so far is saved.' if stopped else 'Done.'
+        st['status'] = 'done'
+    except Exception as e:
+        st['status'] = 'error'
+        st['error'] = str(e)
+    finally:
+        _sector_proc = None
+        st['stopping'] = False
+        st['finishedAt'] = time.time()
+
+
 # ─── HTTP Server ─────────────────────────────────────────────────────────────
 _band_history_lock = threading.Lock()
 _band_history_cache = {}  # 'v' -> (band file mtime, gzipped JSON)
@@ -2064,6 +2247,8 @@ class NSEHandler(http.server.SimpleHTTPRequestHandler):
             self._serve_tv_verify_status()
         elif path == '/api/tv-full/status':
             self._serve_tv_full_status()
+        elif path == '/api/sector-mapping/status':
+            self._serve_sector_status()
         elif path == '/api/tv-full/results':
             self._serve_tv_full_results()
         elif path == '/api/tv-full/report':
@@ -2087,6 +2272,10 @@ class NSEHandler(http.server.SimpleHTTPRequestHandler):
             self._handle_tv_full_start()
         elif parsed.path == '/api/tv-full/stop':
             self._handle_tv_full_stop()
+        elif parsed.path == '/api/sector-mapping/start':
+            self._handle_sector_start()
+        elif parsed.path == '/api/sector-mapping/stop':
+            self._handle_sector_stop()
         else:
             self.send_error(404)
 
@@ -2294,6 +2483,11 @@ class NSEHandler(http.server.SimpleHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(body)
                 return
+            if _sector_state['status'] == 'running':
+                # The rebuild is rewriting Sector-Stock-Mapping.csv, which processing reads.
+                self._send_json({'ok': False, 'error': 'The sector mapping is being rebuilt - reprocess when it finishes '
+                                                       '(Data Quality → Refresh Data).'}, 409)
+                return
             _reprocess_state.update(status='running', step='Starting...', startedAt=time.time(),
                                      finishedAt=None, error=None, stocks=None,
                                      mode='refresh' if download else 'reprocess')
@@ -2381,6 +2575,52 @@ class NSEHandler(http.server.SimpleHTTPRequestHandler):
         self._cors_headers()
         self.end_headers()
         self.wfile.write(body)
+
+    def _handle_sector_start(self):
+        """POST /api/sector-mapping/start[?quick=1] - rebuild Sector-Stock-Mapping.csv from Screener.in in a
+        background thread; the Data Quality "Refresh Data" tab polls /api/sector-mapping/status. `quick` skips the
+        industry-page walk (only new / unclassified / expired stocks are fetched). Same same-origin header rule as the
+        TradingView endpoints. Refused while a refresh/reprocess is reading the mapping. Never started automatically."""
+        if self.headers.get('X-Requested-With') != 'nse-dashboard':
+            self._send_json({'ok': False, 'error': 'Forbidden'}, 403)
+            return
+        quick = 'quick' in parse_qs(urlparse(self.path).query)
+        with _sector_lock:
+            if _sector_state['status'] == 'running':
+                self._send_json({'ok': True, 'alreadyRunning': True})
+                return
+            if _reprocess_state['status'] == 'running':
+                self._send_json({'ok': False, 'error': 'A data refresh/reprocess is running - try again when it finishes.'}, 409)
+                return
+            _sector_stop.clear()
+            _sector_state.update(status='running', step='Starting...', phase='', current=0, total=0, quick=quick,
+                                 startedAt=time.time(), finishedAt=None, error=None, stopping=False, stopped=False,
+                                 log=[], result=None)
+        threading.Thread(target=run_sector_mapping, args=(self.server.base_dir, quick), daemon=True).start()
+        self._send_json({'ok': True, 'started': True})
+
+    def _handle_sector_stop(self):
+        """POST /api/sector-mapping/stop - end a running rebuild now; what it fetched so far is kept."""
+        if self.headers.get('X-Requested-With') != 'nse-dashboard':
+            self._send_json({'ok': False, 'error': 'Forbidden'}, 403)
+            return
+        with _sector_lock:
+            running = _sector_state['status'] == 'running'
+            if running:
+                _sector_stop.set()
+                _sector_state['stopping'] = True
+                proc = _sector_proc
+                if proc is not None and proc.poll() is None:
+                    proc.terminate()
+        self._send_json({'ok': True, 'stopping': running})
+
+    def _serve_sector_status(self):
+        """Run state plus a summary of the mapping file. The summary is skipped while a run is in progress: the
+        script is rewriting the file then, and the progress fields carry everything the tab shows."""
+        mapping = None
+        if _sector_state['status'] != 'running':
+            mapping = summarize_sector_mapping(self.server.base_dir)
+        self._send_json({**_sector_state, 'mapping': mapping})
 
     def _send_json(self, obj, status=200):
         body = json.dumps(obj).encode('utf-8')

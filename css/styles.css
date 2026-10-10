@@ -737,6 +737,8 @@ canvas { max-width: 100%; display: block; }
   padding: 5px 8px; border-radius: 5px; font-size: 12px;
 }
 #dqFullBody .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+#dqRefreshBody .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.dq-h { font-size: 14px; font-weight: 600; color: var(--text); margin: 4px 0 0; }
 
 /* Multi-Preset tab — combine 2+ saved presets with AND/OR */
 .scr-multi-wrap { padding: 16px; }
