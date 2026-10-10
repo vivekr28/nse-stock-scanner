@@ -144,6 +144,7 @@ function renderDataQuality() {
   dqRenderAdjusted();
   dqLoadTvVerify();
   dqLoadTvFull();
+  dqLoadSectorStatus();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -685,4 +686,204 @@ async function dqPollTvFull() {
   } finally {
     _dqFull.polling = false;
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// REFRESH DATA  —  Refresh Data / Reprocess Data, and "Refresh sector mapping"
+// ═══════════════════════════════════════════════════════════════════════════════
+// Refresh Data and Reprocess Data used to be header buttons; they open pages/reprocess.html (live progress, then
+// back to the dashboard), and dqGoReprocess() leaves a note so the dashboard comes back to this tab.
+// The sector mapping (Sector-Stock-Mapping.csv) is rebuilt from Screener.in by a server-side script that takes
+// 4-20 minutes: the button starts it, this tab polls its progress, and when it ends the tab says whether the
+// processed data is now behind it (it only takes effect after a reprocess - the scanner reads processed_data.json).
+let _dqSector = { polling: false, firstLoad: true };
+
+function dqGoReprocess(download) {
+  try {
+    sessionStorage.setItem('nseReopenTab', 'dataquality');
+    sessionStorage.setItem('nseReopenDqTab', 'dqRefresh');
+  } catch (e) { /* storage blocked - the dashboard just reopens on its default tab */ }
+  location.href = download ? 'pages/reprocess.html?refresh=1' : 'pages/reprocess.html';
+}
+
+// The sentence in the "reprocess" box after a rebuild. `r` = the last run's {added, changed, removed} (null when
+// this server session hasn't run one), `stopped` = that run was stopped. Returns {text, action}: action=false
+// when the run changed nothing, so reprocessing is optional.
+function dqSectorReprocessInfo(r, stopped) {
+  if (r) {
+    const parts = [];
+    if (r.added) parts.push(`${r.added} stock${r.added === 1 ? '' : 's'} newly classified`);
+    if (r.changed) parts.push(`${r.changed} changed sector/industry`);
+    if (r.removed) parts.push(`${r.removed} lost their classification`);
+    if (!parts.length) {
+      return { action: false, text: 'The rebuild found no classification changes, so the scanner already shows the same sectors. ' +
+        'Reprocessing is optional (the file is only newer than the processed data).' };
+    }
+    return { action: true, text: `Sector mapping ${stopped ? 'partly ' : ''}updated: ${parts.join(', ')}. ` +
+      'Reprocess Data so the scanner, Sector and Industry analysis show it.' };
+  }
+  return { action: true, text: 'The sector mapping file is newer than the processed data. ' +
+    'Reprocess Data so the scanner, Sector and Industry analysis use it.' };
+}
+
+function dqSectorSummaryHtml(m) {
+  if (!m) return '';
+  const advice = m.advice || {};
+  const color = advice.level === 'due' ? 'var(--orange)' : 'var(--green)';
+  if (!m.exists) return `<span style="color:${color}">${escapeHtml(advice.text || '')}</span>`;
+  const bits = [`<b>${m.stocks}</b> stocks in the mapping`, `${m.classified} classified`];
+  if (m.unclassified) bits.push(`${m.unclassified} without a classification (shown as Undefined-Diversified)`);
+  if (m.updatedAt) bits.push(`file updated ${escapeHtml(new Date(m.updatedAt * 1000).toLocaleString())}`);
+  return `<div style="color:var(--text2)">${bits.join(' · ')}</div>` +
+    `<div style="color:${color};margin-top:3px">${escapeHtml(advice.text || '')}</div>`;
+}
+
+function dqSectorSetStatus(text, kind) {
+  const el = document.getElementById('dqSectorStatus');
+  if (!el) return;
+  el.textContent = text;
+  el.style.color = kind === 'error' ? 'var(--red)' : kind === 'ok' ? 'var(--green)' : 'var(--text2)';
+}
+
+// While the rebuild runs the Refresh/Reprocess buttons are disabled too (the server refuses them anyway -
+// reprocessing reads the file the rebuild is writing).
+function dqSectorSetRunning(running, stopping) {
+  const set = (id, fn) => { const el = document.getElementById(id); if (el) fn(el); };
+  set('dqSectorBtn', el => { el.disabled = running; });
+  set('dqSectorQuick', el => { el.disabled = running; });
+  set('dqRefreshBtn', el => { el.disabled = running; });
+  set('dqReprocessBtn', el => { el.disabled = running; });
+  set('dqSectorStopBtn', el => {
+    el.style.display = running ? '' : 'none';
+    el.disabled = !!stopping;
+    el.textContent = stopping ? 'Stopping…' : 'Stop';
+  });
+  set('dqSectorProgress', el => { el.style.display = running ? '' : 'none'; });
+  set('dqRefreshHint', el => {
+    el.textContent = running ? 'Unavailable while the sector mapping is being rebuilt.' : '';
+  });
+}
+
+// One status fetch: renders the summary, the last run's result and the reprocess box, and picks the progress
+// display back up if a rebuild is already running (page reload mid-run). Silent without a server.
+async function dqLoadSectorStatus() {
+  try {
+    const resp = await fetch('/api/sector-mapping/status', { cache: 'no-store' });
+    if (!resp.ok) return;
+    const s = await resp.json();
+    if (s.status === 'running') {
+      dqSectorSetRunning(true, s.stopping);
+      dqPollSectorMapping();
+      return;
+    }
+    dqSectorSetRunning(false);
+    dqRenderSectorStatus(s);
+  } catch (e) { /* no server - nothing to show */ }
+}
+
+function dqRenderSectorStatus(s) {
+  const m = s.mapping;
+  document.getElementById('dqSectorSummary').innerHTML = dqSectorSummaryHtml(m);
+
+  // Pre-tick Quick when the gap is small (new listings / expired entries) - only on the first load, never over the user's choice.
+  if (_dqSector.firstLoad && m) {
+    _dqSector.firstLoad = false;
+    const q = document.getElementById('dqSectorQuick');
+    if (q) q.checked = m.suggest === 'quick';
+  }
+
+  const r = s.result;
+  const resEl = document.getElementById('dqSectorResult');
+  if (r && s.status !== 'error') {
+    const seen = (r.changedSymbols || []).map(escapeHtml).join(' · ');
+    resEl.innerHTML = `<span style="color:var(--text2)">Last rebuild${s.stopped ? ' (stopped)' : ''}: ` +
+      `${r.added} newly classified · ${r.changed} changed · ${r.removed} removed` +
+      (seen ? `<br>Changed: ${seen}${r.changed > r.changedSymbols.length ? ' …' : ''}` : '') + '</span>';
+  } else {
+    resEl.innerHTML = '';
+  }
+
+  const box = document.getElementById('dqSectorReprocess');
+  const badge = document.getElementById('dqRefreshBadge');
+  const needed = !!(m && m.reprocessNeeded);
+  if (needed) {
+    const info = dqSectorReprocessInfo(r, s.stopped);
+    document.getElementById('dqSectorReprocessText').textContent = info.text;
+    box.style.display = '';
+    box.style.borderColor = info.action ? 'var(--orange)' : 'var(--border)';
+  } else {
+    box.style.display = 'none';
+  }
+  if (badge) {
+    badge.textContent = needed ? '⚠' : '';
+    badge.title = needed ? 'The sector mapping is newer than the processed data - Reprocess Data' : '';
+  }
+  if (s.status === 'error') dqSectorSetStatus(s.error || 'Sector mapping rebuild failed.', 'error');
+}
+
+async function dqRunSectorMapping() {
+  dqSectorSetRunning(true);
+  dqSectorSetStatus('Starting…');
+  document.getElementById('dqSectorResult').innerHTML = '';
+  try {
+    const quick = document.getElementById('dqSectorQuick').checked;
+    const resp = await fetch('/api/sector-mapping/start' + (quick ? '?quick=1' : ''),
+      { method: 'POST', headers: { 'X-Requested-With': 'nse-dashboard' } });
+    const j = await resp.json().catch(() => ({}));
+    if (!resp.ok || j.ok === false) throw new Error(j.error || `Server returned HTTP ${resp.status}`);
+  } catch (e) {
+    dqSectorSetStatus(e.message, 'error');
+    dqSectorSetRunning(false);
+    return;
+  }
+  dqPollSectorMapping();
+}
+
+async function dqStopSectorMapping() {
+  dqSectorSetRunning(true, true);
+  dqSectorSetStatus('Stopping…');
+  try {
+    await fetch('/api/sector-mapping/stop', { method: 'POST', headers: { 'X-Requested-With': 'nse-dashboard' } });
+  } catch (e) { dqSectorSetStatus('Could not reach the server: ' + e.message, 'error'); }
+}
+
+async function dqPollSectorMapping() {
+  if (_dqSector.polling) return;
+  _dqSector.polling = true;
+  try {
+    for (;;) {
+      const s = await (await fetch('/api/sector-mapping/status', { cache: 'no-store' })).json();
+      if (s.status === 'running') {
+        dqSectorSetRunning(true, s.stopping);
+        const total = s.total || 0, cur = s.current || 0;
+        document.getElementById('dqSectorFill').style.width = (total ? Math.min(100, cur / total * 100) : 0) + '%';
+        const secs = Math.round(Date.now() / 1000 - (s.startedAt || Date.now() / 1000));
+        const counter = total ? ` (${cur}/${total})` : '';
+        dqSectorSetStatus(s.stopping ? 'Stopping…' : s.step + counter);
+        const last = (s.log || []).slice(-1)[0] || '';
+        document.getElementById('dqSectorDetail').textContent =
+          `${Math.floor(secs / 60)}m ${secs % 60}s elapsed` + (s.quick ? ' · quick mode' : '') +
+          (s.phase === 'company' && total ? ' · about one request per second' : '') + (last ? ` · ${last}` : '');
+        await new Promise(r => setTimeout(r, 700));
+        continue;
+      }
+      dqSectorSetRunning(false);
+      await dqLoadSectorStatusOnce();
+      if (s.status === 'error') dqSectorSetStatus(s.error || 'Sector mapping rebuild failed.', 'error');
+      else dqSectorSetStatus(s.stopped ? 'Stopped - what was fetched so far is saved.' : 'Sector mapping refreshed.', 'ok');
+      break;
+    }
+  } catch (e) {
+    dqSectorSetStatus('Lost contact with the server: ' + e.message, 'error');
+  } finally {
+    _dqSector.polling = false;
+  }
+}
+
+// Re-fetch and render once the rebuild is over (the status during the run carries no mapping summary).
+async function dqLoadSectorStatusOnce() {
+  try {
+    const resp = await fetch('/api/sector-mapping/status', { cache: 'no-store' });
+    if (resp.ok) dqRenderSectorStatus(await resp.json());
+  } catch (e) { /* keep what is shown */ }
 }

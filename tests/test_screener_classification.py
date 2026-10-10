@@ -203,3 +203,87 @@ def test_stale_walk_entry_is_refetched_when_the_walk_no_longer_returns_it(run):
     previous['BODALCHEM'] = ('walk', old)
     fetched, _ = run({'/market/': ''}, previous)                     # walk finds nothing today
     assert '/company/BODALCHEM/consolidated/' in fetched
+
+
+# --- atomic writes: an interrupted run never leaves a cut-off mapping --------------------------
+
+def test_write_atomic_replaces_the_file_and_leaves_no_temp(tmp_path):
+    path = tmp_path / 'map.csv'
+    path.write_text('old', encoding='utf-8')
+    bsc.write_atomic(str(path), lambda f: f.write('new'))
+    assert path.read_text(encoding='utf-8') == 'new'
+    assert [p.name for p in tmp_path.iterdir()] == ['map.csv']
+
+
+def test_write_atomic_failure_part_way_keeps_the_old_file_and_removes_the_temp(tmp_path):
+    path = tmp_path / 'map.csv'
+    path.write_text('old but complete', encoding='utf-8')
+
+    def explodes(f):
+        f.write('half of the new fi')
+        raise RuntimeError('killed mid-write')
+
+    with pytest.raises(RuntimeError):
+        bsc.write_atomic(str(path), explodes)
+    assert path.read_text(encoding='utf-8') == 'old but complete'
+    assert [p.name for p in tmp_path.iterdir()] == ['map.csv']
+
+
+def test_write_atomic_creates_the_file_when_there_was_none(tmp_path):
+    path = tmp_path / 'fresh.csv'
+    bsc.write_atomic(str(path), lambda f: f.write(b'bytes'), binary=True)
+    assert path.read_bytes() == b'bytes'
+
+
+def test_replace_is_retried_while_the_target_is_locked(tmp_path, monkeypatch):
+    """Windows raises PermissionError while another process (Excel, a virus scan) has the target open."""
+    path = tmp_path / 'map.csv'
+    path.write_text('old', encoding='utf-8')
+    real_replace, calls = bsc.os.replace, []
+
+    def flaky(src, dst):
+        calls.append(1)
+        if len(calls) < 3:
+            raise PermissionError('in use')
+        real_replace(src, dst)
+
+    monkeypatch.setattr(bsc.os, 'replace', flaky)
+    monkeypatch.setattr(bsc.time, 'sleep', lambda s: None)
+    bsc.write_atomic(str(path), lambda f: f.write('new'))
+    assert len(calls) == 3 and path.read_text(encoding='utf-8') == 'new'
+
+
+def test_a_permanently_locked_target_keeps_the_old_file_and_raises(tmp_path, monkeypatch):
+    path = tmp_path / 'map.csv'
+    path.write_text('old', encoding='utf-8')
+    monkeypatch.setattr(bsc.os, 'replace', lambda s, d: (_ for _ in ()).throw(PermissionError('in use')))
+    monkeypatch.setattr(bsc.time, 'sleep', lambda s: None)
+    with pytest.raises(PermissionError):
+        bsc.write_atomic(str(path), lambda f: f.write('new'))
+    assert path.read_text(encoding='utf-8') == 'old'
+    assert [p.name for p in tmp_path.iterdir()] == ['map.csv']
+
+
+def test_a_crash_while_writing_the_mapping_leaves_the_previous_complete_file(run, tmp_path, monkeypatch):
+    """main() end to end: the CSV writer dies on the 3rd row of the final save - the live mapping must still be the
+    previous, complete one (the old in-place write left it cut off after row 2)."""
+    today = date.today().isoformat()
+    previous = {s: ('company', today) for s in SYMBOLS}
+    run({}, previous, '--skip-walk')                                 # lays down a complete mapping
+    live = tmp_path / 'NSE_DATA' / 'Sector-Stock-Mapping.csv'
+    before = live.read_bytes()
+
+    class Dies(csv.DictWriter):
+        n = 0
+
+        def writerow(self, row):
+            Dies.n += 1
+            if Dies.n == 3:
+                raise OSError('disk full')
+            return super().writerow(row)
+
+    monkeypatch.setattr(bsc.csv, 'DictWriter', Dies)
+    with pytest.raises(OSError):
+        run({}, None, '--skip-walk')
+    assert live.read_bytes() == before
+    assert not (tmp_path / 'NSE_DATA' / 'Sector-Stock-Mapping.csv.tmp').exists()
