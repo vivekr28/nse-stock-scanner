@@ -243,17 +243,10 @@ function icRenderSingleStock() {
   if (!stock) return;
 
   const titleEl = document.getElementById('icTitle');
-  titleEl.textContent = `${stock.symbol} — ${stock.industry || 'Undefined-Diversified'}`;
-  // Clicking the stock name toggles selection too, not just the checkbox -
-  // matches the grid cells, where the checkbox and name share one <label>.
-  // toggleStockSelection() only updates the selectedStocks Set, so the
-  // checkbox's own checked state (a separate DOM element here, unlike the
-  // grid's shared <label>) needs to be synced by hand.
-  titleEl.style.cursor = 'pointer';
-  titleEl.onclick = () => {
-    toggleStockSelection(stock.isin);
-    document.getElementById('icSingleSelectCb').checked = isStockSelected(stock.isin);
-  };
+  // The ticker is on the chart itself (its legend); the title only says which industry this stock is in.
+  titleEl.textContent = stock.industry || 'Undefined-Diversified';
+  titleEl.style.cursor = '';
+  titleEl.onclick = null;
   document.getElementById('icSinglePageInfo').textContent = `${icSingleIndex + 1} of ${icTotalSingle()} stocks`;
   document.getElementById('icSinglePrevBtn').disabled = icSingleIndex <= 0;
   document.getElementById('icSingleNextBtn').disabled = icSingleIndex >= icTotalSingle() - 1;
@@ -268,13 +261,14 @@ function icRenderSingleStock() {
   document.getElementById('icSingleStats').textContent = icStatsLine(days);
   if (!container || days.length === 0 || typeof LightweightCharts === 'undefined') return;
   const { candleData, volumeData, closes } = icBuildBarsFromDays(days);
-  icIndustryChartInst = icCreateChart(container, 'icVolumeSingle', document.getElementById('icSingleOhlc'));
+  icIndustryChartInst = icCreateChart(container, 'icVolumeSingle', icLegendStock(stock));
   icWatchManualRange(icIndustryChartInst, container);
   icSetChartData(icIndustryChartInst, candleData, volumeData, closes, icVisibleCandles(), icRightOffset);
 }
 
 function closeIndustryCharts() {
   document.getElementById('industryChartsModal').classList.remove('active');
+  if (typeof icSetIndicatorsOpen === 'function') icSetIndicatorsOpen(false);
   icDisposeCharts();
   icDisposeIndustryChart();
   icDisposeMoneyFlowChart();
@@ -290,7 +284,6 @@ function icUpdateControlVisibility() {
   const singlePagination = document.getElementById('icSinglePaginationWrap');
   const singleSelect = document.getElementById('icSingleSelectWrap');
   const singleStats = document.getElementById('icSingleStats');
-  const singleOhlc = document.getElementById('icSingleOhlc');
   const layoutToggle = document.getElementById('icLayoutToggle');
   const rangeToggle = document.getElementById('icRangeToggle');
   const syncWrap = document.getElementById('icSyncCrosshairWrap');
@@ -310,7 +303,6 @@ function icUpdateControlVisibility() {
     singlePagination.style.display = '';
     if (singleSelect) singleSelect.style.display = '';
     if (singleStats) singleStats.style.display = '';
-    if (singleOhlc) singleOhlc.style.display = '';
     if (layoutToggle) layoutToggle.style.display = 'none';
     if (rangeToggle) rangeToggle.style.display = '';
   } else {
@@ -318,7 +310,6 @@ function icUpdateControlVisibility() {
     singlePagination.style.display = 'none';
     if (singleSelect) singleSelect.style.display = 'none';
     if (singleStats) singleStats.style.display = 'none';
-    if (singleOhlc) singleOhlc.style.display = 'none';
     const showGrid = icActiveTab === 'stocks';
     grid.style.display = showGrid ? '' : 'none';
     gridPagination.style.display = showGrid ? '' : 'none';
@@ -422,11 +413,10 @@ function icRenderPage() {
     cell.innerHTML =
       `<div class="ic-cell-header">` +
         `<div class="ic-cell-line1">` +
-          `<label class="ic-cell-select"><input type="checkbox" class="ic-select-cb" onchange="toggleStockSelection('${s.isin}')" ${isStockSelected(s.isin) ? 'checked' : ''}><span>${escapeHtml(s.symbol)}</span></label>` +
-          `<span class="ic-cell-ohlc" id="icOhlc${i}"></span>` +
+          `<label class="ic-cell-select"><input type="checkbox" class="ic-select-cb" onchange="toggleStockSelection('${s.isin}')" ${isStockSelected(s.isin) ? 'checked' : ''}></label>` +
+          (statsLine ? `<span class="ic-cell-line2 ic-cell-stats">${statsLine}</span>` : '') +
           `<span class="ic-cell-mcap">${fmtCr(s.marketCap || 0)}</span>` +
         `</div>` +
-        (statsLine ? `<div class="ic-cell-line2">${statsLine}</div>` : '') +
       `</div>` +
       `<div class="ic-cell-chart" id="icChart${i}"></div>`;
     grid.appendChild(cell);
@@ -442,7 +432,7 @@ function icRenderPage() {
     if (!container || days.length === 0) return;
 
     const { candleData, volumeData, closes } = icBuildBarsFromDays(days);
-    const inst = icCreateChart(container, 'icVolume' + i, document.getElementById('icOhlc' + i));
+    const inst = icCreateChart(container, 'icVolume' + i, icLegendStock(s));
     icChartInstances.push(inst);
     icWatchManualRange(inst, container);
     icSetChartData(inst, candleData, volumeData, closes, icVisibleCandles(), icRightOffset);
@@ -487,12 +477,41 @@ function icWireStockCrosshairSync() {
   });
 }
 
+// ── On-chart legend text (pure - see tests-js/chart-legend.test.js) ──────────────────────────
+// {symbol} for a Stock Scanner / grid stock record.
+function icLegendStock(s) {
+  return s ? { symbol: s.symbol || '' } : null;
+}
+
+// Identity part of the legend: the bold ticker, nothing else. '' without a stock.
+function icLegendTitle(stock) {
+  if (!stock || !stock.symbol) return '';
+  return `<span class="ic-legend-title"><b>${escapeHtml(stock.symbol)}</b></span>`;
+}
+
+// The whole legend for one bar: title, O H L C, change as `+0.62 (+2.32%)` (absolute and percent vs the
+// previous close, coloured by direction) and the day's money flow. `prevClose` null/0 (first bar) shows '-'.
+function icLegendHtml(stock, bar, prevClose, mfValue) {
+  const chg = prevClose ? bar.close - prevClose : NaN;
+  const pct = prevClose ? chg / prevClose * 100 : NaN;
+  const cls = isNaN(pct) ? '' : (pct >= 0 ? 'positive' : 'negative');
+  const change = isNaN(pct) ? '-' : `${chg >= 0 ? '+' : '-'}${Math.abs(chg).toFixed(2)} (${fmtPct(pct)})`;
+  return icLegendTitle(stock) +
+    `<span>O <b>${bar.open.toFixed(2)}</b></span>` +
+    `<span>H <b>${bar.high.toFixed(2)}</b></span>` +
+    `<span>L <b>${bar.low.toFixed(2)}</b></span>` +
+    `<span>C <b>${bar.close.toFixed(2)}</b></span>` +
+    `<span class="${cls}">${change}</span>` +
+    `<span>MF <b>${fmtTurnoverCr(mfValue || 0)}</b></span>`;
+}
+
 // ── Shared chart plumbing (used by both the per-stock grid and the industry chart) ──
-// `ohlcTarget`, when given, is a header element (next to the stock name) that the
-// crosshair legend renders plain text into — no background/pill, matching the
-// stock name's own styling. Without one (the Industry Chart tab, which has no
-// per-stock name line to attach to), it falls back to a small overlay on the chart.
-function icCreateChart(container, volumeScaleId, ohlcTarget) {
+// The crosshair legend is drawn ON the chart, top-left, TradingView style:
+//   SYMBOL  O 27.29  H 27.90  L 27.01  C 27.31  +0.62 (+2.32%)  MF 4.1 Cr
+// `stock` ({symbol}) adds the ticker in front - the chart cell / modal headers no longer carry it;
+// without one (the Industry Chart tab's equal-weight index, whose name is in the modal header) only the
+// figures are shown.
+function icCreateChart(container, volumeScaleId, stock) {
   // Grid cell containers are always freshly created, but the single-stock/
   // industry-index container is reused across renders — clear it first so the
   // legend/measure overlay elements from a previous chart don't pile up.
@@ -562,18 +581,13 @@ function icCreateChart(container, volumeScaleId, ohlcTarget) {
   // of every candle whose day matches the flagged combo (see icComputeMFDotMarkers).
   const markersPlugin = LightweightCharts.createSeriesMarkers(candleSeries, []);
 
-  // Needed for the fallback OHLC overlay below.
+  // The legend overlay is positioned against this container.
   container.style.position = container.style.position || 'relative';
 
-  // ── TradingView-style OHLC / change% / money-flow legend, driven by the crosshair ──
-  let legendEl;
-  if (ohlcTarget) {
-    legendEl = ohlcTarget; // plain text straight into the header — no background box
-  } else {
-    legendEl = document.createElement('div');
-    legendEl.className = 'ic-legend';
-    container.appendChild(legendEl);
-  }
+  // ── TradingView-style name / OHLC / change / money-flow legend, driven by the crosshair ──
+  const legendEl = document.createElement('div');
+  legendEl.className = 'ic-legend';
+  container.appendChild(legendEl);
 
   const inst = { chart, candleSeries, volumeSeries, volumeSmaSeries, volumeSmaMarkersPlugin, smaSeries, markersPlugin, closes: [], candleData: [], volumeData: [], legendEl };
 
@@ -584,15 +598,7 @@ function icCreateChart(container, volumeScaleId, ohlcTarget) {
     const bar = bars[i];
     const vol = inst.volumeData[i];
     const prevClose = i > 0 ? bars[i - 1].close : null;
-    const chg = prevClose ? (bar.close - prevClose) / prevClose * 100 : NaN;
-    const chgCls = isNaN(chg) ? '' : (chg >= 0 ? 'positive' : 'negative');
-    legendEl.innerHTML =
-      `<span>O <b>${bar.open.toFixed(2)}</b></span>` +
-      `<span>H <b>${bar.high.toFixed(2)}</b></span>` +
-      `<span>L <b>${bar.low.toFixed(2)}</b></span>` +
-      `<span>C <b>${bar.close.toFixed(2)}</b></span>` +
-      `<span class="${chgCls}">${fmtPct(chg)}</span>` +
-      `<span>MF <b>${fmtTurnoverCr(vol ? vol.value : 0)}</b></span>`;
+    legendEl.innerHTML = icLegendHtml(stock, bar, prevClose, vol ? vol.value : 0);
   };
 
   chart.subscribeCrosshairMove(param => {
@@ -1162,6 +1168,53 @@ document.getElementById('icSMA10').addEventListener('change', icUpdateAllSMA);
 document.getElementById('icSMA20').addEventListener('change', icUpdateAllSMA);
 document.getElementById('icSMA50').addEventListener('change', icUpdateAllSMA);
 
+// ── "Indicators" dropdown: the 10 / 20 / 50 SMA and Purple Dots checkboxes live in a menu behind one header button,
+// so the header stays short. The checkboxes keep their ids (icSMA10/20/50, icShowMFDots), so everything that reads them is unchanged; this
+// only opens / closes the menu and shows how many are ticked. Closes on a click anywhere else, on Escape
+// (before Escape closes the popup) and when the popup closes.
+const IC_INDICATOR_IDS = ['icSMA10', 'icSMA20', 'icSMA50', 'icShowMFDots'];
+
+function icIndicatorsOpen() {
+  const menu = document.getElementById('icIndicatorsMenu');
+  return !!menu && menu.style.display !== 'none';
+}
+
+function icSetIndicatorsOpen(open) {
+  const menu = document.getElementById('icIndicatorsMenu');
+  const btn = document.getElementById('icIndicatorsBtn');
+  if (menu) menu.style.display = open ? '' : 'none';
+  if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+function icToggleIndicators(e) {
+  if (e && e.stopPropagation) e.stopPropagation();   // the document-level "click elsewhere closes it" must not see this click
+  icSetIndicatorsOpen(!icIndicatorsOpen());
+}
+
+// Number of indicators ticked, shown as a badge on the button.
+function icUpdateIndicatorsCount() {
+  const n = IC_INDICATOR_IDS.filter(id => document.getElementById(id).checked).length;
+  const el = document.getElementById('icIndicatorsCount');
+  if (el) el.textContent = n ? String(n) : '';
+}
+
+// Escape closes the open menu first; returns true when it did (the caller then does not close the popup).
+function icDismissIndicatorsMenu() {
+  if (!icIndicatorsOpen()) return false;
+  icSetIndicatorsOpen(false);
+  return true;
+}
+
+function icOnDocumentClickIndicators(e) {
+  if (!icIndicatorsOpen()) return;
+  const inside = e && e.target && e.target.closest && e.target.closest('#icIndicatorsDd');
+  if (!inside) icSetIndicatorsOpen(false);
+}
+
+IC_INDICATOR_IDS.forEach(id => document.getElementById(id).addEventListener('change', icUpdateIndicatorsCount));
+document.addEventListener('click', icOnDocumentClickIndicators);
+icUpdateIndicatorsCount();
+
 // ── MF Dots toggle: purple circle below the low of every candle whose day had
 // Money Flow (turnover) >= IC_MF_DOT_MIN_CR crores AND |day change%| >= IC_MF_DOT_MIN_CHG
 // (big moves either direction), on both up and down days (position is anchored
@@ -1264,6 +1317,7 @@ function icHandleSelectKey(e) {
 document.addEventListener('keydown', e => {
   if (!document.getElementById('industryChartsModal').classList.contains('active')) return;
   if (e.key === 'Escape') {
+    if (icDismissIndicatorsMenu()) { e.preventDefault(); return; } // an open Indicators menu closes first
     if (icToolsBusy()) return; // chart-tools.js cancels the armed tool / deselects the drawing instead
     e.preventDefault(); closeIndustryCharts(); return;
   }
