@@ -604,15 +604,19 @@
         <div class="ic-title-line1">
           <label id="icSingleSelectWrap" class="ic-cell-select" style="display:none;"><input type="checkbox" id="icSingleSelectCb"></label>
           <h3 id="icTitle">Industry Charts</h3>
-          <span id="icSingleOhlc" class="ic-cell-ohlc" style="display:none;"></span>
+          <span id="icSingleStats" class="ic-cell-line2" style="display:none;min-width:0;"></span>
         </div>
-        <div id="icSingleStats" class="ic-cell-line2" style="display:none;"></div>
       </div>
       <div class="ic-header-controls">
-        <label><input type="checkbox" id="icSMA10"> 10 SMA</label>
-        <label><input type="checkbox" id="icSMA20" checked> 20 SMA</label>
-        <label><input type="checkbox" id="icSMA50"> 50 SMA</label>
-        <label title="Purple dot below the candle's low on any day with Money Flow >= 40 Cr and |change%| >= 5% (up or down)"><input type="checkbox" id="icShowMFDots" checked> Purple Dots</label>
+        <div class="ic-dropdown" id="icIndicatorsDd">
+          <button type="button" class="btn btn-secondary ic-dd-btn" id="icIndicatorsBtn" onclick="icToggleIndicators(event)" aria-haspopup="true" aria-expanded="false" title="Choose which indicators are drawn on the charts">Indicators <span class="ic-dd-count" id="icIndicatorsCount"></span> &#9662;</button>
+          <div class="ic-dd-menu" id="icIndicatorsMenu" style="display:none;">
+            <label><input type="checkbox" id="icSMA10"> 10 SMA</label>
+            <label><input type="checkbox" id="icSMA20" checked> 20 SMA</label>
+            <label><input type="checkbox" id="icSMA50"> 50 SMA</label>
+            <label title="Purple dot below the candle's low on any day with Money Flow >= 40 Cr and |change%| >= 5% (up or down)"><input type="checkbox" id="icShowMFDots" checked> Purple Dots</label>
+          </div>
+        </div>
         <label><input type="checkbox" id="icPctMode"> % Change</label>
         <label><input type="checkbox" id="icShowADR" checked> 50D ADR</label>
         <label><input type="checkbox" id="icShowAvgMF" checked> 50D Avg MF</label>
@@ -637,14 +641,14 @@
           <button class="btn btn-secondary ic-layout-btn" data-layout="1x1" onclick="icSetLayout('1x1')" title="Single chart">1×1</button>
         </div>
         <div class="ic-pagination" id="icPaginationWrap">
-          <button class="btn btn-secondary" id="icPrevBtn" onclick="icPrevPage()">&lt; Prev</button>
+          <button class="btn btn-secondary ic-nav-btn" id="icPrevBtn" onclick="icPrevPage()" title="Previous page (Up arrow)" aria-label="Previous page">&lt;</button>
           <span id="icPageInfo"></span>
-          <button class="btn btn-secondary" id="icNextBtn" onclick="icNextPage()">Next &gt;</button>
+          <button class="btn btn-secondary ic-nav-btn" id="icNextBtn" onclick="icNextPage()" title="Next page (Down arrow)" aria-label="Next page">&gt;</button>
         </div>
         <div class="ic-pagination" id="icSinglePaginationWrap" style="display:none;">
-          <button class="btn btn-secondary" id="icSinglePrevBtn" onclick="icPrevStock()">&lt; Prev</button>
+          <button class="btn btn-secondary ic-nav-btn" id="icSinglePrevBtn" onclick="icPrevStock()" title="Previous stock (Up arrow)" aria-label="Previous stock">&lt;</button>
           <span id="icSinglePageInfo"></span>
-          <button class="btn btn-secondary" id="icSingleNextBtn" onclick="icNextStock()">Next &gt;</button>
+          <button class="btn btn-secondary ic-nav-btn" id="icSingleNextBtn" onclick="icNextStock()" title="Next stock (Down arrow)" aria-label="Next stock">&gt;</button>
         </div>
       </div>
       <button class="modal-close-btn" onclick="closeIndustryCharts()" title="Close">&times;</button>

@@ -646,6 +646,22 @@ canvas { max-width: 100%; display: block; }
 .ic-pagination { display: flex; align-items: center; gap: 10px; }
 .ic-pagination span { color: var(--text2); font-size: 13px; white-space: nowrap; }
 .ic-pagination .btn { padding: 5px 12px; font-size: 12px; }
+.ic-pagination .ic-nav-btn { min-width: 34px; padding: 5px 0; font-size: 14px; font-weight: 600; line-height: 1; }
+
+/* "Indicators" dropdown in the chart popup header: a button that opens a small checklist (10 / 20 / 50 SMA). */
+.ic-dropdown { position: relative; }
+.ic-dd-btn { padding: 5px 10px; font-size: 12px; white-space: nowrap; }
+.ic-dd-count { display: inline-block; min-width: 16px; padding: 0 5px; margin: 0 2px; border-radius: 8px;
+  background: var(--accent); color: #fff; font-size: 11px; line-height: 16px; text-align: center; }
+.ic-dd-count:empty { display: none; }
+.ic-dd-menu {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 40; min-width: 170px;
+  display: flex; flex-direction: column; gap: 2px; padding: 6px;
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.ic-header-controls .ic-dd-menu label { padding: 6px 8px; border-radius: 6px; }
+.ic-header-controls .ic-dd-menu label:hover { background: rgba(59, 130, 246, 0.15); color: var(--text); }
 .ic-tabbar { display: flex; gap: 6px; padding: 10px 16px 0; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .ic-tab {
   background: none; border: none; color: var(--text2); font-size: 13px; font-weight: 600;
@@ -677,7 +693,7 @@ canvas { max-width: 100%; display: block; }
 .ic-grid-dense { gap: 6px; }
 .ic-grid-dense .ic-cell-header { padding: 4px 8px; font-size: 12px; }
 .ic-grid-dense .ic-cell-line1 { flex-wrap: nowrap; gap: 8px; }
-.ic-grid-dense .ic-cell-ohlc { font-size: 10px; gap: 6px; flex: 1 1 0; }
+.ic-grid-dense .ic-legend { font-size: 10px; gap: 2px 6px; top: 4px; left: 6px; }
 .ic-grid-dense .ic-cell-line2 { font-size: 9px; }
 .ic-cell {
   display: flex; flex-direction: column;
@@ -697,24 +713,26 @@ canvas { max-width: 100%; display: block; }
 .ic-cell-chart { flex: 1; min-height: 0; position: relative; }
 .ic-cell-select { display: flex; align-items: center; gap: 6px; cursor: pointer; min-width: 0; flex-shrink: 0; }
 
-/* OHLC / change% / money-flow — plain text, no background, same line as the
-   stock name (rendered here by the chart's crosshair legend; see icCreateChart) */
-.ic-cell-ohlc { display: flex; gap: 8px; font-size: 11px; font-weight: 400; color: var(--text2); white-space: nowrap; overflow: hidden; min-width: 0; }
-.ic-cell-ohlc b { color: var(--text); font-weight: 600; }
-
 /* 50D ADR / 50D Avg Money Flow — plain text line below the stock name */
 .ic-cell-line2 { font-size: 10px; font-weight: 400; color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* ADR / Avg MF sit on the checkbox line of a grid cell (between the checkbox and the market cap), not on a second line */
+.ic-cell-stats { flex: 0 1 auto; min-width: 0; }
 
-/* Fallback OHLC overlay for charts with no header name line to attach to
-   (the Industry Chart tab's equal-weight index) */
+/* On-chart legend (top-left of every candlestick chart, TradingView style): ticker, company name,
+   O H L C, change, money flow - drawn by the chart's crosshair handler, see icCreateChart. Wraps onto
+   further lines in narrow grid cells rather than running under the price scale. */
 .ic-legend {
   position: absolute; top: 6px; left: 8px; z-index: 5;
-  display: flex; gap: 8px; flex-wrap: wrap;
+  display: flex; gap: 2px 8px; flex-wrap: wrap; align-items: baseline;
+  max-width: calc(100% - 76px);
   font-size: 11px; color: var(--text2);
   background: rgba(15, 23, 42, 0.55); padding: 3px 8px; border-radius: 4px;
-  pointer-events: none; white-space: nowrap;
+  pointer-events: none;
 }
+.ic-legend > span { white-space: nowrap; }
 .ic-legend b { color: var(--text); font-weight: 600; }
+.ic-legend .ic-legend-title { color: var(--text2); max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.ic-legend .ic-legend-title b { font-size: 1.1em; color: var(--text); }
 
 .ic-layout-toggle { display: flex; gap: 4px; }
 .ic-layout-btn { padding: 5px 10px; font-size: 12px; }
