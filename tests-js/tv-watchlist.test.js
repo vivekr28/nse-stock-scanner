@@ -47,6 +47,32 @@ test('industry names without a comma are unchanged', () => {
   assert.equal(dom.el('tvModalContent').textContent, '###Undefined-Diversified(1),NSE:AAA');
 });
 
+test('"flat" mode: every passed stock once, no headers', () => {
+  const dom = installFakeDom(sb, {});
+  setPassed([stock('AAA', 'Banks'), stock('BBB', 'Gems, Jewellery And Watches'), stock('CCC', 'Banks')]);
+  sb.exportTradingViewWatchlist('flat');
+  assert.equal(dom.el('tvModalContent').textContent, 'NSE:AAA,NSE:BBB,NSE:CCC');
+  assert.equal(dom.el('tvModalFooter').textContent, '3 stocks');
+});
+
+test('"sector" mode: grouped by sector, biggest group first, commas in names removed', () => {
+  const dom = installFakeDom(sb, {});
+  const withSector = (symbol, sector) => ({ symbol, isin: symbol, industry: 'Banks', sector });
+  setPassed([withSector('AAA', 'Financial Services'), withSector('BBB', 'Oil, Gas & Consumable Fuels'), withSector('CCC', 'Financial Services'), withSector('DDD', undefined)]);
+  sb.exportTradingViewWatchlist('sector');
+  const text = dom.el('tvModalContent').textContent;
+  assert.equal(text, '###Financial Services(2),NSE:AAA,NSE:CCC,###Oil Gas & Consumable Fuels(1),NSE:BBB,###Undefined-Diversified(1),NSE:DDD');
+  assert.equal(dom.el('tvModalFooter').textContent, '4 stocks across 3 sectors');
+});
+
+test('no mode (and "industry") still groups by industry', () => {
+  const dom = installFakeDom(sb, {});
+  setPassed([stock('AAA', 'Banks')]);
+  sb.exportTradingViewWatchlist();
+  assert.equal(dom.el('tvModalContent').textContent, '###Banks(1),NSE:AAA');
+  assert.equal(dom.el('tvModalFooter').textContent, '1 stocks across 1 industries');
+});
+
 // Every industry name in the project's real sector mapping (the git-tracked copy in reference-data/, so it runs in CI too)
 // exports cleanly - guards against a future name with a comma, or any other separator TradingView would split on.
 const fs = require('node:fs');
