@@ -154,7 +154,14 @@
     <button class="btn btn-primary" onclick="runScreener()">Scan</button>
     <button class="btn btn-secondary" onclick="clearScreenerSearch()" title="Clear the symbol search">Reset</button>
     <button class="btn btn-secondary export-btn" onclick="exportScreenerCSV()">Export CSV</button>
-    <button class="btn btn-secondary export-btn" onclick="exportTradingViewWatchlist()" title="Copy TradingView watchlist to clipboard">TV Watchlist</button>
+    <div class="ic-dropdown export-btn" id="tvWatchlistDd">
+      <button type="button" class="btn btn-secondary" id="tvWatchlistBtn" onclick="toggleTvWatchlistMenu(event)" aria-haspopup="true" aria-expanded="false" title="Copy the stocks passing the current scan (the filtered results) as a TradingView watchlist">TV Watchlist &#9662;</button>
+      <div class="ic-dd-menu" id="tvWatchlistMenu" style="display:none;">
+        <button type="button" class="ic-dd-item" onclick="exportTradingViewWatchlist('industry')">Grouped by industry</button>
+        <button type="button" class="ic-dd-item" onclick="exportTradingViewWatchlist('sector')">Grouped by sector</button>
+        <button type="button" class="ic-dd-item" onclick="exportTradingViewWatchlist('flat')">No grouping (flat list)</button>
+      </div>
+    </div>
     <button class="btn btn-secondary scr-toggle-btn showing-passed" id="scrToggleView" onclick="togglePassedFailed()">Showing Passed — Click for Failed</button>
     <span style="width:1px;align-self:stretch;background:var(--border);"></span>
     <button class="btn btn-secondary export-btn sel-action-btn" onclick="copySelectedStocksWatchlist()" title="Copy stocks picked in chart popups, grouped by industry" disabled>Copy Selected</button>

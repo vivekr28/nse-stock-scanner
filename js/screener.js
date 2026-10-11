@@ -982,31 +982,61 @@ function exportScreenerCSV() {
 
 let _tvWatchlistText = '';
 
-function exportTradingViewWatchlist() {
+// "TV Watchlist" dropdown on the Stock Scanner toolbar: open / close the menu. Closes on a click elsewhere, on Escape,
+// and when an option is picked (exportTradingViewWatchlist closes it).
+function setTvWatchlistMenuOpen(open) {
+  const menu = document.getElementById('tvWatchlistMenu');
+  const btn = document.getElementById('tvWatchlistBtn');
+  if (menu) menu.style.display = open ? '' : 'none';
+  if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+function toggleTvWatchlistMenu(e) {
+  if (e && e.stopPropagation) e.stopPropagation();   // the document-level "click elsewhere closes it" must not see this click
+  const menu = document.getElementById('tvWatchlistMenu');
+  setTvWatchlistMenuOpen(!!menu && menu.style.display === 'none');
+}
+
+document.addEventListener('click', e => {
+  const inside = e && e.target && e.target.closest && e.target.closest('#tvWatchlistDd');
+  if (!inside) setTvWatchlistMenuOpen(false);
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') setTvWatchlistMenuOpen(false); });
+
+// mode: 'industry' (grouped by industry, the default), 'sector' (grouped by sector) or 'flat' (one list, no headers).
+function exportTradingViewWatchlist(mode) {
+  setTvWatchlistMenuOpen(false);
   if (screenerPassed.length === 0) { alert('No passed stocks to export. Run a scan first.'); return; }
   const passed = screenerPassed;
-  // Group by industry
-  const byIndustry = {};
-  passed.forEach(s => {
-    const ind = s.industry || 'Undefined-Diversified';
-    if (!byIndustry[ind]) byIndustry[ind] = [];
-    byIndustry[ind].push(s.symbol);
-  });
-  // Build TradingView watchlist string
-  const parts = [];
-  let industryCount = 0;
-  Object.keys(byIndustry).sort((a, b) => byIndustry[b].length - byIndustry[a].length).forEach(ind => {
-    const syms = byIndustry[ind];
-    // TradingView splits the pasted text on commas, so a comma inside an industry name ("Gems, Jewellery And Watches")
-    // would break the header in two and leave the second half as a red, invalid "symbol"
-    parts.push('###' + ind.replace(/\s*,\s*/g, ' ') + '(' + syms.length + ')');
-    syms.forEach(sym => parts.push('NSE:' + sym));
-    industryCount++;
-  });
-  _tvWatchlistText = parts.join(',');
+  let footer;
+  if (mode === 'flat') {
+    _tvWatchlistText = passed.map(s => 'NSE:' + s.symbol).join(',');
+    footer = `${passed.length} stocks`;
+  } else {
+    const field = mode === 'sector' ? 'sector' : 'industry';
+    const bucket = {};
+    passed.forEach(s => {
+      const key = s[field] || 'Undefined-Diversified';
+      if (!bucket[key]) bucket[key] = [];
+      bucket[key].push(s.symbol);
+    });
+    // Build TradingView watchlist string
+    const parts = [];
+    let groupCount = 0;
+    Object.keys(bucket).sort((a, b) => bucket[b].length - bucket[a].length).forEach(name => {
+      const syms = bucket[name];
+      // TradingView splits the pasted text on commas, so a comma inside a group name ("Gems, Jewellery And Watches")
+      // would break the header in two and leave the second half as a red, invalid "symbol"
+      parts.push('###' + name.replace(/\s*,\s*/g, ' ') + '(' + syms.length + ')');
+      syms.forEach(sym => parts.push('NSE:' + sym));
+      groupCount++;
+    });
+    _tvWatchlistText = parts.join(',');
+    footer = `${passed.length} stocks across ${groupCount} ${mode === 'sector' ? 'sectors' : 'industries'}`;
+  }
   // Show modal
   document.getElementById('tvModalContent').textContent = _tvWatchlistText;
-  document.getElementById('tvModalFooter').textContent = `${passed.length} stocks across ${industryCount} industries`;
+  document.getElementById('tvModalFooter').textContent = footer;
   document.getElementById('tvCopyBtn').classList.remove('copied');
   document.getElementById('tvCopyBtn').innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg> Copy';
   document.getElementById('tvModal').classList.add('active');

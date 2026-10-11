@@ -660,6 +660,11 @@ canvas { max-width: 100%; display: block; }
   background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
+.ic-dd-item {
+  background: none; border: none; color: var(--text2); font-size: 13px; text-align: left; white-space: nowrap;
+  padding: 6px 8px; border-radius: 6px; cursor: pointer;
+}
+.ic-dd-item:hover { background: rgba(59, 130, 246, 0.15); color: var(--text); }
 .ic-header-controls .ic-dd-menu label { padding: 6px 8px; border-radius: 6px; }
 .ic-header-controls .ic-dd-menu label:hover { background: rgba(59, 130, 246, 0.15); color: var(--text); }
 .ic-tabbar { display: flex; gap: 6px; padding: 10px 16px 0; border-bottom: 1px solid var(--border); flex-shrink: 0; }
