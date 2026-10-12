@@ -36,9 +36,24 @@ test('breadth tools: the % Above 20 / 50 SMA tabs draw on the line series, in pe
   assert.equal(run('brdTools.entries[0].unit'), 'pp');
 });
 
+// No shipped tab is a candle metric any more (the move tabs are lines), but the candle path stays for any
+// BRD_METRICS entry without `line: true`, so these tests register one of their own.
+run("BRD_METRICS.candleTest = { label: 'candle test', prefix: 'candleTest', countKey: 'candleTestCloseCount' }");
+
+test('breadth tools: the 4% / 10% / 20% move tabs draw on the line series, in percentage points', () => {
+  for (const tab of ['move4d', 'move10w', 'move20m']) {
+    setupChart();
+    showTab(tab);
+    assert.equal(run('BRD_METRICS[brdActiveMetricKey()].line'), true, tab);
+    run('brdRefreshTools()');
+    assert.equal(run('_brdToolsSeries === __line'), true, tab);
+    assert.equal(run('brdTools.entries[0].unit'), 'pp', tab);
+  }
+});
+
 test('breadth tools: a candle metric draws on the candle series', () => {
   setupChart();
-  showTab('move4d');
+  showTab('candleTest');
   run('brdRefreshTools()');
   assert.equal(run('_brdToolsSeries === __candle'), true);
 });
@@ -81,7 +96,7 @@ test('breadth tools: the old series loses its drawing layer when the metric chan
   showTab('above20');
   run('brdRefreshTools()');
   assert.ok(sb.__line.primitive);
-  showTab('move4d');
+  showTab('candleTest');
   run('brdRefreshTools()');
   assert.equal(sb.__line.primitive, null);
   assert.ok(sb.__candle.primitive);

@@ -1,7 +1,8 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// BREADTH — stat cards + a shared TradingView candlestick chart, tabbed across
+// BREADTH — stat cards + a shared TradingView chart, tabbed across
 // 5 breadth metrics (% above 20/50 SMA - one tab with a checkbox per SMA, % with a big day/week/month move).
-// Each candle's O/H/L/C is a REAL, independently-computed breadth percentage,
+// Every tab currently plots the close % as a line (BRD_METRICS `line: true`); the candle path is kept for
+// any metric without that flag. Each bar's O/H/L/C is a REAL, independently-computed breadth percentage,
 // not a synthetic yesterday-vs-today body: for every stock, its own Open/High/
 // Low/Close is tested against a reference (the stock's own SMA for the two SMA
 // tabs; its close N trading days ago for the three move tabs), and each of the
@@ -24,9 +25,9 @@ const BRD_MONTH_MOVE_PCT = 20; // 21-trading-day change% threshold, either direc
 const BRD_METRICS = {
   above20: { label: '% Stocks Above 20 SMA', prefix: 'above20', line: true, countKey: 'above20CloseCount' },
   above50: { label: '% Stocks Above 50 SMA', prefix: 'above50', line: true, countKey: 'above50CloseCount' },
-  move4d: { label: `% Stocks with ${BRD_DAY_MOVE_PCT}%+ Move (Day)`, prefix: 'move4d', countKey: 'move4dCloseCount' },
-  move10w: { label: `% Stocks with ${BRD_WEEK_MOVE_PCT}%+ Move (Week)`, prefix: 'move10w', countKey: 'move10wCloseCount' },
-  move20m: { label: `% Stocks with ${BRD_MONTH_MOVE_PCT}%+ Move (Month)`, prefix: 'move20m', countKey: 'move20mCloseCount' },
+  move4d: { label: `% Stocks with ${BRD_DAY_MOVE_PCT}%+ Move (Day)`, prefix: 'move4d', line: true, countKey: 'move4dCloseCount' },
+  move10w: { label: `% Stocks with ${BRD_WEEK_MOVE_PCT}%+ Move (Week)`, prefix: 'move10w', line: true, countKey: 'move10wCloseCount' },
+  move20m: { label: `% Stocks with ${BRD_MONTH_MOVE_PCT}%+ Move (Month)`, prefix: 'move20m', line: true, countKey: 'move20mCloseCount' },
   // Sub-metrics of the "Stocks Making New Highs" tab - picked by its dropdown, not by a tab button.
   high1m: { label: '% Stocks Making 1M High', prefix: 'high1m', line: true, countKey: 'high1mCloseCount' },
   high3m: { label: '% Stocks Making 3M High', prefix: 'high3m', line: true, countKey: 'high3mCloseCount' },
@@ -321,7 +322,7 @@ function brdEnsureChart() {
   });
   brdCandleSeries.priceScale().applyOptions({ scaleMargins: { top: 0.1, bottom: 0.1 } });
 
-  // Plain line (close %) for the two SMA tabs; candles for the move tabs.
+  // Plain line (close %) for every metric flagged `line: true`; candles (O/H/L/C) for any that is not.
   brdLineSeries = brdChart.addSeries(LightweightCharts.LineSeries, {
     color: BRD_UP_COLOR, lineWidth: 2,
     priceFormat: { type: 'custom', formatter: v => v.toFixed(1) + '%' },
