@@ -99,6 +99,77 @@ function computeIndustryMoneyFlowRocMap(period, lag) {
   return roc;
 }
 
+// ── IPOs listed per industry (Sort By -> IPOs Listed) ──
+// A stock counts when its NSE listing date (EQUITY_L.csv via Store.latestBySymbol[].listingDate) falls after the
+// same date N calendar months before the latest data date, up to and including it. That is "new NSE listings":
+// IPOs plus any demerger / SME-migration listings. A listing date shared by IPO_BULK_DAY_MIN or more stocks is a
+// bulk admission of already-listed companies to NSE (live data: 102 on one day in Apr-2026 and 136 in Aug-2026,
+// vs. at most 6 on any ordinary day), not a run of IPOs, so those days are left out - EXCEPT stocks whose
+// listing-day turnover was IPO-scale (>= IPO_BULK_KEEP_TURNOVER_CR): a genuine IPO can list on the same day
+// (MOLBIO and DHOOTTRANS did, trading Rs 1,586 Cr and Rs 3,586 Cr on day one, while the other 234 bulk-admitted
+// companies never passed Rs 29 Cr).
+const IPO_PERIOD_MONTHS = { '1m': 1, '3m': 3, '6m': 6, '1y': 12 };
+const IPO_PERIOD_LABELS = { '1m': 'Last 1 Month', '3m': 'Last 3 Months', '6m': 'Last 6 Months', '1y': 'Last 1 Year' };
+const IPO_PERIOD_SHORT = { '1m': '1M', '3m': '3M', '6m': '6M', '1y': '1Y' };
+const IPO_BULK_DAY_MIN = 20;
+const IPO_BULK_KEEP_TURNOVER_CR = 100;
+
+// Turnover (Rs Cr; the data is in lakhs) on a stock's listing day, 0 when that bar isn't there. The listing day
+// is the stock's first bar, so only the first few are looked at.
+function listingDayTurnoverCr(key, listingDate) {
+  const days = (Store.dailyBySymbol || {})[key];
+  if (!days) return 0;
+  for (let i = 0; i < days.length && i < 5; i++) {
+    if (listingDateToIso(days[i].date) === listingDate) return (days[i].turnover || 0) / 100;
+  }
+  return 0;
+}
+
+// 'YYYY-MM-DD' minus whole calendar months, clamping the day (31-Mar minus 1 month = 28/29-Feb). '' when unreadable.
+function isoMinusMonths(iso, months) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || '');
+  if (!m) return '';
+  const total = parseInt(m[1], 10) * 12 + (parseInt(m[2], 10) - 1) - months;
+  const y = Math.floor(total / 12), mo = total % 12;
+  const daysInMonth = new Date(Date.UTC(y, mo + 1, 0)).getUTCDate();
+  return `${y}-${String(mo + 1).padStart(2, '0')}-${String(Math.min(parseInt(m[3], 10), daysInMonth)).padStart(2, '0')}`;
+}
+
+// { from, to, bulkDays, counts(stock, key) } for a period key; a listing counts when from < date <= to and either
+// its day is not a bulk day or the stock traded like an IPO that day. bulkDays = the bulk days inside the window,
+// [{date, count, kept: [symbols counted anyway]}]. `to` is '' when there is no data yet.
+function ipoWindow(period) {
+  const dates = Store.dates || [];
+  const to = dates.length ? listingDateToIso(dates[dates.length - 1]) : '';
+  const from = to ? isoMinusMonths(to, IPO_PERIOD_MONTHS[period] || 3) : '';
+  const perDay = {};
+  for (const key in Store.latestBySymbol) {
+    const d = Store.latestBySymbol[key].listingDate;
+    if (d) perDay[d] = (perDay[d] || 0) + 1;
+  }
+  const bulkSet = new Set(Object.keys(perDay).filter(d => perDay[d] >= IPO_BULK_DAY_MIN));
+  const keptAnyway = (s, key) => listingDayTurnoverCr(key, s.listingDate) >= IPO_BULK_KEEP_TURNOVER_CR;
+  const counts = (s, key) => {
+    if (!(to && s.listingDate && s.listingDate > from && s.listingDate <= to)) return false;
+    return !bulkSet.has(s.listingDate) || keptAnyway(s, key);
+  };
+  const bulkDays = [...bulkSet].filter(d => d > from && d <= to).sort().map(date => {
+    const kept = [];
+    for (const key in Store.latestBySymbol) {
+      const s = Store.latestBySymbol[key];
+      if (s.listingDate === date && keptAnyway(s, key)) kept.push(s.symbol);
+    }
+    return { date, count: perDay[date], kept: kept.sort() };
+  });
+  return { from, to, bulkDays, counts };
+}
+
+const IND_MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function isoToDmy(iso) { // '2026-04-20' -> '20-Apr-2026'
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || '');
+  return m ? `${m[3]}-${IND_MONTH_NAMES[parseInt(m[2], 10) - 1]}-${m[1]}` : (iso || '');
+}
+
 // ── Store chart bar regions for hover/click ──
 let _chartBars = [];   // [{x, y, w, h, ind}]
 let _chartData = [];   // full indList reference for popup
@@ -111,6 +182,11 @@ function renderIndustryAnalysis() {
   const isRoc = sortBy === 'money_flow_roc';
   const mfRocPeriod = document.getElementById('mfRocPeriod').value;
   const effectivePeriod = isRoc ? mfRocPeriod : mfPeriod;
+  const isIpo = sortBy === 'ipo';
+  const ipoPeriod = ((document.getElementById('ipoPeriod') || {}).value) || '3m';
+  const ipoWin = ipoWindow(ipoPeriod);
+  const ipoGroup = document.getElementById('ipoPeriodGroup');
+  if (ipoGroup) ipoGroup.style.display = isIpo ? '' : 'none';
   mfRocSyncLagSelect('mfRocPeriod', 'mfRocLag');
   const mfRocLag = mfRocResolveLag(mfRocPeriod, document.getElementById('mfRocLag').value);
 
@@ -157,9 +233,11 @@ function renderIndustryAnalysis() {
       totalDistFrom52H: 0, totalDistFromSMA: 0,
       moneyFlowCurrent: 0, moneyFlowPrev: 0,
       moneyFlowPastCurrent: 0, moneyFlowPastPrev: 0,
+      ipoStocks: [],
       sector: s.sector || '-'
     };
     industries[ind].stocks.push(s);
+    if (ipoWin.counts(s, key)) industries[ind].ipoStocks.push(s);
     industries[ind].totalTurnover += (s.turnover || 0);
     industries[ind].totalMonthlyChange += (s.monthlyChangePct || 0);
     industries[ind].totalMcap += (s.marketCap || 0);
@@ -209,6 +287,11 @@ function renderIndustryAnalysis() {
       moneyFlowChg,
       moneyFlowChgPast,
       moneyFlowRoc,
+      ipoCount: data.ipoStocks.length,
+      // newest listing first, symbols only - for the chart tooltip and the table
+      ipoSymbols: [...data.ipoStocks]
+        .sort((a, b) => b.listingDate.localeCompare(a.listingDate) || a.symbol.localeCompare(b.symbol))
+        .map(x => x.symbol),
       topGainer: data.stocks.sort((a, b) => b.monthlyChangePct - a.monthlyChangePct)[0],
       topLoser: data.stocks.sort((a, b) => a.monthlyChangePct - b.monthlyChangePct)[0],
       stocks: data.stocks
@@ -233,6 +316,8 @@ function renderIndustryAnalysis() {
     case 'stocks': indList.sort((a, b) => b.stockCount - a.stockCount); break;
     case 'money_flow': indList.sort((a, b) => b.moneyFlowChg - a.moneyFlowChg); break;
     case 'money_flow_roc': indList.sort((a, b) => b.moneyFlowRoc - a.moneyFlowRoc); break;
+    // ties (most industries have 0-2) go to the stronger industry
+    case 'ipo': indList.sort((a, b) => (b.ipoCount - a.ipoCount) || (b.rsScore - a.rsScore)); break;
   }
 
   // Save for popup lookups
@@ -253,13 +338,17 @@ function renderIndustryAnalysis() {
   // ── Horizontal Bar Chart (replaced by the all-periods table when that's shown) ──
   const rsChartSection = document.getElementById('rsChartSection');
   if (rsChartSection) rsChartSection.style.display = allPeriodsOn ? 'none' : '';
-  if (!allPeriodsOn) renderMetricChart(indList.slice(0, 40), sortBy, effectivePeriod, mfData, mfRocLag);
+  // The IPO chart only lists industries that had at least one listing; the table and heatmap still show the rest.
+  const ipoInfo = isIpo ? { period: ipoPeriod, from: ipoWin.from, to: ipoWin.to, bulkDays: ipoWin.bulkDays } : null;
+  const chartList = isIpo ? indList.filter(i => i.ipoCount > 0) : indList;
+  if (!allPeriodsOn) renderMetricChart(chartList.slice(0, 40), sortBy, effectivePeriod, mfData, mfRocLag, ipoInfo);
 
   // ── Industry Table (all filtered industries; manual header sort layered on the filter order) ──
   // A manual column sort only lasts until the Sort By metric / MF period changes, so picking a
   // new Sort By always brings the table back in step with the chart.
   const sortTrack = sortBy === 'money_flow_roc' ? sortBy + '|' + effectivePeriod + '|' + mfRocLag
-    : sortBy === 'money_flow' ? sortBy + '|' + effectivePeriod : sortBy;
+    : sortBy === 'money_flow' ? sortBy + '|' + effectivePeriod
+    : isIpo ? sortBy + '|' + ipoPeriod : sortBy;
   if (sortTrack !== _indSortTrack) {
     _indSortTrack = sortTrack;
     indSortCol = null;
@@ -271,7 +360,8 @@ function renderIndustryAnalysis() {
     sortLabel: document.getElementById('industrySort').selectedOptions[0].textContent,
     mfLabel: periodLabels[effectivePeriod] || '6M',
     isRoc,
-    rocPeriodLabel: periodLabels[mfRocLag] || '3M'
+    rocPeriodLabel: periodLabels[mfRocLag] || '3M',
+    ipoLabel: isIpo ? (IPO_PERIOD_SHORT[ipoPeriod] || '3M') : null
   };
   renderIndustryBreakdownTable();
 
@@ -301,6 +391,7 @@ function renderIndustryAnalysis() {
           <tr><td style="color:var(--text2)">Breadth</td><td style="text-align:right">${ind.breadth.toFixed(0)}%</td></tr>
           <tr><td style="color:var(--text2)">MF Chg</td><td style="text-align:right;color:${mfChgColor2}">${mfSign}${ind.moneyFlowChg.toFixed(1)}%</td></tr>
           ${rocRow}
+          ${isIpo ? `<tr><td style="color:var(--text2)">IPOs ${IPO_PERIOD_SHORT[ipoPeriod] || ''}</td><td style="text-align:right;font-weight:600">${ind.ipoCount}</td></tr>` : ''}
         </table>
       </div>
     `;
@@ -322,7 +413,7 @@ let _indBreakdown = { list: [], sortBy: 'rs_score', sortLabel: '', mfLabel: '6M'
 const IND_ASC_COLS = new Set(['name', 'sector', 'avgDist52H', 'topLoser']);
 const indColDir = key => IND_ASC_COLS.has(key) ? 1 : -1;
 
-function indBreakdownCols(mfLabel, isRoc, rocPeriodLabel) {
+function indBreakdownCols(mfLabel, isRoc, rocPeriodLabel, ipoLabel) {
   const cols = [
     { key: 'name', label: 'Industry' },
     { key: 'sector', label: 'Sector' },
@@ -337,6 +428,13 @@ function indBreakdownCols(mfLabel, isRoc, rocPeriodLabel) {
     { key: 'moneyFlowPrev', label: `Prev ${mfLabel} (Cr)` },
     { key: 'moneyFlowChg', label: 'MF Chg%' }
   ];
+  if (ipoLabel) {
+    // right after the Stocks column
+    cols.splice(4, 0,
+      { key: 'ipoCount', label: `IPOs (${ipoLabel})` },
+      { key: 'ipoSymbols', label: 'Listed', get: i => i.ipoSymbols.join(', ') }
+    );
+  }
   if (isRoc) {
     cols.push(
       { key: 'moneyFlowChgPast', label: `MF Chg% (${rocPeriodLabel} ago)` },
@@ -377,9 +475,18 @@ function resetIndustryBreakdownSort() {
   renderIndustryBreakdownTable();
 }
 
+// The two extra cells of the IPO view: how many, and which (newest first).
+function ipoCells(ind, ipoLabel) {
+  if (!ipoLabel) return '';
+  const syms = ind.ipoSymbols.map(x => x.replace(/&/g, '&amp;')).join(', ');
+  return `
+      <td style="font-weight:600">${ind.ipoCount}</td>
+      <td style="color:var(--text2);font-size:11px;white-space:normal;min-width:160px;">${syms || '-'}</td>`;
+}
+
 function renderIndustryBreakdownTable() {
-  const { list, sortLabel, mfLabel, isRoc, rocPeriodLabel } = _indBreakdown;
-  const cols = indBreakdownCols(mfLabel, isRoc, rocPeriodLabel);
+  const { list, sortLabel, mfLabel, isRoc, rocPeriodLabel, ipoLabel } = _indBreakdown;
+  const cols = indBreakdownCols(mfLabel, isRoc, rocPeriodLabel, ipoLabel);
   const eff = indEffectiveSort();
 
   let sorted = list; // already in filter order
@@ -429,7 +536,7 @@ function renderIndustryBreakdownTable() {
           <span style="font-size:11px;min-width:30px;color:${rsColor};font-weight:600">${ind.rsScore.toFixed(0)}</span>
         </div>
       </td>
-      <td>${ind.stockCount}</td>
+      <td>${ind.stockCount}</td>${ipoCells(ind, ipoLabel)}
       <td>${fmtCr(ind.totalMcap)}</td>
       <td class="${ind.avgMonthlyChange >= 0 ? 'positive' : 'negative'}">${ind.avgMonthlyChange.toFixed(2)}%</td>
       <td>
@@ -479,11 +586,14 @@ const METRIC_CONFIG = {
                  tip: 'Percentage change in cumulative turnover vs the prior equivalent period. Positive = more money flowing in than before; negative = declining interest.' },
   money_flow_roc: { key: 'moneyFlowRoc',  unit: 'pp',  dec: 1, maxVal: null,
                  title: 'Industry by Money Flow Rate of Change',
-                 tip: 'Change in the MF Chg% reading itself, comparing now to the same reading one ROC timeframe ago (in percentage points; the timeframe can be the window itself or any shorter one). Positive = the flow reading is improving even if still negative; negative = it is fading even if still positive.' }
+                 tip: 'Change in the MF Chg% reading itself, comparing now to the same reading one ROC timeframe ago (in percentage points; the timeframe can be the window itself or any shorter one). Positive = the flow reading is improving even if still negative; negative = it is fading even if still positive.' },
+  ipo:         { key: 'ipoCount',         unit: '',    dec: 0, maxVal: null,
+                 title: 'IPOs Listed by Industry',
+                 tip: 'Number of stocks whose NSE listing date falls in the selected period, per industry.' }
 };
 
 // ── Horizontal Bar Chart (adapts to selected metric) ──
-function renderMetricChart(data, sortBy, mfPeriod, mfData, rocLag) {
+function renderMetricChart(data, sortBy, mfPeriod, mfData, rocLag, ipoInfo) {
   const cfg = { ...METRIC_CONFIG[sortBy] || METRIC_CONFIG.rs_score };
 
   // Append period to money_flow title
@@ -492,6 +602,21 @@ function renderMetricChart(data, sortBy, mfPeriod, mfData, rocLag) {
     const daysInfo = mfData ? ' (' + mfData.currentDays + ' vs ' + mfData.prevDays + ' trading days)' : '';
     const lagInfo = sortBy === 'money_flow_roc' && rocLag ? ', vs ' + rocLag.toUpperCase() + ' ago' : '';
     cfg.title = (sortBy === 'money_flow' ? 'Money Flow Change — ' : 'Money Flow Rate of Change — ') + periodLabel + daysInfo + lagInfo;
+  }
+
+  if (sortBy === 'ipo' && ipoInfo) {
+    cfg.title = 'IPOs Listed by Industry — ' + (IPO_PERIOD_LABELS[ipoInfo.period] || IPO_PERIOD_LABELS['3m']) +
+      (ipoInfo.to ? ' (' + isoToDmy(ipoInfo.from) + ' to ' + isoToDmy(ipoInfo.to) + ')' : '');
+    cfg.tip = 'Stocks with an NSE listing date in the period, per industry: IPOs plus any demerger or SME-migration listings; ' +
+      'companies since delisted are not counted. Only industries with at least one listing are charted (the table below lists all).' +
+      (ipoInfo.bulkDays.length
+        ? ' Left out as bulk admissions of existing companies, not IPOs: ' +
+          ipoInfo.bulkDays.map(b => isoToDmy(b.date) + ' (' + (b.count - b.kept.length) + ' of ' + b.count + ' stocks)').join(', ') + '.' +
+          (ipoInfo.bulkDays.some(b => b.kept.length)
+            ? ' Counted anyway because they traded like IPOs on day one (turnover of Rs ' + IPO_BULK_KEEP_TURNOVER_CR + ' Cr or more): ' +
+              ipoInfo.bulkDays.flatMap(b => b.kept).join(', ') + '.'
+            : '')
+        : '');
   }
 
   // Update chart heading and tooltip
@@ -505,6 +630,19 @@ function renderMetricChart(data, sortBy, mfPeriod, mfData, rocLag) {
 
   const canvas = document.getElementById('rsChart');
   const ctx = canvas.getContext('2d');
+  if (!data.length) { // e.g. no listing in the period: say so instead of an empty canvas
+    _chartBars = [];
+    canvas.width = Math.max(canvas.parentElement.clientWidth, 500);
+    canvas.height = 60;
+    ctx.fillStyle = '#1e293b';
+    ctx.fillRect(0, 0, canvas.width, 60);
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '12px -apple-system, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('No stocks listed in this period for the industries shown.', 16, 30);
+    return;
+  }
   const barH = 22;
   const gap = 4;
   const margin = { top: 10, right: 110, bottom: 20, left: 220 };
@@ -525,6 +663,8 @@ function renderMetricChart(data, sortBy, mfPeriod, mfData, rocLag) {
     maxAbs = Math.max(...data.map(d => Math.abs(d[cfg.key])));
     if (maxAbs === 0) maxAbs = 1;
   }
+  // A count: round the axis up to 1-4, or a multiple of 4, so the four gridlines are whole numbers (2, 4, 6, 8)
+  if (sortBy === 'ipo') maxAbs = maxAbs <= 4 ? Math.ceil(maxAbs) : Math.ceil(maxAbs / 4) * 4;
 
   // Reset bar regions for hover/click
   _chartBars = [];
@@ -592,7 +732,7 @@ function renderMetricChart(data, sortBy, mfPeriod, mfData, rocLag) {
   // Vertical gridlines
   ctx.strokeStyle = '#33415566';
   ctx.lineWidth = 1;
-  const gridSteps = 4;
+  const gridSteps = sortBy === 'ipo' ? Math.min(4, maxAbs) : 4;
   for (let step = 0; step <= gridSteps; step++) {
     const frac = step / gridSteps;
     const x = margin.left + frac * plotW;
@@ -634,6 +774,15 @@ function renderMetricChart(data, sortBy, mfPeriod, mfData, rocLag) {
     return _tooltipEl;
   }
 
+  // The IPO view adds what was listed: "IPOs (3M): 4" and the first few symbols, newest first.
+  function ipoTooltipHtml(ind) {
+    if (!_indBreakdown.ipoLabel) return '';
+    const shown = ind.ipoSymbols.slice(0, 8).map(x => x.replace(/&/g, '&amp;')).join(', ');
+    const more = ind.ipoSymbols.length > 8 ? ' +' + (ind.ipoSymbols.length - 8) + ' more' : '';
+    return '<div>IPOs (' + _indBreakdown.ipoLabel + '): <b>' + ind.ipoCount + '</b></div>' +
+      (shown ? '<div style="font-size:11px;color:#94a3b8;">' + shown + more + '</div>' : '');
+  }
+
   function findBar(e) {
     const canvas = document.getElementById('rsChart');
     if (!canvas) return null;
@@ -673,6 +822,7 @@ function renderMetricChart(data, sortBy, mfPeriod, mfData, rocLag) {
       '<div>Stocks: <b>' + ind.stockCount + '</b></div>' +
       '<div>Mkt Cap: <b>' + fmtCr(ind.totalMcap) + '</b></div>' +
       '<div>Breadth: <b>' + ind.breadth.toFixed(0) + '%</b> &nbsp; RS: <b>' + ind.rsScore.toFixed(0) + '</b></div>' +
+      ipoTooltipHtml(ind) +
       '<div style="font-size:11px;color:#94a3b8;margin-top:4px;">Click to view stocks</div>';
     tip.style.display = 'block';
     // Position near cursor

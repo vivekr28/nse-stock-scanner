@@ -798,6 +798,16 @@
         <option value="stocks">Stock Count</option>
         <option value="money_flow">Money Flow</option>
         <option value="money_flow_roc">Money Flow Rate of Change</option>
+        <option value="ipo">IPOs Listed</option>
+      </select>
+    </div>
+    <div class="filter-group" id="ipoPeriodGroup" style="display:none;">
+      <label title="Stocks whose NSE listing date falls in this window, counted per industry.">IPO Period</label>
+      <select id="ipoPeriod" onchange="renderIndustryAnalysis()">
+        <option value="1m">Last 1 Month</option>
+        <option value="3m" selected>Last 3 Months</option>
+        <option value="6m">Last 6 Months</option>
+        <option value="1y">Last 1 Year</option>
       </select>
     </div>
     <div class="filter-group" id="mfPeriodGroup" style="display:none;">
@@ -1110,9 +1120,9 @@
 <script src="js/data-processor.js?v=2"></script>
 <script src="js/scanner.js?v=2"></script>
 <script src="js/screener.js?v=16"></script>
-<script src="js/breadth.js?v=13"></script>
+<script src="js/breadth.js?v=14"></script>
 <script src="js/sector.js?v=2"></script>
-<script src="js/industry.js?v=10"></script>
+<script src="js/industry.js?v=13"></script>
 <script src="js/lib/lightweight-charts.standalone.production.js"></script>
 <script src="js/ew-index.js?v=6"></script>
 <script src="js/chart-tools.js?v=6"></script>
