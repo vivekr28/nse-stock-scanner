@@ -962,7 +962,11 @@ if ($AllBand.Count -gt 0) {
 #     company and quarter (higher SEQ), or consolidated numbers appear where only standalone existed;
 #   * at most ResultsMaxFetch files per run (newest quarter first), saved as it goes, so a refresh never blocks for
 #     long and an interrupted run loses nothing; run again (or -ResultsMaxFetch 0 once) to finish the backlog;
-#   * rows older than the window are kept (archive), and a failed or empty download changes nothing.
+#   * rows older than the window are kept (archive), and a failed or empty download changes nothing;
+#   * OTHER BASIS, only where needed: a quarter is compared with the same quarter a year earlier, which is only meaningful
+#     on one basis. When the two stored rows are on different bases (a company that began filing consolidated results, or
+#     stopped), a basis NSE lists for BOTH quarters is looked for and the missing filing(s) are read into the row's ALT_*
+#     columns (the other basis), so the dashboard can compare like for like. About 150 extra filings on the real data.
 # Amounts are Rs crore, EPS is Rs per share. NET_PROFIT_CR is the profit attributable to the owners of the parent
 # when the filing reports it (what EPS is based on), else the total profit; for banks REVENUE_CR is total income
 # (interest earned + other income). Rows are written sorted so an unchanged feed leaves the file byte-identical.
@@ -972,7 +976,8 @@ if ($FetchResults) {
     Write-Host "`nQuarterly results: skipped (on demand - run with -FetchResults to update reference-data\QuarterlyResults.csv)" -ForegroundColor DarkGray
 }
 $ResultsFile = Join-Path $ReferenceFolder "QuarterlyResults.csv"
-$ResultsColumns = @('ISIN','SYMBOL','TO_DATE','BASIS','AUDITED','FILED','REVENUE_CR','PBT_CR','NET_PROFIT_CR','EPS_BASIC','EPS_DILUTED','SEQ')
+$ResultsColumns = @('ISIN','SYMBOL','TO_DATE','BASIS','AUDITED','FILED','REVENUE_CR','PBT_CR','NET_PROFIT_CR','EPS_BASIC','EPS_DILUTED','SEQ',
+                    'ALT_BASIS','ALT_REVENUE_CR','ALT_PBT_CR','ALT_NET_PROFIT_CR','ALT_EPS_BASIC','ALT_EPS_DILUTED','ALT_SEQ')
 $ResultsSummary = "Skipped (on demand - run with -FetchResults)"
 $ResultsInv = [Globalization.CultureInfo]::InvariantCulture
 # Windows PowerShell 5.1 draws a progress bar for every Invoke-WebRequest, which makes the multi-MB result lists (and
@@ -1061,6 +1066,7 @@ function New-ResultRow($Filing, $Xml) {
         FILED = ([string]$Filing.broadCastDate).Split(' ')[0]
         REVENUE_CR = ''; PBT_CR = ''; NET_PROFIT_CR = ''; EPS_BASIC = ''; EPS_DILUTED = ''
         SEQ = [string]$Filing.seqNumber
+        ALT_BASIS = ''; ALT_REVENUE_CR = ''; ALT_PBT_CR = ''; ALT_NET_PROFIT_CR = ''; ALT_EPS_BASIC = ''; ALT_EPS_DILUTED = ''; ALT_SEQ = ''
     }
     if (-not $Xml) { return $row }
     # (OperatingIncome = a general insurer's total income; the life insurers have Income; the *BeforeTax names are the insurers')
@@ -1091,6 +1097,31 @@ function New-ResultRow($Filing, $Xml) {
     return $row
 }
 
+# A stored row as an object with every column (a file written before the ALT_* columns existed has none of them)
+function ConvertTo-FullResultRow($r) {
+    $o = [ordered]@{}
+    foreach ($c in $ResultsColumns) { $v = $r.$c; $o[$c] = $(if ($null -eq $v) { '' } else { [string]$v }) }
+    return [pscustomobject]$o
+}
+
+# The XBRL text of one filing: Status OK / GONE (404) / FAIL (after a retry); the caller decides what a failure means
+function Get-XbrlText([string]$Url) {
+    for ($attempt = 1; $attempt -le 2; $attempt++) {
+        try {
+            $resp = Invoke-WebRequest -Uri $Url -Headers $ApiHeaders -WebSession $Session -UseBasicParsing -TimeoutSec 60 -ErrorAction Stop
+            $xml = $resp.Content
+            if ($xml -is [byte[]]) { $xml = [Text.Encoding]::UTF8.GetString($xml) }
+            return [pscustomobject]@{ Status = 'OK'; Xml = [string]$xml }
+        } catch {
+            $code = $null
+            if ($_.Exception.Response) { $code = [int]$_.Exception.Response.StatusCode }
+            if ($code -eq 404) { return [pscustomobject]@{ Status = 'GONE'; Xml = $null } }
+            if ($attempt -lt 2) { Start-Sleep -Seconds 2 }
+        }
+    }
+    return [pscustomobject]@{ Status = 'FAIL'; Xml = $null }
+}
+
 function Save-ResultsFile($RowMap) {
     $sorted = @($RowMap.Values | Sort-Object `
         @{ Expression = { $d = ConvertTo-ExDate $_.TO_DATE; if ($null -ne $d) { $d } else { [datetime]::MaxValue } } }, `
@@ -1099,7 +1130,10 @@ function Save-ResultsFile($RowMap) {
     $lines = New-Object System.Collections.Generic.List[string]
     $lines.Add($ResultsColumns -join ',')
     foreach ($r in $sorted) {
-        $lines.Add((($ResultsColumns | ForEach-Object { '"' + (([string]$r.$_) -replace '"','""') + '"' }) -join ','))
+        $lines.Add((($ResultsColumns | ForEach-Object {
+            $v = [string]$r.$_
+            if (($v -eq '') -and ($_ -like 'ALT_*')) { '' } else { '"' + ($v -replace '"','""') + '"' }
+        }) -join ','))
     }
     return (Save-IfChanged $ResultsFile ($lines -join "`n"))
 }
@@ -1112,7 +1146,7 @@ if ($FetchResults) { try {
     if (Test-Path $ResultsFile) {
         foreach ($r in @(Import-Csv -Path $ResultsFile -Encoding UTF8)) {
             if ($r.SYMBOL -and $r.TO_DATE) {
-                $resultRows[('{0}|{1}' -f $r.SYMBOL, $r.TO_DATE)] = $r
+                $resultRows[('{0}|{1}' -f $r.SYMBOL, $r.TO_DATE)] = ConvertTo-FullResultRow $r
                 if ($r.ISIN) { $isinBySymbol[$r.SYMBOL] = $r.ISIN }   # file is date-sorted, so the newest ISIN wins
             }
         }
@@ -1229,10 +1263,91 @@ if ($FetchResults) { try {
             }
         }
 
+        # -- Other basis, only where a quarter and its year-ago quarter are stored on DIFFERENT bases ------------------
+        # Per stock: its latest 10 quarters (what the dashboard's table shows). If a quarter and the same quarter a year
+        # earlier are stored on different bases (Consolidated vs Standalone), look for a basis NSE lists for BOTH (the stored
+        # basis of a quarter counts, and so does any basis the integrated list has for it; Consolidated is preferred) and
+        # read the filing(s) of that basis that are not stored into the row's ALT_* columns. Revised filings are caught by
+        # ALT_SEQ. Older-feed quarters (before Mar-2025) list one basis only, so a pair that needs one stays unfixed.
+        $nAltRead = 0; $nAltFailed = 0
+        try {
+            $altIndex = @{}    # SYMBOL|quarter|basis -> the newest filing of that basis
+            foreach ($qk in $integratedByQuarter.Keys) {
+                foreach ($f in $integratedByQuarter[$qk]) {
+                    if ((-not $f.symbol) -or (-not $f.xbrl) -or ([string]$f.xbrl).EndsWith('/-')) { continue }
+                    $b = $(if ($f.consolidated -eq 'Consolidated') { 'Consolidated' } else { 'Standalone' })
+                    $ak = '{0}|{1}|{2}' -f $f.symbol, $f.toDate, $b
+                    if ((-not $altIndex.ContainsKey($ak)) -or ([long]$f.seqNumber -gt [long]$altIndex[$ak].seqNumber)) { $altIndex[$ak] = $f }
+                }
+            }
+            $latestBySymbol = @{}
+            foreach ($row in $resultRows.Values) {
+                $rd = ConvertTo-ExDate $row.TO_DATE
+                if (($null -ne $rd) -and ((-not $latestBySymbol.ContainsKey($row.SYMBOL)) -or ($rd -gt $latestBySymbol[$row.SYMBOL]))) { $latestBySymbol[$row.SYMBOL] = $rd }
+            }
+            $altWork = New-Object System.Collections.Generic.List[object]
+            $altSeen = @{}
+            foreach ($sym in @($latestBySymbol.Keys)) {
+                for ($n = 0; $n -lt 10; $n++) {
+                    $q  = $latestBySymbol[$sym].AddDays(1).AddMonths(-3 * $n).AddDays(-1)
+                    $ya = $q.AddDays(1).AddYears(-1).AddDays(-1)
+                    $qs = $q.ToString('dd-MMM-yyyy', $ResultsInv); $ys = $ya.ToString('dd-MMM-yyyy', $ResultsInv)
+                    $rq = $resultRows[('{0}|{1}' -f $sym, $qs)]; $ry = $resultRows[('{0}|{1}' -f $sym, $ys)]
+                    if (($null -eq $rq) -or ($null -eq $ry) -or ($rq.BASIS -eq $ry.BASIS)) { continue }
+                    $common = $null
+                    foreach ($b in @('Consolidated', 'Standalone')) {
+                        $okQ = ($rq.BASIS -eq $b) -or $altIndex.ContainsKey(('{0}|{1}|{2}' -f $sym, $qs, $b))
+                        $okY = ($ry.BASIS -eq $b) -or $altIndex.ContainsKey(('{0}|{1}|{2}' -f $sym, $ys, $b))
+                        if ($okQ -and $okY) { $common = $b; break }
+                    }
+                    if ($null -eq $common) { continue }
+                    foreach ($pair in @(@($rq, $qs), @($ry, $ys))) {
+                        $row = $pair[0]
+                        if ($row.BASIS -eq $common) { continue }
+                        $filing = $altIndex[('{0}|{1}|{2}' -f $sym, $pair[1], $common)]
+                        if (($row.ALT_BASIS -eq $common) -and ([string]$row.ALT_SEQ -eq [string]$filing.seqNumber)) { continue }
+                        $wk = '{0}|{1}|{2}' -f $sym, $pair[1], $common
+                        if ($altSeen.ContainsKey($wk)) { continue }
+                        $altSeen[$wk] = $true
+                        $altWork.Add([pscustomobject]@{ Row = $row; Filing = $filing; Basis = $common })
+                    }
+                }
+            }
+            $altCap = $(if ($ResultsMaxFetch -gt 0) { [math]::Max(0, $ResultsMaxFetch - $nDone) } else { [int]::MaxValue })
+            $altList = @($altWork | Select-Object -First $altCap)
+            Write-Host "  Other-basis filings to read: $($altList.Count)" -ForegroundColor DarkGray   # the dashboard's Fetch button parses this line
+            $altDone = 0; $altFailRun = 0
+            foreach ($w in $altList) {
+                $altDone++
+                $got = Get-XbrlText $w.Filing.xbrl
+                if ($got.Status -eq 'FAIL') {
+                    $nAltFailed++; $altFailRun++
+                    if ($altFailRun -ge 15) {
+                        Write-Host "  Warning: 15 filings in a row failed to download - stopping early (NSE may be throttling); will resume next run" -ForegroundColor Yellow
+                        break
+                    }
+                    continue
+                }
+                $altFailRun = 0
+                # a filing that is gone or has no readable numbers is recorded with blank numbers so it isn't re-fetched every run
+                $alt = New-ResultRow $w.Filing $(if ($got.Status -eq 'OK') { $got.Xml } else { $null })
+                $w.Row.ALT_BASIS = $w.Basis
+                $w.Row.ALT_REVENUE_CR = $alt.REVENUE_CR; $w.Row.ALT_PBT_CR = $alt.PBT_CR; $w.Row.ALT_NET_PROFIT_CR = $alt.NET_PROFIT_CR
+                $w.Row.ALT_EPS_BASIC = $alt.EPS_BASIC; $w.Row.ALT_EPS_DILUTED = $alt.EPS_DILUTED; $w.Row.ALT_SEQ = [string]$w.Filing.seqNumber
+                $nAltRead++
+                if (($altDone % 50) -eq 0 -or $altDone -eq $altList.Count) {
+                    Write-Host "  Other-basis: $altDone / $($altList.Count) filings processed..." -ForegroundColor DarkGray
+                }
+            }
+        }
+        catch {
+            Write-Host "  Warning: could not read the other-basis filings - $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+
         if ($resultRows.Count -gt 0) {
             $resultsChanged = Save-ResultsFile $resultRows
             $remaining = $pending.Count - $nDone
-            Write-Host "  Quarterly results: $($resultRows.Count) rows ($($resultRows.Count - $storedAtStart) new; $nFetched read, $nBlank without numbers, $nFailed failed) $(if ($resultsChanged) { 'updated' } else { 'unchanged' }) in $([math]::Round($resultsTimer.Elapsed.TotalSeconds))s - newest quarter $($anchorDate.ToString('dd-MMM-yyyy'))" -ForegroundColor Green
+            Write-Host "  Quarterly results: $($resultRows.Count) rows ($($resultRows.Count - $storedAtStart) new; $nFetched read, $nBlank without numbers, $nFailed failed$(if (($nAltRead + $nAltFailed) -gt 0) { "; $nAltRead other-basis read, $nAltFailed failed" })) $(if ($resultsChanged) { 'updated' } else { 'unchanged' }) in $([math]::Round($resultsTimer.Elapsed.TotalSeconds))s - newest quarter $($anchorDate.ToString('dd-MMM-yyyy'))" -ForegroundColor Green
             if ($remaining -gt 0) {
                 Write-Host "  $remaining more filings still to fetch - they will be picked up on the next run (or run with -ResultsMaxFetch 0 to fetch them all now)" -ForegroundColor Yellow
             }

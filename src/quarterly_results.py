@@ -70,6 +70,32 @@ def _off_by_scale(v, n):
     return any(0.75 / k <= r <= 1.33 / k or 0.75 * k <= r <= 1.33 * k for k in _SCALE_FACTORS)
 
 
+def _view(row, prefix=''):
+    return {'s': _result_num(row.get(prefix + 'REVENUE_CR')), 'e': _result_num(row.get(prefix + 'NET_PROFIT_CR')),
+            'eps': _result_num(row.get(prefix + 'EPS_BASIC'))}
+
+
+def _views(row):
+    """{basis: figures} a stored row holds: its own BASIS, plus the ALT_BASIS ones (the other basis, filled by
+    Download-NSE-Bhavcopy.ps1 only where a quarter and its year-ago quarter are on different bases)."""
+    out = {row.get('BASIS'): _view(row)}
+    alt = row.get('ALT_BASIS')
+    if alt and alt != row.get('BASIS'):
+        out[alt] = _view(row, 'ALT_')
+    return out
+
+
+def _common_basis(cur, prev):
+    """(basis, this quarter's figures, year-ago figures) for a basis both rows hold with sales and profit, preferring
+    consolidated; None when there is none."""
+    cv, pv = _views(cur), _views(prev)
+    for basis in ('Consolidated', 'Standalone'):
+        a, b = cv.get(basis), pv.get(basis)
+        if a and b and None not in (a['s'], a['e'], b['s'], b['e']):
+            return basis, a, b
+    return None
+
+
 def _shift_quarter(d, n):
     """The quarter-end n quarters after (negative: before) quarter-end date d."""
     months = d.year * 12 + d.month - 1 + 3 * n
@@ -98,16 +124,23 @@ def build_quarterly_growth(path):
       q   the stock's latest declared quarter-end (YYYY-MM-DD) - per stock, not a global date
       b   'C' consolidated / 'S' standalone (the basis of that latest result)
       cmp 'ok' when the year-ago quarter can be compared like for like; otherwise why not: 'no-prev' (no result for
-          the same quarter a year earlier), 'basis' (one year consolidated, the other standalone - not comparable),
+          the same quarter a year earlier), 'basis' (one year consolidated, the other standalone and no basis on file
+          for BOTH - not comparable),
           'blank' (a result is on file but NSE's filing gave no numbers), 'scale' (this quarter's or the year-ago
           quarter's figures look mis-scaled in the company's filing - see _looks_mis_scaled)
+      ab    only present when the quarter and its year-ago quarter are stored on different bases but the file also holds
+            the OTHER basis (the ALT_* columns, read by Download-NSE-Bhavcopy.ps1): 'S' or 'C', the basis the comparison
+            was made on (preferring consolidated). The browser marks such figures; everything below is then on that basis
       s/sp  sales (Rs crore) this quarter / a year ago;  e/ep  net profit (Rs crore) this quarter / a year ago
       sg/eg sales / net-profit growth %, None unless cmp is 'ok' AND the year-ago figure is positive
       st/et turnaround flags (kept apart from growth, which needs a positive base), only ever True when cmp is 'ok':
             et = profit this quarter after a LOSS in the same quarter a year ago (year-ago below zero, now above);
             st = sales this quarter after NO sales a year ago (year-ago zero, now above - sales cannot be negative)
       h     the last 10 quarters (oldest first) each against its own year-ago quarter, for the stock chart's table:
-            [[quarter-end, sales Rs cr, sales growth %, EPS, EPS growth %, cmp, EPS turnaround 1/0], ...]; EPS is as filed;
+            [[quarter-end, sales Rs cr, sales growth %, EPS, EPS growth %, cmp, EPS turnaround 1/0], ...]; EPS is as filed
+            (sales and EPS shown are the quarter's STORED figures; when a quarter was compared on the other basis the row has
+            three more items, [..., 'S'|'C', sales this quarter, sales a year ago] on that basis, and the two growth figures
+            are on that basis too);
             a quarter with no result on file is [d, None, None, None, None, 'none', 0]
     Sales is revenue from operations (total income for banks); profit is the owners' share where reported."""
     if not os.path.exists(path):
@@ -147,9 +180,20 @@ def build_quarterly_growth(path):
                 if prev_eps is not None:
                     eps_growth = _growth_pct(eps, prev_eps)
                     eps_turnaround = int(prev_eps < 0 and eps > 0)
+            elif prev is not None and c.get('ab'):
+                # different stored bases, compared on the one both hold: the EPS growth is on that basis too
+                basis = 'Consolidated' if c['ab'] == 'C' else 'Standalone'
+                cur_eps, prev_eps = _views(row)[basis]['eps'], _views(prev)[basis]['eps']
+                if cur_eps is not None and prev_eps is not None:
+                    eps_growth = _growth_pct(cur_eps, prev_eps)
+                    eps_turnaround = int(prev_eps < 0 and cur_eps > 0)
             # a quarter whose own figures look mis-scaled shows no sales (its EPS is per share and is unaffected)
-            sales = None if _looks_mis_scaled(sales_by_date, d) or c['s'] is None else round(c['s'], 1)
-            hist.append([d.isoformat(), sales, c['sg'], eps, eps_growth, c['cmp'], eps_turnaround])
+            shown = _result_num(row.get('REVENUE_CR'))       # the stored figure, whatever basis the comparison used
+            sales = None if _looks_mis_scaled(sales_by_date, d) or shown is None else round(shown, 1)
+            entry = [d.isoformat(), sales, c['sg'], eps, eps_growth, c['cmp'], eps_turnaround]
+            if c.get('ab'):
+                entry += [c['ab'], round(c['s'], 1), round(c['sp'], 1)]
+            hist.append(entry)
         rec['h'] = hist
         out[sym] = rec
     return out
@@ -168,7 +212,18 @@ def _compare_quarter(quarters, sales_by_date, d):
         return rec
     rec['sp'], rec['ep'] = _result_num(prev.get('REVENUE_CR')), _result_num(prev.get('NET_PROFIT_CR'))
     if prev.get('BASIS') != cur.get('BASIS'):
-        rec['cmp'] = 'basis'
+        common = _common_basis(cur, prev)
+        if common is None:
+            rec['cmp'] = 'basis'
+        else:
+            # compared on a basis both quarters hold. The mis-scaled-filing guard is not applied here (it reads the stored
+            # sales series); a filing that is off by a clean power of 100 on the other basis only is not caught
+            basis, a, b = common
+            rec['ab'] = 'C' if basis == 'Consolidated' else 'S'
+            rec['s'], rec['sp'], rec['e'], rec['ep'] = a['s'], b['s'], a['e'], b['e']
+            rec['sg'], rec['eg'] = _growth_pct(a['s'], b['s']), _growth_pct(a['e'], b['e'])
+            rec['st'] = b['s'] <= 0 and a['s'] > 0
+            rec['et'] = b['e'] < 0 and a['e'] > 0
     elif s is None or e is None or rec['sp'] is None or rec['ep'] is None:
         rec['cmp'] = 'blank'
     elif _looks_mis_scaled(sales_by_date, d) or _looks_mis_scaled(sales_by_date, year_ago):

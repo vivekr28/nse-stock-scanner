@@ -698,6 +698,7 @@ canvas { max-width: 100%; display: block; }
 .ic-qtr-table td.ic-qtr-note { color: var(--text2); font-weight: 400; text-align: left; white-space: normal; max-width: 200px; }
 .ic-qtr-table td.ic-qtr-band { text-align: right; }
 .ic-qtr-mark { color: var(--orange, #f59e0b); margin-left: 1px; }
+.ic-qtr-basis { color: var(--text2); font-size: 9px; margin-left: 2px; }
 /* Industry Money Flow Chart tab: period selector row above the chart; the candlestick
    header controls (SMAs, dots, layout, pagination) don't apply there, so they hide */
 .ic-mf-toolbar { display: flex; align-items: center; gap: 12px; padding: 0 4px 10px; flex-shrink: 0; }
