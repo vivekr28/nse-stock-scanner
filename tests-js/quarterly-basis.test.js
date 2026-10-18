@@ -95,5 +95,5 @@ test('scanner: the Result Qtr column shows (S) / (C) for a stock compared on the
 test('wiring: the stylesheet has the marker style and index.html loads the new versions', () => {
   assert.match(read('css/styles.css'), /\.ic-qtr-basis\s*\{/);
   const html = read('index.html');
-  assert.ok(/styles\.css\?v=15/.test(html) && /quarterly-results\.js\?v=8/.test(html) && /quarterly-chart-table\.js\?v=2/.test(html));
+  assert.ok(/styles\.css\?v=15/.test(html) && /quarterly-results\.js\?v=9/.test(html) && /quarterly-chart-table\.js\?v=2/.test(html));
 });

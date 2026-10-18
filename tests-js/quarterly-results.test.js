@@ -138,7 +138,8 @@ test('qrFilterState reads the four filters; a blank or invalid threshold counts 
   assert.equal(sb.qrFilterState().any, false);
   dom.el('scrF20On').checked = true; dom.el('scrF22On').checked = true;
   const s = JSON.parse(JSON.stringify(sb.qrFilterState()));
-  assert.deepEqual(s, { f20: { on: true, min: 25 }, f21: { on: false, min: 0 }, f22: { on: true }, f23: { on: false }, any: true });
+  assert.deepEqual(s, { f20: { on: true, min: 25 }, f21: { on: false, min: 0 }, f22: { on: true }, f23: { on: false },
+    f26: { on: false, min: 0 }, f27: { on: false, min: 0 }, any: true });   // f26 / f27 = the latest-quarter filters (tests-js/quarterly-latest.test.js)
 });
 
 test('qrApplyToStock records what the table columns need on the stock and returns the reasons it fails', () => {

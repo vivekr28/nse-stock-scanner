@@ -70,13 +70,16 @@ function qrFmtCr(v) { return Number(v).toLocaleString('en-IN', { maximumFraction
 // Growth is only defined when the result can be compared like for like with a POSITIVE year-ago figure, so a stock that
 // was loss-making a year ago fails the growth filters with a reason saying so, rather than a made-up %. That case is what
 // the two turnaround filters are for: they are kept separate and never use a percentage.
-function qrFailReasons(symbol, f20, f21, f22, f23) {
+function qrFailReasons(symbol, f20, f21, f22, f23, f26, f27) {
   const reasons = [];
   const checks = [];
   if (f20 && f20.on) checks.push({ code: 'F20', name: 'Earnings', kind: 'growth', g: 'eg', cur: 'e', min: f20.min });
   if (f21 && f21.on) checks.push({ code: 'F21', name: 'Sales', kind: 'growth', g: 'sg', cur: 's', min: f21.min });
   if (f22 && f22.on) checks.push({ code: 'F22', name: 'Earnings', kind: 'turnaround', flag: 'et', cur: 'e', prev: 'ep' });
   if (f23 && f23.on) checks.push({ code: 'F23', name: 'Sales', kind: 'turnaround', flag: 'st', cur: 's', prev: 'sp' });
+  // F26 / F27: the same growth tests as F20 / F21, but only for stocks that have declared the NEWEST quarter on file
+  if (f26 && f26.on) checks.push({ code: 'F26', name: 'Earnings', kind: 'growth', g: 'eg', cur: 'e', min: f26.min, latest: true });
+  if (f27 && f27.on) checks.push({ code: 'F27', name: 'Sales', kind: 'growth', g: 'sg', cur: 's', min: f27.min, latest: true });
   if (!checks.length) return reasons;
 
   const rec = qrLookup(symbol);
@@ -85,6 +88,7 @@ function qrFailReasons(symbol, f20, f21, f22, f23) {
     if (!Store.quarterly) { reasons.push(`${c.code}: No quarterly results file (run Download-NSE-Bhavcopy.ps1 -FetchResults)`); continue; }
     if (!rec) { reasons.push(`${c.code}: No quarterly results for this stock`); continue; }
     const q = qrQuarterLabel(rec.q);
+    if (c.latest && rec.q !== Store.quarterly.latestQuarter) { reasons.push(`${c.code}: No ${qrQuarterLabel(Store.quarterly.latestQuarter)} result yet (its latest is ${q})`); continue; }
     if (rec.cmp === 'no-prev') { reasons.push(`${c.code}: No ${q} result from the year before to compare with`); continue; }
     if (rec.cmp === 'basis') { reasons.push(`${c.code}: ${q} and last year's quarter are on different bases (standalone vs consolidated)`); continue; }
     if (rec.cmp === 'blank') { reasons.push(`${c.code}: ${q} result numbers unavailable`); continue; }
@@ -121,7 +125,7 @@ function qrFailReasons(symbol, f20, f21, f22, f23) {
 // ── Hooks for the Stock Scanner (js/screener.js calls these, each guarded by typeof - the same way it calls the As of Date
 // module's) - so the scanner itself knows nothing about the four filters' controls, fields or columns. ──────────────────
 
-const QR_FILTER_IDS = ['scrF20On', 'scrF21On', 'scrF22On', 'scrF23On'];
+const QR_FILTER_IDS = ['scrF20On', 'scrF21On', 'scrF22On', 'scrF23On', 'scrF26On', 'scrF27On'];
 
 // The four filters as the scanner should apply them now: { f20:{on,min}, f21:{on,min}, f22:{on}, f23:{on}, any }
 function qrFilterState() {
@@ -132,8 +136,10 @@ function qrFilterState() {
     f21: { on: on('scrF21On'), min: num('scrF21Val') },
     f22: { on: on('scrF22On') },
     f23: { on: on('scrF23On') },
+    f26: { on: on('scrF26On'), min: num('scrF26Val') },
+    f27: { on: on('scrF27On'), min: num('scrF27Val') },
   };
-  s.any = s.f20.on || s.f21.on || s.f22.on || s.f23.on;
+  s.any = s.f20.on || s.f21.on || s.f22.on || s.f23.on || s.f26.on || s.f27.on;
   return s;
 }
 
@@ -150,7 +156,7 @@ function qrApplyToStock(stock, state) {
   stock._qrProfitPrev = rec ? num(rec.ep) : NaN;
   stock._qrSalesNow = rec ? num(rec.s) : NaN;
   stock._qrSalesPrev = rec ? num(rec.sp) : NaN;
-  return qrFailReasons(stock.symbol, state.f20, state.f21, state.f22, state.f23);
+  return qrFailReasons(stock.symbol, state.f20, state.f21, state.f22, state.f23, state.f26, state.f27);
 }
 
 // How many of the four filters are switched on (the scanner adds it to its active-filter count and badge)
@@ -174,8 +180,8 @@ function qrColumns() {
   if (!s.any) return [];
   const cols = [{ key: '_qrQtr', label: 'Result Qtr', fmt: (v, row) => qrQuarterLabel(v) + (row && row._qrBasis ? ` (${row._qrBasis})` : '') }];   // (S) / (C): compared on the other basis
   const growthCol = (key, label) => ({ key, label, fmt: v => isNaN(v) ? '-' : (v >= 0 ? '+' : '') + v.toFixed(1) + '%', cls: v => isNaN(v) ? '' : (v >= 0 ? 'positive' : 'negative') });
-  if (s.f20.on) cols.push(growthCol('_qrEarn', 'Earnings YoY%'));
-  if (s.f21.on) cols.push(growthCol('_qrSales', 'Sales YoY%'));
+  if (s.f20.on || s.f26.on) cols.push(growthCol('_qrEarn', 'Earnings YoY%'));     // one column however many of the earnings filters are on
+  if (s.f21.on || s.f27.on) cols.push(growthCol('_qrSales', 'Sales YoY%'));
   const fromTo = (nowKey, prevKey, label) => ({ key: nowKey, label, fmt: (v, row) => {
     const prev = row[prevKey];
     return isNaN(v) || isNaN(prev) ? '-' : `${qrFmtCr(prev)} → ${qrFmtCr(v)}`;
@@ -192,10 +198,19 @@ function qrReset() {
   set('scrF21On', 'checked', false); set('scrF21Val', 'value', '10');
   set('scrF22On', 'checked', false);
   set('scrF23On', 'checked', false);
+  set('scrF26On', 'checked', false); set('scrF26Val', 'value', '20');
+  set('scrF27On', 'checked', false); set('scrF27Val', 'value', '10');
+}
+
+// The quarter name in the F26 / F27 labels: the newest quarter any stock has declared (blank until the data is loaded)
+function qrUpdateLatestLabels() {
+  const text = Store.quarterly && Store.quarterly.latestQuarter ? `(${qrQuarterLabel(Store.quarterly.latestQuarter)})` : '';
+  for (const id of ['scrF26Q', 'scrF27Q']) { const el = document.getElementById(id); if (el) el.textContent = text; }
 }
 
 // The tab's one-line status: what is loaded and how fresh it is
 function qrUpdateStatus() {
+  qrUpdateLatestLabels();
   const el = document.getElementById('scrQtrStatus');
   if (!el) return;
   if (Store.quarterlyState === 'loading') {

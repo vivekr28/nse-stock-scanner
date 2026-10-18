@@ -564,6 +564,28 @@
               </div>
             </div>
 
+            <!-- F26: Earnings growth, ONLY for stocks that have declared the newest quarter on file (the quarter name is filled in by js/quarterly-results.js) -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF26On">
+              <span class="scr-label" title="Like QoQ Y Earnings, but only stocks that have declared the NEWEST quarter any company has declared (shown in the label) can pass: a stock whose latest result is an older quarter is left out. Net profit of that quarter vs the same quarter a year earlier, in %.">Latest Quarter <span id="scrF26Q"></span> QoQ Y Earnings:</span>
+              <div class="scr-inputs">
+                <span class="scr-unit">&gt;</span>
+                <input type="number" id="scrF26Val" value="20" step="5" style="width:70px;">
+                <span class="scr-unit">%</span>
+              </div>
+            </div>
+
+            <!-- F27: Sales growth, ONLY for stocks that have declared the newest quarter on file -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF27On">
+              <span class="scr-label" title="Like QoQ Y Sales, but only stocks that have declared the NEWEST quarter any company has declared (shown in the label) can pass: a stock whose latest result is an older quarter is left out. Sales of that quarter vs the same quarter a year earlier, in %.">Latest Quarter <span id="scrF27Q"></span> QoQ Y Sales:</span>
+              <div class="scr-inputs">
+                <span class="scr-unit">&gt;</span>
+                <input type="number" id="scrF27Val" value="10" step="5" style="width:70px;">
+                <span class="scr-unit">%</span>
+              </div>
+            </div>
+
           </div>
         </div>
 
@@ -1229,7 +1251,7 @@
 <script src="js/data-processor.js?v=2"></script>
 <script src="js/scanner.js?v=2"></script>
 <script src="js/screener.js?v=21"></script>
-<script src="js/quarterly-results.js?v=8"></script>
+<script src="js/quarterly-results.js?v=9"></script>
 <script src="js/relative-strength.js?v=3"></script>
 <script src="js/quarterly-chart-table.js?v=2"></script>
 <script src="js/breadth.js?v=14"></script>
@@ -1242,7 +1264,7 @@
 <script src="js/industry-charts.js?v=24"></script>
 <script src="js/data-quality.js?v=12"></script>
 <script src="js/quarterly-results-fetch.js?v=1"></script>
-<script src="js/presets.js?v=15"></script>
+<script src="js/presets.js?v=16"></script>
 <script src="js/asof-scan.js?v=3"></script>
 <script src="js/ui.js?v=12"></script>
 <script src="js/nse-download.js?v=5"></script>
