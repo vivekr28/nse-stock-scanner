@@ -10,6 +10,10 @@
     - Downloads EQUITY_L.csv (master equity list with ISIN mappings)
     - Keeps reference-data\CorporateActions.csv as a permanent archive (merged, never truncated);
       use -CorpActionsFrom "01-Jan-2010" once to archive everything NSE still serves
+    - ON DEMAND ONLY (-FetchResults): keeps reference-data\QuarterlyResults.csv (revenue / PBT / net profit / EPS per
+      company per quarter, read from NSE's XBRL result filings) from NSE's two result lists (the older one up to Dec-2024,
+      the integrated-filing one from Mar-2025), fetched incrementally; a first run reads ~14,000 filings (~20 min), later
+      runs only what is new - run it regularly in results season. Optional -ResultsMaxFetch N caps filings read per run
     - Keeps window open so you can see the results
 #>
 
@@ -18,6 +22,9 @@ param(
     [string]$StartFrom = "",   # Optional: force start date, e.g. "01-Sep-2024" or "2024-09-01"
     [string]$IndexStartFrom = "", # Optional: first date of the NSE index closing-value history (default: the last 730 days), e.g. "03-Oct-2024"
     [string]$CorpActionsFrom = "", # Optional: archive corporate actions from this date (one-time backfill), e.g. "01-Jan-2010"
+    [int]$ResultsQuarters = 8, # Quarterly results to keep up to date: this many quarters back from the newest quarter NSE serves
+    [switch]$FetchResults,     # Also download/update reference-data\QuarterlyResults.csv (on demand only - NOT part of a normal refresh or dashboard start)
+    [int]$ResultsMaxFetch = 0, # With -FetchResults: max result filings (XBRL files) read in one run; 0 = no limit
     [switch]$NoPause           # Headless (launched by the dashboard's Refresh Data): no key prompts, no server reprocess call
 )
 
@@ -59,6 +66,12 @@ $MidSmall400Url = "https://www.nseindia.com/api/NextApi/apiClient/marketWatchApi
 # Corporate actions (splits/bonuses, for price back-adjustment) - bulk endpoint,
 # one call returns every stock's actions in the date range.
 $CorpActionsBaseUrl = "https://www.nseindia.com/api/corporates-corporateActions?index=equities"
+# Quarterly financial results: this list names every filing (and its XBRL file, which holds the numbers). With no
+# dates it returns the newest quarter NSE serves; with from_date/to_date (filing dates) it returns older ones.
+$ResultsBaseUrl = "https://www.nseindia.com/api/corporates-financial-results?index=equities&period=Quarterly"
+# That list STOPS at the quarter ending Dec-2024: since 2025 companies file results through SEBI's integrated filing, and
+# NSE lists those separately ("Integrated Filing - Financials" page). Mar-2025 onwards, every filing with its XBRL file.
+$IntegratedResultsUrl = "https://www.nseindia.com/api/integrated-filing-results?&type=Integrated%20Filing-%20Financials"
 
 # NSE blocks requests without browser-like headers
 $Headers = @{
@@ -933,6 +946,308 @@ if ($AllBand.Count -gt 0) {
     }
 }
 
+# -- Download quarterly results (revenue / profit / EPS, read from NSE's XBRL result filings) ------
+# TWO NSE feeds are combined. The older "Financial Results" list ends at the quarter ending Dec-2024 (it is where the
+# stored history Mar-2023..Dec-2024 came from); NSE's "Integrated Filing - Financials" list has every filing from Mar-2025
+# on (about 27,000 so far, in six XBRL formats: Ind-AS, NBFC, bank, non-Ind-AS, life and general insurers). Both name the
+# filing and its XBRL file; the numbers are read from the XBRL. A quarter is taken from the integrated list when it has
+# it, else from the older one. Rows are keyed by SYMBOL + quarter (the integrated list has no ISIN, and an ISIN changes at
+# a split/bonus; the ISIN column is filled from rows already stored for that symbol, else left blank).
+# reference-data\QuarterlyResults.csv holds ONE row per company per quarter: the CONSOLIDATED result when the company
+# files one, otherwise the STANDALONE one (BASIS says which). NSE's bulk list only names the filings; the numbers are
+# in each filing's XBRL file, so those are fetched one by one - which is why this step is incremental:
+#   * the window is ResultsQuarters quarters back from the NEWEST quarter NSE serves (not from today - the feed can
+#     lag, and a today-based window would then be empty);
+#   * a filing is fetched once; it is fetched again only if NSE publishes a different/revised filing for that
+#     company and quarter (higher SEQ), or consolidated numbers appear where only standalone existed;
+#   * at most ResultsMaxFetch files per run (newest quarter first), saved as it goes, so a refresh never blocks for
+#     long and an interrupted run loses nothing; run again (or -ResultsMaxFetch 0 once) to finish the backlog;
+#   * rows older than the window are kept (archive), and a failed or empty download changes nothing.
+# Amounts are Rs crore, EPS is Rs per share. NET_PROFIT_CR is the profit attributable to the owners of the parent
+# when the filing reports it (what EPS is based on), else the total profit; for banks REVENUE_CR is total income
+# (interest earned + other income). Rows are written sorted so an unchanged feed leaves the file byte-identical.
+if ($FetchResults) {
+    Write-Host "`nDownloading quarterly results (revenue / profit / EPS)..." -ForegroundColor Cyan
+} else {
+    Write-Host "`nQuarterly results: skipped (on demand - run with -FetchResults to update reference-data\QuarterlyResults.csv)" -ForegroundColor DarkGray
+}
+$ResultsFile = Join-Path $ReferenceFolder "QuarterlyResults.csv"
+$ResultsColumns = @('ISIN','SYMBOL','TO_DATE','BASIS','AUDITED','FILED','REVENUE_CR','PBT_CR','NET_PROFIT_CR','EPS_BASIC','EPS_DILUTED','SEQ')
+$ResultsSummary = "Skipped (on demand - run with -FetchResults)"
+$ResultsInv = [Globalization.CultureInfo]::InvariantCulture
+# Windows PowerShell 5.1 draws a progress bar for every Invoke-WebRequest, which makes the multi-MB result lists (and
+# thousands of small XBRL files) crawl in an interactive console. Switched off for this step only; restored below.
+$PrevProgressPreference = $ProgressPreference
+$ProgressPreference = 'SilentlyContinue'
+
+function Get-NseListJson([string]$Url) {
+    $resp = Invoke-WebRequest -Uri $Url -Headers $ApiHeaders -WebSession $Session -UseBasicParsing -TimeoutSec 120 -ErrorAction Stop
+    return @($resp.Content | ConvertFrom-Json)
+}
+
+# Every filing of NSE's integrated-filing list (all pages), normalised to the field names the rest of this step uses
+# (isin is filled in later - the list has none). seq_Id: a revision always has a higher one than its original.
+function Get-IntegratedFilings {
+    $headers = $ApiHeaders.Clone()
+    $headers['Referer'] = 'https://www.nseindia.com/companies-listing/corporate-integrated-filing'
+    $pageSize = 5000
+    $all = New-Object System.Collections.Generic.List[object]
+    $script:IntegratedReceived = 0; $script:IntegratedTotal = 0
+    for ($page = 1; $page -le 30; $page++) {
+        # A page can come back short or empty (seen once in a real run, which then silently dropped ~19,000 filings), so a
+        # page that is smaller than it should be is asked for again; what is still missing is reported by the caller.
+        $rows = @(); $json = $null
+        for ($attempt = 1; $attempt -le 4; $attempt++) {
+            $resp = Invoke-WebRequest -Uri "$IntegratedResultsUrl&page=$page&size=$pageSize" -Headers $headers -WebSession $Session -UseBasicParsing -TimeoutSec 120 -ErrorAction Stop
+            $json = $resp.Content | ConvertFrom-Json
+            $rows = @($json.data)
+            $expected = [math]::Min($pageSize, [int]$json.totalCount - ($page - 1) * $pageSize)
+            if ($rows.Count -ge $expected -or $attempt -eq 4) { break }
+            Start-Sleep -Seconds (2 * $attempt)
+        }
+        $script:IntegratedTotal = [int]$json.totalCount
+        $script:IntegratedReceived += $rows.Count
+        foreach ($r in $rows) {
+            $d = ConvertTo-ExDate ([string]$r.qe_Date)
+            if ($null -eq $d -or -not $r.symbol -or -not $r.xbrl -or ([string]$r.xbrl).EndsWith('/null') -or ([string]$r.xbrl).EndsWith('/-')) { continue }
+            $all.Add([pscustomobject]@{
+                isin = ''; symbol = [string]$r.symbol; toDate = $d.ToString('dd-MMM-yyyy', $ResultsInv)
+                consolidated = [string]$r.consolidated; audited = [string]$r.audited; broadCastDate = [string]$r.broadcast_Date
+                seqNumber = [string]$r.seq_Id; xbrl = [string]$r.xbrl
+            })
+        }
+        if ($rows.Count -eq 0 -or ($page * $pageSize) -ge [int]$json.totalCount) { break }
+    }
+    return $all
+}
+
+# First numeric value among $Names for the CURRENT quarter (XBRL context "OneD"; "FourD" is the year-to-date figure)
+function Get-XbrlNumber([string]$Xml, [string[]]$Names) {
+    foreach ($n in $Names) {
+        # any namespace prefix: the older filings use in-bse-fin:, the integrated ones in-capmkt:
+        $m = [regex]::Match($Xml, ('<[\w-]+:{0}\s[^>]*contextRef="OneD"[^>]*>([^<]*)<' -f $n))
+        if ($m.Success) {
+            $v = 0.0
+            if ([double]::TryParse($m.Groups[1].Value.Trim(), [Globalization.NumberStyles]::Float, $ResultsInv, [ref]$v)) { return $v }
+        }
+    }
+    return $null
+}
+
+function Format-ResultNumber($Value, [double]$Divisor, [int]$Digits) {
+    if ($null -eq $Value) { return '' }
+    $r = [math]::Round([double]$Value / $Divisor, $Digits)
+    if ($r -eq 0) { return '0' }
+    return $r.ToString('0.' + ('#' * $Digits), $ResultsInv)
+}
+
+# One filing per company: consolidated preferred, then the newest revision (highest seq); filings without an XBRL file ("-") can't be read.
+# Grouped by SYMBOL (the integrated list has no ISIN)
+function Select-BestFilings($Filings) {
+    $best = New-Object System.Collections.Generic.List[object]
+    foreach ($g in ($Filings | Where-Object { $_.symbol -and $_.xbrl -and -not ([string]$_.xbrl).EndsWith('/-') -and $_.cumulative -ne 'Cumulative' } | Group-Object symbol)) {
+        $pick = $g.Group | Sort-Object @{ Expression = { if ($_.consolidated -eq 'Consolidated') { 0 } else { 1 } }; Ascending = $true }, `
+                                       @{ Expression = { [long]$_.seqNumber }; Ascending = $false } | Select-Object -First 1
+        $best.Add($pick)
+    }
+    return $best
+}
+
+function New-ResultRow($Filing, $Xml) {
+    $row = [pscustomobject]@{
+        ISIN = [string]$Filing.isin; SYMBOL = [string]$Filing.symbol; TO_DATE = [string]$Filing.toDate
+        BASIS = $(if ($Filing.consolidated -eq 'Consolidated') { 'Consolidated' } else { 'Standalone' })
+        AUDITED = $(if ($Filing.audited -eq 'Audited') { 'Audited' } else { 'Unaudited' })
+        FILED = ([string]$Filing.broadCastDate).Split(' ')[0]
+        REVENUE_CR = ''; PBT_CR = ''; NET_PROFIT_CR = ''; EPS_BASIC = ''; EPS_DILUTED = ''
+        SEQ = [string]$Filing.seqNumber
+    }
+    if (-not $Xml) { return $row }
+    # (OperatingIncome = a general insurer's total income; the life insurers have Income; the *BeforeTax names are the insurers')
+    $rev = Get-XbrlNumber $Xml @('RevenueFromOperations','Income','OperatingIncome','Revenue')
+    $pbt = Get-XbrlNumber $Xml @('ProfitBeforeTax','ProfitLossFromOrdinaryActivitiesBeforeTax','ProfitBeforeExtraordinaryItemsAndTax','ProfitOrLossBeforeTax','ProfitLossBeforeTax')
+    # Profit: the owners' share when the filing reports one, else total profit less minority interest. A consolidated filing
+    # often leaves "attributable to owners" at 0.00 (minority interest 0.00 too) while the total profit is real - ~15% of
+    # all filings on the real data (Dr Reddy's, Havells, NMDC, Bosch...) - so a ZERO owners' figure is not a figure.
+    $owners = Get-XbrlNumber $Xml @('ProfitOrLossAttributableToOwnersOfParent','ProfitLossAfterTaxesMinorityInterestAndShareOfProfitLossOfAssociates')
+    $minority = Get-XbrlNumber $Xml @('ProfitOrLossAttributableToNonControllingInterests','ProfitLossOfMinorityInterest')
+    $totalProfit = Get-XbrlNumber $Xml @('ProfitLossForPeriod','ProfitLossForThePeriod','ProfitLossFromOrdinaryActivitiesAfterTax','ProfitLossAfterTax','ProfitLossAfterTaxAndExtraordinaryItems','ProfitLossAfterTaxBeforeExtraordinaryItems')
+    if (($null -ne $owners) -and ($owners -ne 0)) { $net = $owners }
+    elseif (($null -ne $totalProfit) -and ($totalProfit -ne 0)) { $net = $totalProfit - $(if ($null -ne $minority) { $minority } else { 0 }) }
+    elseif ($null -ne $owners) { $net = $owners }
+    else { $net = $totalProfit }
+    $epsB = Get-XbrlNumber $Xml @('BasicEarningsLossPerShareFromContinuingAndDiscontinuedOperations','BasicEarningsPerShareAfterExtraordinaryItems','BasicEarningsLossPerShareFromContinuingOperations','BasicEarningsPerShareBeforeExtraordinaryItems')
+    $epsD = Get-XbrlNumber $Xml @('DilutedEarningsLossPerShareFromContinuingAndDiscontinuedOperations','DilutedEarningsPerShareAfterExtraordinaryItems','DilutedEarningsLossPerShareFromContinuingOperations','DilutedEarningsPerShareBeforeExtraordinaryItems')
+    # Some filers mis-tag the owners-attributable profit (e.g. a profit shown as a loss while their own EPS is positive).
+    # When it contradicts the filing's EPS sign but the total profit agrees with it, trust the total.
+    if (($null -ne $net) -and ($null -ne $epsB) -and ($net -ne 0) -and ($epsB -ne 0) -and (($net -gt 0) -ne ($epsB -gt 0))) {
+        if (($null -ne $totalProfit) -and ($totalProfit -ne 0) -and (($totalProfit -gt 0) -eq ($epsB -gt 0))) { $net = $totalProfit }
+    }
+    $row.REVENUE_CR = Format-ResultNumber $rev 1e7 4
+    $row.PBT_CR = Format-ResultNumber $pbt 1e7 4
+    $row.NET_PROFIT_CR = Format-ResultNumber $net 1e7 4
+    $row.EPS_BASIC = Format-ResultNumber $epsB 1 2
+    $row.EPS_DILUTED = Format-ResultNumber $epsD 1 2
+    return $row
+}
+
+function Save-ResultsFile($RowMap) {
+    $sorted = @($RowMap.Values | Sort-Object `
+        @{ Expression = { $d = ConvertTo-ExDate $_.TO_DATE; if ($null -ne $d) { $d } else { [datetime]::MaxValue } } }, `
+        @{ Expression = { $_.SYMBOL } }, `
+        @{ Expression = { $_.ISIN } })
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add($ResultsColumns -join ',')
+    foreach ($r in $sorted) {
+        $lines.Add((($ResultsColumns | ForEach-Object { '"' + (([string]$r.$_) -replace '"','""') + '"' }) -join ','))
+    }
+    return (Save-IfChanged $ResultsFile ($lines -join "`n"))
+}
+
+if ($FetchResults) { try {
+    $resultsTimer = [Diagnostics.Stopwatch]::StartNew()
+    # Stored rows first (also gives the ISIN to put on new rows: the integrated list has none). Keyed SYMBOL|quarter.
+    $resultRows = @{}
+    $isinBySymbol = @{}
+    if (Test-Path $ResultsFile) {
+        foreach ($r in @(Import-Csv -Path $ResultsFile -Encoding UTF8)) {
+            if ($r.SYMBOL -and $r.TO_DATE) {
+                $resultRows[('{0}|{1}' -f $r.SYMBOL, $r.TO_DATE)] = $r
+                if ($r.ISIN) { $isinBySymbol[$r.SYMBOL] = $r.ISIN }   # file is date-sorted, so the newest ISIN wins
+            }
+        }
+    }
+    $storedAtStart = $resultRows.Count
+
+    # The two feeds (see the note above). Either can fail on its own; both failing keeps the file as it is.
+    $latestFilings = @(); $oldAnchor = $null
+    try { $latestFilings = Get-NseListJson $ResultsBaseUrl }
+    catch { Write-Host "  Warning: the older results list is unavailable - $($_.Exception.Message)" -ForegroundColor Yellow }
+    foreach ($f in $latestFilings) {
+        $d = ConvertTo-ExDate ([string]$f.toDate)
+        if ($null -ne $d -and (($null -eq $oldAnchor) -or ($d -gt $oldAnchor))) { $oldAnchor = $d }
+    }
+    $integratedByQuarter = @{}; $newAnchor = $null
+    try {
+        foreach ($f in (Get-IntegratedFilings)) {
+            $d = ConvertTo-ExDate $f.toDate
+            if (($null -eq $newAnchor) -or ($d -gt $newAnchor)) { $newAnchor = $d }
+            if ($isinBySymbol.ContainsKey($f.symbol)) { $f.isin = $isinBySymbol[$f.symbol] }
+            if (-not $integratedByQuarter.ContainsKey($f.toDate)) { $integratedByQuarter[$f.toDate] = New-Object System.Collections.Generic.List[object] }
+            $integratedByQuarter[$f.toDate].Add($f)
+        }
+    }
+    catch { Write-Host "  Warning: the integrated-filing results list is unavailable - $($_.Exception.Message)" -ForegroundColor Yellow }
+    $integratedIncomplete = ($script:IntegratedTotal -gt 0) -and ($script:IntegratedReceived -lt $script:IntegratedTotal)
+    if ($script:IntegratedTotal -gt 0) {
+        Write-Host ("  Integrated-filing list: {0:N0} of {1:N0} filings received" -f $script:IntegratedReceived, $script:IntegratedTotal) -ForegroundColor DarkGray
+    }
+    if ($integratedIncomplete) {
+        Write-Host "  Warning: NSE's integrated-filing list came back INCOMPLETE - some quarters below may be partial. Run again to fill the gap." -ForegroundColor Yellow
+    }
+    $anchorDate = $oldAnchor
+    if (($null -ne $newAnchor) -and (($null -eq $anchorDate) -or ($newAnchor -gt $anchorDate))) { $anchorDate = $newAnchor }
+
+    if (($null -eq $anchorDate) -or ($ResultsQuarters -lt 1)) {
+        Write-Host "  Warning: NSE returned no quarterly results (or -ResultsQuarters < 1) - keeping the existing file" -ForegroundColor Yellow
+        $ResultsSummary = "No data from NSE - file unchanged"
+    } else {
+        # What is missing or outdated? Quarters are walked newest first, so a capped run fills the newest ones first.
+        $pending = New-Object System.Collections.Generic.List[object]
+        $quarterEnd = $anchorDate
+        $quarterLabels = @()
+        for ($qi = 0; $qi -lt $ResultsQuarters; $qi++) {
+            try {
+                $qKey = $quarterEnd.ToString('dd-MMM-yyyy', $ResultsInv)
+                if ($integratedByQuarter.ContainsKey($qKey)) {
+                    $filings = $integratedByQuarter[$qKey].ToArray(); $feed = 'integrated'
+                } elseif (($null -ne $oldAnchor) -and ($quarterEnd -le $oldAnchor)) {
+                    $feed = 'older'
+                    if ($quarterEnd -eq $oldAnchor) {
+                        $filings = $latestFilings
+                    } else {
+                        $from = $quarterEnd.AddDays(1)
+                        $to = $quarterEnd.AddDays(180)
+                        if ($to -gt (Get-Date).Date) { $to = (Get-Date).Date }
+                        $filings = Get-NseListJson ("$ResultsBaseUrl&from_date=$($from.ToString('dd-MM-yyyy'))&to_date=$($to.ToString('dd-MM-yyyy'))")
+                    }
+                    $filings = @($filings | Where-Object { (ConvertTo-ExDate ([string]$_.toDate)) -eq $quarterEnd })
+                } else {
+                    $filings = @(); $feed = 'no data'
+                }
+                $best = Select-BestFilings $filings
+                $qPending = 0
+                foreach ($f in $best) {
+                    $key = '{0}|{1}' -f $f.symbol, $f.toDate
+                    if ((-not $resultRows.ContainsKey($key)) -or ([string]$resultRows[$key].SEQ -ne [string]$f.seqNumber)) {
+                        $pending.Add([pscustomobject]@{ Key = $key; Filing = $f }); $qPending++
+                    }
+                }
+                $quarterLabels += ("{0} ({1}: {2} filers, {3} to fetch)" -f $quarterEnd.ToString('MMM-yyyy', $ResultsInv), $feed, $best.Count, $qPending)
+            } catch {
+                Write-Host "  Warning: could not list results for the quarter ending $($quarterEnd.ToString('dd-MMM-yyyy')) - $($_.Exception.Message)" -ForegroundColor Yellow
+            }
+            $quarterEnd = $quarterEnd.AddDays(1).AddMonths(-3).AddDays(-1)
+        }
+        Write-Host "  Window: $($quarterLabels -join '; ')" -ForegroundColor DarkGray
+
+        $toFetch = if ($ResultsMaxFetch -gt 0) { @($pending | Select-Object -First $ResultsMaxFetch) } else { $pending.ToArray() }
+        $nFetched = 0; $nBlank = 0; $nFailed = 0; $nDone = 0; $consecutiveFail = 0
+        foreach ($p in $toFetch) {
+            $nDone++
+            $xml = $null; $status = 'FAIL'
+            for ($attempt = 1; $attempt -le 2; $attempt++) {
+                try {
+                    $resp = Invoke-WebRequest -Uri $p.Filing.xbrl -Headers $ApiHeaders -WebSession $Session -UseBasicParsing -TimeoutSec 60 -ErrorAction Stop
+                    $xml = $resp.Content
+                    if ($xml -is [byte[]]) { $xml = [Text.Encoding]::UTF8.GetString($xml) }
+                    $status = 'OK'; break
+                } catch {
+                    $code = $null
+                    if ($_.Exception.Response) { $code = [int]$_.Exception.Response.StatusCode }
+                    if ($code -eq 404) { $status = 'GONE'; break }
+                    if ($attempt -lt 2) { Start-Sleep -Seconds 2 }
+                }
+            }
+            if ($status -eq 'FAIL') {
+                $nFailed++; $consecutiveFail++
+                if ($consecutiveFail -ge 15) {
+                    Write-Host "  Warning: 15 filings in a row failed to download - stopping early (NSE may be throttling); will resume next run" -ForegroundColor Yellow
+                    break
+                }
+                continue
+            }
+            $consecutiveFail = 0
+            # A filing that is gone or has no readable numbers is stored with blank metrics so it isn't re-fetched every run
+            $row = New-ResultRow $p.Filing $(if ($status -eq 'OK') { [string]$xml } else { $null })
+            if (-not ($row.REVENUE_CR -or $row.NET_PROFIT_CR -or $row.EPS_BASIC)) { $nBlank++ } else { $nFetched++ }
+            $resultRows[$p.Key] = $row
+            if (($nDone % 500) -eq 0) {
+                $null = Save-ResultsFile $resultRows
+                Write-Host "  Results: $nDone / $($toFetch.Count) filings processed..." -ForegroundColor DarkGray
+            }
+        }
+
+        if ($resultRows.Count -gt 0) {
+            $resultsChanged = Save-ResultsFile $resultRows
+            $remaining = $pending.Count - $nDone
+            Write-Host "  Quarterly results: $($resultRows.Count) rows ($($resultRows.Count - $storedAtStart) new; $nFetched read, $nBlank without numbers, $nFailed failed) $(if ($resultsChanged) { 'updated' } else { 'unchanged' }) in $([math]::Round($resultsTimer.Elapsed.TotalSeconds))s - newest quarter $($anchorDate.ToString('dd-MMM-yyyy'))" -ForegroundColor Green
+            if ($remaining -gt 0) {
+                Write-Host "  $remaining more filings still to fetch - they will be picked up on the next run (or run with -ResultsMaxFetch 0 to fetch them all now)" -ForegroundColor Yellow
+            }
+            $ResultsSummary = "$($resultRows.Count) rows, newest quarter $($anchorDate.ToString('dd-MMM-yyyy')); $nFetched read this run, $remaining still to fetch$(if ($integratedIncomplete) { ' - NSE list INCOMPLETE, run again' })"
+        } else {
+            Write-Host "  Warning: no quarterly results could be read - nothing written" -ForegroundColor Yellow
+            $ResultsSummary = "Nothing could be read"
+        }
+    }
+}
+catch {
+    Write-Host "  Warning: Could not download quarterly results - $($_.Exception.Message)" -ForegroundColor Yellow
+    $ResultsSummary = "Failed: $($_.Exception.Message)"
+} }
+$ProgressPreference = $PrevProgressPreference
+
 # -- Seed the sector mapping from the git-tracked copy if NSE_DATA has none ------
 # reference-data\Sector-Stock-Mapping.csv is written by src/build_screener_classification.py; the older
 # location (next to this script) is still honoured.
@@ -990,6 +1305,9 @@ if ($BandFail.Count -gt 0) {
 if ($BandOK.Count -eq 0 -and $BandFail.Count -eq 0 -and $BandExist.Count -eq 0 -and $BandHoliday.Count -eq 0) {
     Write-Host "    Nothing to download." -ForegroundColor DarkGray
 }
+
+Write-Host "`n  QUARTERLY RESULTS:" -ForegroundColor Cyan
+Write-Host "    $ResultsSummary" -ForegroundColor DarkGray
 
 Write-Host "`n  Output: $MergedFolder" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Yellow
