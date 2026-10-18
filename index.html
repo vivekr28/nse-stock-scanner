@@ -194,6 +194,7 @@
         <!-- Tab bar -->
         <div class="scr-filter-tabbar">
           <button id="scrTabTechnicals" class="scr-filter-tab active" onclick="switchFilterTab('technicals')">Technicals<span id="scrTabTechCount" class="scr-tab-count"></span></button>
+          <button id="scrTabRelStrength" class="scr-filter-tab" onclick="switchFilterTab('relstrength')">Relative Strength<span id="scrTabRsCount" class="scr-tab-count"></span></button>
           <button id="scrTabIndustry" class="scr-filter-tab" onclick="switchFilterTab('industry')">Sector & Industry<span id="scrTabIndCount" class="scr-tab-count"></span></button>
           <button id="scrTabQuarterly" class="scr-filter-tab" onclick="switchFilterTab('quarterly')">Quarterly Results<span id="scrTabQtrCount" class="scr-tab-count"></span></button>
           <button id="scrTabMulti" class="scr-filter-tab" onclick="switchFilterTab('multi')">Multi-Preset<span id="scrTabMultiCount" class="scr-tab-count"></span></button>
@@ -346,32 +347,6 @@
               </div>
             </div>
 
-            <!-- F16: % change between two chosen dates, each on a chosen O/H/L/C field -->
-            <div class="scr-filter-row">
-              <input type="checkbox" id="scrF16On">
-              <span class="scr-label">% Change:</span>
-              <div class="scr-inputs">
-                <span class="scr-unit">From</span>
-                <input type="date" id="scrF16FromDate">
-                <select id="scrF16FromField">
-                  <option value="open">Open</option>
-                  <option value="high">High</option>
-                  <option value="low">Low</option>
-                  <option value="close" selected>Close</option>
-                </select>
-                <span class="scr-unit">to</span>
-                <input type="date" id="scrF16ToDate">
-                <select id="scrF16ToField">
-                  <option value="open">Open</option>
-                  <option value="high">High</option>
-                  <option value="low">Low</option>
-                  <option value="close" selected>Close</option>
-                </select>
-                <span class="scr-unit">&ge;</span>
-                <input type="number" id="scrF16Val" value="0" step="5" style="width:70px;"> <span class="scr-unit">%</span>
-              </div>
-            </div>
-
             <!-- F19: Listed Date - stocks listed on or after the chosen date -->
             <div class="scr-filter-row">
               <input type="checkbox" id="scrF19On">
@@ -469,6 +444,58 @@
                 <span class="scr-unit">&gt;</span>
                 <input type="number" id="scrF17Val" value="0" step="5" style="width:60px;">
                 <span class="scr-unit">pp</span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- ═══ Relative Strength Tab (js/relative-strength.js): % Change between two dates (F16, moved from Technicals) and Close Above (F24) ═══ -->
+        <div id="scrPaneRelStrength" class="scr-filter-pane" style="display:none;">
+          <div class="scr-filters-list">
+
+            <!-- F16: % change between two chosen dates, each on a chosen O/H/L/C field -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF16On">
+              <span class="scr-label">% Change:</span>
+              <div class="scr-inputs">
+                <span class="scr-unit">From</span>
+                <input type="date" id="scrF16FromDate">
+                <select id="scrF16FromField">
+                  <option value="open">Open</option>
+                  <option value="high">High</option>
+                  <option value="low">Low</option>
+                  <option value="close" selected>Close</option>
+                </select>
+                <span class="scr-unit">to</span>
+                <input type="date" id="scrF16ToDate">
+                <select id="scrF16ToField">
+                  <option value="open">Open</option>
+                  <option value="high">High</option>
+                  <option value="low">Low</option>
+                  <option value="close" selected>Close</option>
+                </select>
+                <span class="scr-unit">&ge;</span>
+                <input type="number" id="scrF16Val" value="0" step="5" style="width:70px;"> <span class="scr-unit">%</span>
+              </div>
+            </div>
+
+            <!-- F24: Close above the Open / High / Low / Close of a chosen date, on any of the next n trading days (js/relative-strength.js) -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF24On">
+              <span class="scr-label" title="Passes stocks that CLOSED above the chosen Open / High / Low / Close of the chosen date on at least one of the next n trading days after it (strictly above; the date itself is not one of the n days). A date that is not a trading day uses the nearest earlier one.">Close Above:</span>
+              <div class="scr-inputs">
+                <select id="scrF24Field">
+                  <option value="open">Open</option>
+                  <option value="high" selected>High</option>
+                  <option value="low">Low</option>
+                  <option value="close">Close</option>
+                </select>
+                <span class="scr-unit">of</span>
+                <input type="date" id="scrF24Date">
+                <span class="scr-unit">in any of the next</span>
+                <input type="number" id="scrF24Days" value="5" min="1" step="1" style="width:60px;">
+                <span class="scr-unit">days</span>
               </div>
             </div>
 
@@ -1184,8 +1211,9 @@
 <script src="js/cache.js?v=2"></script>
 <script src="js/data-processor.js?v=2"></script>
 <script src="js/scanner.js?v=2"></script>
-<script src="js/screener.js?v=19"></script>
+<script src="js/screener.js?v=20"></script>
 <script src="js/quarterly-results.js?v=7"></script>
+<script src="js/relative-strength.js?v=1"></script>
 <script src="js/quarterly-chart-table.js?v=1"></script>
 <script src="js/breadth.js?v=14"></script>
 <script src="js/sector.js?v=2"></script>
@@ -1197,9 +1225,9 @@
 <script src="js/industry-charts.js?v=24"></script>
 <script src="js/data-quality.js?v=12"></script>
 <script src="js/quarterly-results-fetch.js?v=1"></script>
-<script src="js/presets.js?v=13"></script>
-<script src="js/asof-scan.js?v=2"></script>
-<script src="js/ui.js?v=11"></script>
+<script src="js/presets.js?v=14"></script>
+<script src="js/asof-scan.js?v=3"></script>
+<script src="js/ui.js?v=12"></script>
 <script src="js/nse-download.js?v=5"></script>
 
 </body>

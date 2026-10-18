@@ -365,6 +365,8 @@ function runScreener() {
 
   // Quarterly Results tab (F20 - F23, js/quarterly-results.js): read here, applied per stock below
   const qr = typeof qrFilterState === 'function' ? qrFilterState() : null;
+  // Relative Strength tab's F24 (js/relative-strength.js): read here, applied per stock below
+  const rs = typeof rsFilterState === 'function' ? rsFilterState() : null;
 
   // Pre-compute industry RS map if needed
   let indRSMap = {};
@@ -641,6 +643,9 @@ function runScreener() {
     // F20 - F23: growth / turnaround of the latest declared quarter vs the same quarter last year (js/quarterly-results.js)
     if (qr && qr.any) failReasons.push(...qrApplyToStock(s, qr));
 
+    // F24: closed above the O/H/L/C of a chosen date within the next n trading days (js/relative-strength.js)
+    if (rs && rs.any) failReasons.push(...rsApplyToStock(s, days, rs, allowPartial));
+
     // F18: Making a new 1M / 3M / 52W high today (every ticked window must be one)
     if (f18On) {
       const results = {};
@@ -806,6 +811,7 @@ function renderScreenerTable() {
   if (f19On) {
     cols.push({ key: 'listingDate', label: 'Listed On', fmt: v => v || '-' });
   }
+  if (typeof rsColumns === 'function') cols.push(...rsColumns());   // Relative Strength tab's F24 columns (js/relative-strength.js)
   if (typeof qrColumns === 'function') cols.push(...qrColumns());   // Quarterly Results filters' columns (js/quarterly-results.js)
   cols.push({ key: 'marketCap', label: 'MCap(Cr)', fmt: v => fmtCr(v) });
 
@@ -917,6 +923,7 @@ function resetScreener() {
   initF16Dates();
   document.getElementById('scrF19On').checked = false;
   document.getElementById('scrF19Date').value = '';
+  if (typeof rsReset === 'function') rsReset(); // the Relative Strength tab's F24 controls (js/relative-strength.js)
   if (typeof qrReset === 'function') qrReset(); // the Quarterly Results tab's controls (js/quarterly-results.js)
   if (typeof asOfReset === 'function') asOfReset(); // the As of Date tab's controls reset with everything else
   scrShowingFailed = false;
@@ -1166,18 +1173,19 @@ function updateApplyBtn() {
 }
 
 function updateFilterBadge() {
-  const techIds = ['scrF1On','scrF2On','scrF3On','scrF4On','scrF5On','scrF6On','scrF7On','scrF8On','scrF10On','scrF15On','scrF16On','scrF18On','scrF19On'];
+  const techIds = ['scrF1On','scrF2On','scrF3On','scrF4On','scrF5On','scrF6On','scrF7On','scrF8On','scrF10On','scrF15On','scrF18On','scrF19On'];   // F16 (% Change) lives on the Relative Strength tab now
   const indIds  = ['scrF9On','scrF11On','scrF12On','scrF13On','scrF14On','scrF17On'];
   const countChecked = ids => ids.filter(id => { const el = document.getElementById(id); return el && el.checked; }).length;
 
   const techCount = countChecked(techIds);
   const indCount  = countChecked(indIds);
+  const rsCount   = typeof rsActiveCount === 'function' ? rsActiveCount() : 0; // Relative Strength tab: F16 + F24 (js/relative-strength.js)
   const qtrCount  = typeof qrActiveCount === 'function' ? qrActiveCount() : 0; // Quarterly Results tab (js/quarterly-results.js)
   const asOfCount = typeof asOfActiveCount === 'function' ? asOfActiveCount() : 0; // As of Date tab (js/asof-scan.js)
 
   const badge = document.getElementById('scrActiveFilterBadge');
   if (badge) {
-    const total = techCount + indCount + qtrCount + asOfCount;
+    const total = techCount + indCount + rsCount + qtrCount + asOfCount;
     badge.textContent = total;
     badge.style.display = total > 0 ? '' : 'none';
   }
@@ -1196,6 +1204,7 @@ function updateFilterBadge() {
     indBadge.style.display = indCount > 0 ? 'inline-block' : 'none';
   }
 
+  if (typeof rsUpdateBadge === 'function') rsUpdateBadge();
   if (typeof qrUpdateBadge === 'function') qrUpdateBadge();
 
   if (typeof asOfUpdateBadge === 'function') asOfUpdateBadge();
@@ -1206,19 +1215,23 @@ function updateFilterBadge() {
 function switchFilterTab(tab) {
   const techPane  = document.getElementById('scrPaneTechnicals');
   const indPane   = document.getElementById('scrPaneIndustry');
+  const rsPane    = document.getElementById('scrPaneRelStrength');
   const qtrPane   = document.getElementById('scrPaneQuarterly');
   const multiPane = document.getElementById('scrPaneMulti');
   const techTab   = document.getElementById('scrTabTechnicals');
   const indTab    = document.getElementById('scrTabIndustry');
+  const rsTab     = document.getElementById('scrTabRelStrength');
   const qtrTab    = document.getElementById('scrTabQuarterly');
   const multiTab  = document.getElementById('scrTabMulti');
 
   techPane.style.display  = tab === 'technicals' ? '' : 'none';
   indPane.style.display   = tab === 'industry'   ? '' : 'none';
+  rsPane.style.display    = tab === 'relstrength' ? '' : 'none';
   qtrPane.style.display   = tab === 'quarterly'  ? '' : 'none';
   multiPane.style.display = tab === 'multi'      ? '' : 'none';
   techTab.classList.toggle('active', tab === 'technicals');
   indTab.classList.toggle('active', tab === 'industry');
+  rsTab.classList.toggle('active', tab === 'relstrength');
   qtrTab.classList.toggle('active', tab === 'quarterly');
   multiTab.classList.toggle('active', tab === 'multi');
 
