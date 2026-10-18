@@ -139,7 +139,9 @@ test('qrFilterState reads the four filters; a blank or invalid threshold counts 
   dom.el('scrF20On').checked = true; dom.el('scrF22On').checked = true;
   const s = JSON.parse(JSON.stringify(sb.qrFilterState()));
   assert.deepEqual(s, { f20: { on: true, min: 25 }, f21: { on: false, min: 0 }, f22: { on: true }, f23: { on: false },
-    f26: { on: false, min: 0 }, f27: { on: false, min: 0 }, any: true });   // f26 / f27 = the latest-quarter filters (tests-js/quarterly-latest.test.js)
+    f26: { on: false, min: 0 }, f27: { on: false, min: 0 },                 // f26 / f27 = the latest-quarter filters (tests-js/quarterly-latest.test.js)
+    f28: { on: false, min: 0 }, f29: { on: false, min: 0 },                 // f28-f31 = QoQ Earnings / QoQ Sales and their latest-quarter versions (tests-js/quarterly-qoq.test.js)
+    f30: { on: false, min: 0 }, f31: { on: false, min: 0 }, any: true });
 });
 
 test('qrApplyToStock records what the table columns need on the stock and returns the reasons it fails', () => {

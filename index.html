@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NSE EOD Dashboard</title>
-<link rel="stylesheet" href="css/styles.css?v=15">
+<link rel="stylesheet" href="css/styles.css?v=16">
 </head>
 <body>
 
@@ -524,65 +524,117 @@
           <div class="scr-filters-list">
             <p id="scrQtrStatus" style="color:var(--text2);font-size:12px;margin:0;">Loading quarterly results...</p>
 
-            <!-- F20: Earnings (net profit) growth, latest quarter vs the same quarter last year -->
-            <div class="scr-filter-row">
-              <input type="checkbox" id="scrF20On">
-              <span class="scr-label" title="Net profit of the stock's latest declared quarter vs the same quarter a year earlier, in %. Stocks that were loss-making a year ago have no % growth and do not pass.">QoQ Y Earnings:</span>
-              <div class="scr-inputs">
-                <span class="scr-unit">&gt;</span>
-                <input type="number" id="scrF20Val" value="20" step="5" style="width:70px;">
-                <span class="scr-unit">%</span>
+            <div class="scr-qtr-col">
+              <div class="scr-col-head">Against the same quarter a year earlier</div>
+
+              <!-- F20: Earnings (net profit) growth, latest quarter vs the same quarter last year -->
+              <div class="scr-filter-row">
+                <input type="checkbox" id="scrF20On">
+                <span class="scr-label" title="Net profit of the stock's latest declared quarter vs the same quarter a year earlier, in %. Stocks that were loss-making a year ago have no % growth and do not pass.">QoQ Y Earnings:</span>
+                <div class="scr-inputs">
+                  <span class="scr-unit">&gt;</span>
+                  <input type="number" id="scrF20Val" value="20" step="5" style="width:70px;">
+                  <span class="scr-unit">%</span>
+                </div>
+              </div>
+
+              <!-- F21: Sales growth, latest quarter vs the same quarter last year -->
+              <div class="scr-filter-row">
+                <input type="checkbox" id="scrF21On">
+                <span class="scr-label" title="Sales (revenue from operations; total income for banks) of the stock's latest declared quarter vs the same quarter a year earlier, in %.">QoQ Y Sales:</span>
+                <div class="scr-inputs">
+                  <span class="scr-unit">&gt;</span>
+                  <input type="number" id="scrF21Val" value="10" step="5" style="width:70px;">
+                  <span class="scr-unit">%</span>
+                </div>
+              </div>
+
+              <!-- F26: Earnings growth, ONLY for stocks that have declared the newest quarter on file (the quarter name is filled in by js/quarterly-results.js) -->
+              <div class="scr-filter-row">
+                <input type="checkbox" id="scrF26On">
+                <span class="scr-label" title="Like QoQ Y Earnings, but only stocks that have declared the NEWEST quarter any company has declared (shown in the label) can pass: a stock whose latest result is an older quarter is left out. Net profit of that quarter vs the same quarter a year earlier, in %.">Latest Quarter <span id="scrF26Q"></span> QoQ Y Earnings:</span>
+                <div class="scr-inputs">
+                  <span class="scr-unit">&gt;</span>
+                  <input type="number" id="scrF26Val" value="20" step="5" style="width:70px;">
+                  <span class="scr-unit">%</span>
+                </div>
+              </div>
+
+              <!-- F27: Sales growth, ONLY for stocks that have declared the newest quarter on file -->
+              <div class="scr-filter-row">
+                <input type="checkbox" id="scrF27On">
+                <span class="scr-label" title="Like QoQ Y Sales, but only stocks that have declared the NEWEST quarter any company has declared (shown in the label) can pass: a stock whose latest result is an older quarter is left out. Sales of that quarter vs the same quarter a year earlier, in %.">Latest Quarter <span id="scrF27Q"></span> QoQ Y Sales:</span>
+                <div class="scr-inputs">
+                  <span class="scr-unit">&gt;</span>
+                  <input type="number" id="scrF27Val" value="10" step="5" style="width:70px;">
+                  <span class="scr-unit">%</span>
+                </div>
+              </div>
+
+              <!-- F22: Earnings turnaround - a loss in the same quarter a year ago, a profit now. Kept apart from F20: growth % needs a positive base -->
+              <div class="scr-filter-row">
+                <input type="checkbox" id="scrF22On">
+                <span class="scr-label" title="Net profit this quarter after a LOSS in the same quarter a year earlier. No % is computed (a percentage from a loss means nothing); the table shows the two amounts instead.">QoQ Y Earnings turnaround:</span>
+                <div class="scr-inputs">
+                  <span class="scr-unit">loss a year ago, profit now</span>
+                </div>
+              </div>
+
+              <!-- F23: Sales turnaround - no sales in the same quarter a year ago, some now. Kept apart from F21 -->
+              <div class="scr-filter-row">
+                <input type="checkbox" id="scrF23On">
+                <span class="scr-label" title="Sales this quarter after NO sales in the same quarter a year earlier (sales cannot be negative, so zero is the only 'before'). Rare: only a handful of stocks.">QoQ Y Sales turnaround:</span>
+                <div class="scr-inputs">
+                  <span class="scr-unit">no sales a year ago, sales now</span>
+                </div>
               </div>
             </div>
 
-            <!-- F21: Sales growth, latest quarter vs the same quarter last year -->
-            <div class="scr-filter-row">
-              <input type="checkbox" id="scrF21On">
-              <span class="scr-label" title="Sales (revenue from operations; total income for banks) of the stock's latest declared quarter vs the same quarter a year earlier, in %.">QoQ Y Sales:</span>
-              <div class="scr-inputs">
-                <span class="scr-unit">&gt;</span>
-                <input type="number" id="scrF21Val" value="10" step="5" style="width:70px;">
-                <span class="scr-unit">%</span>
-              </div>
-            </div>
+            <div class="scr-qtr-col">
+              <div class="scr-col-head">Against the previous quarter</div>
 
-            <!-- F22: Earnings turnaround - a loss in the same quarter a year ago, a profit now. Kept apart from F20: growth % needs a positive base -->
-            <div class="scr-filter-row">
-              <input type="checkbox" id="scrF22On">
-              <span class="scr-label" title="Net profit this quarter after a LOSS in the same quarter a year earlier. No % is computed (a percentage from a loss means nothing); the table shows the two amounts instead.">QoQ Y Earnings turnaround:</span>
-              <div class="scr-inputs">
-                <span class="scr-unit">loss a year ago, profit now</span>
+              <!-- F28: earnings growth against the PREVIOUS quarter (a sequential step, not the year-ago comparison) -->
+              <div class="scr-filter-row">
+                <input type="checkbox" id="scrF28On">
+                <span class="scr-label" title="Net profit of the stock's latest declared quarter against the quarter BEFORE it (not the same quarter a year ago), in %. Needs a positive profit in the previous quarter. 0 = profit up on the previous quarter.">QoQ Earnings:</span>
+                <div class="scr-inputs">
+                  <span class="scr-unit">&gt;</span>
+                  <input type="number" id="scrF28Val" value="0" step="5" style="width:70px;">
+                  <span class="scr-unit">%</span>
+                </div>
               </div>
-            </div>
 
-            <!-- F23: Sales turnaround - no sales in the same quarter a year ago, some now. Kept apart from F21 -->
-            <div class="scr-filter-row">
-              <input type="checkbox" id="scrF23On">
-              <span class="scr-label" title="Sales this quarter after NO sales in the same quarter a year earlier (sales cannot be negative, so zero is the only 'before'). Rare: only a handful of stocks.">QoQ Y Sales turnaround:</span>
-              <div class="scr-inputs">
-                <span class="scr-unit">no sales a year ago, sales now</span>
+              <!-- F29: sales growth against the PREVIOUS quarter -->
+              <div class="scr-filter-row">
+                <input type="checkbox" id="scrF29On">
+                <span class="scr-label" title="Sales of the stock's latest declared quarter against the quarter BEFORE it (not the same quarter a year ago), in %. Needs sales in the previous quarter. 0 = sales up on the previous quarter.">QoQ Sales:</span>
+                <div class="scr-inputs">
+                  <span class="scr-unit">&gt;</span>
+                  <input type="number" id="scrF29Val" value="0" step="5" style="width:70px;">
+                  <span class="scr-unit">%</span>
+                </div>
               </div>
-            </div>
 
-            <!-- F26: Earnings growth, ONLY for stocks that have declared the newest quarter on file (the quarter name is filled in by js/quarterly-results.js) -->
-            <div class="scr-filter-row">
-              <input type="checkbox" id="scrF26On">
-              <span class="scr-label" title="Like QoQ Y Earnings, but only stocks that have declared the NEWEST quarter any company has declared (shown in the label) can pass: a stock whose latest result is an older quarter is left out. Net profit of that quarter vs the same quarter a year earlier, in %.">Latest Quarter <span id="scrF26Q"></span> QoQ Y Earnings:</span>
-              <div class="scr-inputs">
-                <span class="scr-unit">&gt;</span>
-                <input type="number" id="scrF26Val" value="20" step="5" style="width:70px;">
-                <span class="scr-unit">%</span>
+              <!-- F30: QoQ earnings, ONLY for stocks that have declared the newest quarter on file (the quarter name is filled in by js/quarterly-results.js) -->
+              <div class="scr-filter-row">
+                <input type="checkbox" id="scrF30On">
+                <span class="scr-label" title="Like QoQ Earnings, but only stocks that have declared the NEWEST quarter any company has declared (shown in the label) can pass: a stock whose latest result is an older quarter is left out. Net profit of that quarter against the quarter before it, in %.">Latest Quarter <span id="scrF30Q"></span> QoQ Earnings:</span>
+                <div class="scr-inputs">
+                  <span class="scr-unit">&gt;</span>
+                  <input type="number" id="scrF30Val" value="0" step="5" style="width:70px;">
+                  <span class="scr-unit">%</span>
+                </div>
               </div>
-            </div>
 
-            <!-- F27: Sales growth, ONLY for stocks that have declared the newest quarter on file -->
-            <div class="scr-filter-row">
-              <input type="checkbox" id="scrF27On">
-              <span class="scr-label" title="Like QoQ Y Sales, but only stocks that have declared the NEWEST quarter any company has declared (shown in the label) can pass: a stock whose latest result is an older quarter is left out. Sales of that quarter vs the same quarter a year earlier, in %.">Latest Quarter <span id="scrF27Q"></span> QoQ Y Sales:</span>
-              <div class="scr-inputs">
-                <span class="scr-unit">&gt;</span>
-                <input type="number" id="scrF27Val" value="10" step="5" style="width:70px;">
-                <span class="scr-unit">%</span>
+              <!-- F31: QoQ sales, ONLY for stocks that have declared the newest quarter on file -->
+              <div class="scr-filter-row">
+                <input type="checkbox" id="scrF31On">
+                <span class="scr-label" title="Like QoQ Sales, but only stocks that have declared the NEWEST quarter any company has declared (shown in the label) can pass: a stock whose latest result is an older quarter is left out. Sales of that quarter against the quarter before it, in %.">Latest Quarter <span id="scrF31Q"></span> QoQ Sales:</span>
+                <div class="scr-inputs">
+                  <span class="scr-unit">&gt;</span>
+                  <input type="number" id="scrF31Val" value="0" step="5" style="width:70px;">
+                  <span class="scr-unit">%</span>
+                </div>
               </div>
             </div>
 
@@ -1251,7 +1303,7 @@
 <script src="js/data-processor.js?v=2"></script>
 <script src="js/scanner.js?v=2"></script>
 <script src="js/screener.js?v=21"></script>
-<script src="js/quarterly-results.js?v=9"></script>
+<script src="js/quarterly-results.js?v=10"></script>
 <script src="js/relative-strength.js?v=3"></script>
 <script src="js/quarterly-chart-table.js?v=2"></script>
 <script src="js/breadth.js?v=14"></script>
@@ -1264,7 +1316,7 @@
 <script src="js/industry-charts.js?v=24"></script>
 <script src="js/data-quality.js?v=12"></script>
 <script src="js/quarterly-results-fetch.js?v=1"></script>
-<script src="js/presets.js?v=16"></script>
+<script src="js/presets.js?v=17"></script>
 <script src="js/asof-scan.js?v=3"></script>
 <script src="js/ui.js?v=12"></script>
 <script src="js/nse-download.js?v=5"></script>

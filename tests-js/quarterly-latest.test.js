@@ -161,10 +161,10 @@ test('index.html: the two rows are in the Quarterly Results pane, after F23, wit
     const at = html.indexOf(`id="${id}"`);
     assert.ok(at > pane && at < multi, `${id} is in the Quarterly Results pane`);
   }
-  assert.ok(html.indexOf('id="scrF26On"') > html.indexOf('id="scrF23On"'));
+  assert.ok(html.indexOf('id="scrF26On"') > html.indexOf('id="scrF21On"'));      // after the plain growth filters, in the same column
   assert.match(html, /Latest Quarter <span id="scrF26Q"><\/span> QoQ Y Earnings:/);
   assert.match(html, /Latest Quarter <span id="scrF27Q"><\/span> QoQ Y Sales:/);
-  assert.match(html, /quarterly-results\.js\?v=9/);
+  assert.match(html, /quarterly-results\.js\?v=1\d/);
 });
 
 test('screener.js still holds none of the Quarterly Results filters (no F26 / F27 ids)', () => {

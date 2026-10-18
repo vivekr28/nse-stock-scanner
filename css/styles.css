@@ -201,6 +201,18 @@ select option {
 .scr-filter-pair { display: flex; flex-direction: column; gap: 10px; }
 /* Technicals: the Day Chg / Turnover co-occurrence card (F4) spans both columns, below them */
 #scrPaneTechnicals .scr-filter-pair { grid-column: 1 / -1; }
+/* Quarterly Results tab: two columns - the filters that compare with the same quarter a year earlier (left) and with the previous quarter
+   (right), each under a small heading; the status line spans both. Collapses to one column on a narrow modal, like Technicals. */
+#scrPaneQuarterly .scr-filters-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(600px, 1fr));
+  align-items: start;
+  gap: 10px 16px;
+}
+#scrPaneQuarterly #scrQtrStatus { grid-column: 1 / -1; }
+.scr-qtr-col { display: flex; flex-direction: column; gap: 10px; }
+.scr-col-head { color: var(--text2); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; padding: 0 4px; }
+#scrPaneQuarterly .scr-filter-row .scr-label { min-width: 130px; }
 /* Technicals: two independent stacks so spacing stays uniform regardless of tall rows in the other column */
 .scr-tech-col { display: flex; flex-direction: column; gap: 10px; }
 /* Free up room for inputs in the narrower 2-column cells — the sitewide 180px label

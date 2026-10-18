@@ -131,6 +131,8 @@ def build_quarterly_growth(path):
       ab    only present when the quarter and its year-ago quarter are stored on different bases but the file also holds
             the OTHER basis (the ALT_* columns, read by Download-NSE-Bhavcopy.ps1): 'S' or 'C', the basis the comparison
             was made on (preferring consolidated). The browser marks such figures; everything below is then on that basis
+      qe/qs net-profit / sales growth % against the PREVIOUS quarter (not the year-ago one), on a basis both quarters hold; None when the
+            previous quarter's profit / sales is not positive. Only present when the previous quarter is on file
       s/sp  sales (Rs crore) this quarter / a year ago;  e/ep  net profit (Rs crore) this quarter / a year ago
       sg/eg sales / net-profit growth %, None unless cmp is 'ok' AND the year-ago figure is positive
       st/et turnaround flags (kept apart from growth, which needs a positive base), only ever True when cmp is 'ok':
@@ -160,6 +162,12 @@ def build_quarterly_growth(path):
         rec = _compare_quarter(quarters, sales_by_date, latest)
         rec['q'] = latest.isoformat()
         rec['b'] = 'C' if quarters[latest].get('BASIS') == 'Consolidated' else 'S'
+        # growth against the previous quarter (a sequential step, for the scanner's QoQ Earnings / QoQ Sales filters)
+        prev_q = quarters.get(_shift_quarter(latest, -1))
+        if prev_q is not None:
+            seq = _common_basis(quarters[latest], prev_q)
+            rec['qe'] = _growth_pct(seq[1]['e'], seq[2]['e']) if seq else None
+            rec['qs'] = _growth_pct(seq[1]['s'], seq[2]['s']) if seq else None
         # The last 10 calendar quarters ending at the latest one (oldest first), each against its own year-ago quarter - the
         # stock chart's table: [quarter-end, sales Rs cr, sales growth %, EPS, EPS growth %, cmp, EPS turnaround 1/0].
         # A quarter with no result on file is [quarter-end, None, None, None, None, 'none', 0]. EPS is as filed (NOT restated
