@@ -1161,6 +1161,20 @@
       <div id="dqSectorReprocessText" style="margin-bottom:8px;"></div>
       <button class="btn btn-primary" onclick="dqGoReprocess(false)">Reprocess Data now</button>
     </div>
+
+    <h3 class="dq-h" style="margin-top:22px;">Quarterly results (earnings)</h3>
+    <p style="color:var(--text2);font-size:12px;margin:8px 0;">Feeds the Stock Scanner's <b>Quarterly Results</b> filters and the table on the single-stock chart. <b>Fetch quarterly results</b> reads the new result filings NSE has published since the last fetch (the first fetch reads about 14,000 and takes around 20 minutes; later ones take a few minutes) and updates <code>reference-data/QuarterlyResults.csv</code>. The downloader also brings the price files up to date first, so run <b>Reprocess Data</b> afterwards if it fetched new ones. The new quarters show in the scanner and charts straight away, with no reprocess or restart. It only runs when you click &mdash; run it every week or two in results season. <b>Stop</b> keeps what was read (saved in batches of 500 filings).</p>
+    <div id="qrfSummary" style="font-size:12px;margin:8px 0;"></div>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:10px 0;">
+      <button id="qrfBtn" class="btn btn-primary" onclick="qrfStart()" title="Read NSE's new quarterly result filings and update QuarterlyResults.csv">Fetch quarterly results</button>
+      <button id="qrfStopBtn" class="btn btn-secondary" style="display:none;" onclick="qrfStop()">Stop</button>
+      <span id="qrfStatus" style="font-size:12px;color:var(--text2);"></span>
+    </div>
+    <div id="qrfProgress" style="display:none;margin:6px 0 10px;">
+      <div class="progress-track"><div class="progress-fill" id="qrfFill"></div></div>
+      <div class="progress-detail" id="qrfDetail"></div>
+    </div>
+    <div id="qrfResult" style="font-size:12px;margin:8px 0 4px;"></div>
   </div>
 </div>
 
@@ -1181,7 +1195,8 @@
 <script src="js/chart-tools.js?v=6"></script>
 <script src="js/market-overview.js?v=7"></script>
 <script src="js/industry-charts.js?v=24"></script>
-<script src="js/data-quality.js?v=11"></script>
+<script src="js/data-quality.js?v=12"></script>
+<script src="js/quarterly-results-fetch.js?v=1"></script>
 <script src="js/presets.js?v=13"></script>
 <script src="js/asof-scan.js?v=2"></script>
 <script src="js/ui.js?v=11"></script>

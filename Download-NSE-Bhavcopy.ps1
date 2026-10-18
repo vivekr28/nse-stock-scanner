@@ -10,7 +10,7 @@
     - Downloads EQUITY_L.csv (master equity list with ISIN mappings)
     - Keeps reference-data\CorporateActions.csv as a permanent archive (merged, never truncated);
       use -CorpActionsFrom "01-Jan-2010" once to archive everything NSE still serves
-    - ON DEMAND ONLY (-FetchResults): keeps reference-data\QuarterlyResults.csv (revenue / PBT / net profit / EPS per
+    - ON DEMAND ONLY (-FetchResults; the dashboard's Data Quality -> Refresh Data -> Fetch quarterly results button runs it): keeps reference-data\QuarterlyResults.csv (revenue / PBT / net profit / EPS per
       company per quarter, read from NSE's XBRL result filings) from NSE's two result lists (the older one up to Dec-2024,
       the integrated-filing one from Mar-2025), fetched incrementally; a first run reads ~14,000 filings (~20 min), later
       runs only what is new - run it regularly in results season. Optional -ResultsMaxFetch N caps filings read per run
@@ -1192,6 +1192,7 @@ if ($FetchResults) { try {
         Write-Host "  Window: $($quarterLabels -join '; ')" -ForegroundColor DarkGray
 
         $toFetch = if ($ResultsMaxFetch -gt 0) { @($pending | Select-Object -First $ResultsMaxFetch) } else { $pending.ToArray() }
+        Write-Host "  Filings to read: $($toFetch.Count)" -ForegroundColor DarkGray   # the dashboard's Fetch button parses this line
         $nFetched = 0; $nBlank = 0; $nFailed = 0; $nDone = 0; $consecutiveFail = 0
         foreach ($p in $toFetch) {
             $nDone++
@@ -1222,8 +1223,8 @@ if ($FetchResults) { try {
             $row = New-ResultRow $p.Filing $(if ($status -eq 'OK') { [string]$xml } else { $null })
             if (-not ($row.REVENUE_CR -or $row.NET_PROFIT_CR -or $row.EPS_BASIC)) { $nBlank++ } else { $nFetched++ }
             $resultRows[$p.Key] = $row
-            if (($nDone % 500) -eq 0) {
-                $null = Save-ResultsFile $resultRows
+            if (($nDone % 500) -eq 0) { $null = Save-ResultsFile $resultRows }
+            if (($nDone % 50) -eq 0 -or $nDone -eq $toFetch.Count) {
                 Write-Host "  Results: $nDone / $($toFetch.Count) filings processed..." -ForegroundColor DarkGray
             }
         }

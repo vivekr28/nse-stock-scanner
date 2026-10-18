@@ -24,6 +24,7 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
 import tv_adjust  # TradingView-assisted corrections; does nothing until the Data Quality button is clicked
+import quarterly_results_fetch  # Data Quality -> Refresh Data: the "Fetch quarterly results" button (runs Download-NSE-Bhavcopy.ps1 -FetchResults)
 import quarterly_results  # Quarterly Results filters / chart table: growth maths + the /api/quarterly-growth payload (pure)
 import tv_report  # report of a full "verify every stock" run (pure functions)
 
@@ -2251,6 +2252,8 @@ class NSEHandler(http.server.SimpleHTTPRequestHandler):
             self._serve_tv_full_status()
         elif path == '/api/sector-mapping/status':
             self._serve_sector_status()
+        elif path == '/api/quarterly-results/status':
+            self._send_json(quarterly_results_fetch.status(self.server.base_dir))
         elif path == '/api/tv-full/results':
             self._serve_tv_full_results()
         elif path == '/api/tv-full/report':
@@ -2278,6 +2281,10 @@ class NSEHandler(http.server.SimpleHTTPRequestHandler):
             self._handle_sector_start()
         elif parsed.path == '/api/sector-mapping/stop':
             self._handle_sector_stop()
+        elif parsed.path == '/api/quarterly-results/start':
+            self._handle_results_fetch_start()
+        elif parsed.path == '/api/quarterly-results/stop':
+            self._handle_results_fetch_stop()
         else:
             self.send_error(404)
 
@@ -2494,6 +2501,11 @@ class NSEHandler(http.server.SimpleHTTPRequestHandler):
         /pages/reprocess.html for a live progress display. With ?download=1, the
         NSE downloader script runs first ("Refresh Data")."""
         download = 'download' in parse_qs(urlparse(self.path).query)
+        if quarterly_results_fetch.is_running():
+            # the fetch runs the downloader, which rewrites the price files processing reads
+            self._send_json({'ok': False, 'error': 'Quarterly results are being fetched - try again when that finishes '
+                                                   '(Data Quality → Refresh Data).'}, 409)
+            return
         with _reprocess_lock:
             if _reprocess_state['status'] == 'running':
                 body = json.dumps({'ok': True, 'alreadyRunning': True}).encode('utf-8')
@@ -2618,6 +2630,25 @@ class NSEHandler(http.server.SimpleHTTPRequestHandler):
                                  log=[], result=None)
         threading.Thread(target=run_sector_mapping, args=(self.server.base_dir, quick), daemon=True).start()
         self._send_json({'ok': True, 'started': True})
+
+    def _handle_results_fetch_start(self):
+        """POST /api/quarterly-results/start - see quarterly_results_fetch.py. Same same-origin header rule as the sector rebuild.
+        Refused while a refresh/reprocess runs (the script also rewrites the price files those read)."""
+        if self.headers.get('X-Requested-With') != 'nse-dashboard':
+            self._send_json({'ok': False, 'error': 'Forbidden'}, 403)
+            return
+        if _reprocess_state['status'] == 'running':
+            self._send_json({'ok': False, 'error': 'A data refresh/reprocess is running - try again when it finishes.'}, 409)
+            return
+        code, body = quarterly_results_fetch.start(self.server.base_dir)
+        self._send_json(body, code)
+
+    def _handle_results_fetch_stop(self):
+        """POST /api/quarterly-results/stop - end a running fetch now; results read so far are kept (saved in batches of 500)."""
+        if self.headers.get('X-Requested-With') != 'nse-dashboard':
+            self._send_json({'ok': False, 'error': 'Forbidden'}, 403)
+            return
+        self._send_json({'ok': True, 'stopping': quarterly_results_fetch.stop()})
 
     def _handle_sector_stop(self):
         """POST /api/sector-mapping/stop - end a running rebuild now; what it fetched so far is kept."""
