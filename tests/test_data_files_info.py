@@ -57,3 +57,15 @@ def test_unparseable_dates_in_the_index_file_are_skipped(tmp_path):
         + combined_row('Nifty 50', 'not-a-date') + combined_row('Nifty 50', '02-Oct-2025'), encoding='utf-8')
     info = ns.get_data_files_info(str(base))['indices']
     assert info['rows'] == 2 and info['latest'] == '02-Oct-2025'
+
+
+def test_quarterly_results_file_is_listed(tmp_path):
+    # the Data Files popup lists reference-data/QuarterlyResults.csv (size + last updated), and reports it missing until -FetchResults has run
+    info = ns.get_data_files_info(str(tmp_path))
+    row = next(f for f in info['files'] if f['file'] == 'QuarterlyResults.csv')
+    assert row['exists'] is False
+    ref = tmp_path / ns.REFERENCE_SUBDIR
+    ref.mkdir()
+    (ref / 'QuarterlyResults.csv').write_text('SYMBOL,QUARTER_END\nABC,31-Mar-2026\n')
+    row = next(f for f in ns.get_data_files_info(str(tmp_path))['files'] if f['file'] == 'QuarterlyResults.csv')
+    assert row['exists'] is True and row['size'] > 0 and row['label'].startswith('Quarterly results')

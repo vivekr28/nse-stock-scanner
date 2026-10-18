@@ -2918,6 +2918,7 @@ def get_data_files_info(base_dir):
             ref('MidSmallcap 400 constituents', MIDSMALL400_FILE),
             ref('Index closing values (combined)', INDICES_FILE),
             ref('Corporate actions', CORPACTIONS_FILE, folder=os.path.join(base_dir, REFERENCE_SUBDIR)),
+            ref('Quarterly results (earnings)', quarterly_results.RESULTS_FILE, folder=os.path.join(base_dir, REFERENCE_SUBDIR)),
             ref('Sector mapping', SECTOR_FILE),
             ref('Market cap (NSE mcap file)', MARKETCAP_FILE),
             ref('Processed data (dashboard JSON)', PROCESSED_FILE),
