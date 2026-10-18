@@ -636,6 +636,24 @@
                   <span class="scr-unit">%</span>
                 </div>
               </div>
+
+              <!-- F32: earnings turnaround against the PREVIOUS quarter - a loss then, a profit now. Kept apart from QoQ Earnings: growth % needs a positive base -->
+              <div class="scr-filter-row">
+                <input type="checkbox" id="scrF32On">
+                <span class="scr-label" title="Net profit this quarter after a LOSS in the previous quarter. No % is computed (a percentage from a loss means nothing); the table shows the two amounts instead.">QoQ Earnings turnaround:</span>
+                <div class="scr-inputs">
+                  <span class="scr-unit">loss a quarter ago, profit now</span>
+                </div>
+              </div>
+
+              <!-- F33: sales turnaround against the PREVIOUS quarter - no sales then, some now. Kept apart from QoQ Sales -->
+              <div class="scr-filter-row">
+                <input type="checkbox" id="scrF33On">
+                <span class="scr-label" title="Sales this quarter after NO sales in the previous quarter (sales cannot be negative, so zero is the only 'before'). Rare.">QoQ Sales turnaround:</span>
+                <div class="scr-inputs">
+                  <span class="scr-unit">no sales a quarter ago, sales now</span>
+                </div>
+              </div>
             </div>
 
           </div>
@@ -1303,7 +1321,7 @@
 <script src="js/data-processor.js?v=2"></script>
 <script src="js/scanner.js?v=2"></script>
 <script src="js/screener.js?v=21"></script>
-<script src="js/quarterly-results.js?v=10"></script>
+<script src="js/quarterly-results.js?v=11"></script>
 <script src="js/relative-strength.js?v=3"></script>
 <script src="js/quarterly-chart-table.js?v=2"></script>
 <script src="js/breadth.js?v=14"></script>
@@ -1316,7 +1334,7 @@
 <script src="js/industry-charts.js?v=24"></script>
 <script src="js/data-quality.js?v=12"></script>
 <script src="js/quarterly-results-fetch.js?v=1"></script>
-<script src="js/presets.js?v=17"></script>
+<script src="js/presets.js?v=18"></script>
 <script src="js/asof-scan.js?v=3"></script>
 <script src="js/ui.js?v=12"></script>
 <script src="js/nse-download.js?v=5"></script>

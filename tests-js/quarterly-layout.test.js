@@ -46,7 +46,7 @@ test('left: filters against the same quarter a year earlier; right: against the 
   assert.match(left.html, /<div class="scr-col-head">Against the same quarter a year earlier<\/div>/);
   assert.match(right.html, /<div class="scr-col-head">Against the previous quarter<\/div>/);
   assert.deepEqual(ids(left), ['scrF20On', 'scrF21On', 'scrF26On', 'scrF27On', 'scrF22On', 'scrF23On']);   // growth, latest-quarter growth, then the turnarounds
-  assert.deepEqual(ids(right), ['scrF28On', 'scrF29On', 'scrF30On', 'scrF31On']);                         // QoQ, then the latest-quarter versions
+  assert.deepEqual(ids(right), ['scrF28On', 'scrF29On', 'scrF30On', 'scrF31On', 'scrF32On', 'scrF33On']);   // QoQ, the latest-quarter versions, then the turnarounds
 });
 
 test('every control of every filter is inside its own column (nothing was lost in the move)', () => {
@@ -54,7 +54,7 @@ test('every control of every filter is inside its own column (nothing was lost i
   for (const id of ['scrF20Val', 'scrF21Val', 'scrF26Val', 'scrF26Q', 'scrF27Val', 'scrF27Q']) assert.ok(left.html.includes(`id="${id}"`), id);
   for (const id of ['scrF28Val', 'scrF29Val', 'scrF30Val', 'scrF30Q', 'scrF31Val', 'scrF31Q']) assert.ok(right.html.includes(`id="${id}"`), id);
   const all = [...html.slice(html.indexOf('id="scrPaneQuarterly"'), html.indexOf('id="scrPaneMulti"')).matchAll(/id="(scrF\d+On)"/g)].map(m => m[1]);
-  assert.equal(all.length, 10);
+  assert.equal(all.length, 12);
 });
 
 test('the stylesheet makes the pane a two-column grid with the status line spanning both, like the Technicals tab', () => {

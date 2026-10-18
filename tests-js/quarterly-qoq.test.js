@@ -165,6 +165,99 @@ test('index.html: the four rows are in the Quarterly Results pane after F27, wit
   assert.match(html, /quarterly-results\.js\?v=1\d/);
 });
 
-test('screener.js still holds none of the Quarterly Results filters (no F28-F31 ids)', () => {
-  assert.ok(!/scrF2[0-9]|scrF3[01]/.test(read('js/screener.js')));
+test('screener.js still holds none of the Quarterly Results filters (no F28-F33 ids)', () => {
+  assert.ok(!/scrF2[0-9]|scrF3[0-3]/.test(read('js/screener.js')));
+});
+
+
+// ── F32 / F33: the sequential turnarounds (a loss a quarter ago, a profit now / no sales a quarter ago, some now) ──────────
+
+const turnReasons = (...a) => Array.from(sb.qrQoqTurnaroundReasons(...a));
+const NO = { on: false }, YES = { on: true };
+// qp = [previous profit, previous sales, profit now, sales now] in Rs crore
+const trec = o => rec(Object.assign({ qp: [-5, 100, 10, 120], qet: true, qst: false }, o));
+
+test('F32: a loss in the previous quarter and a profit now passes; the reasons say why a stock is not one', () => {
+  withData({ turn: trec({}), pos: trec({ qp: [8, 100, 10, 120], qet: false }), zero: trec({ qp: [0, 100, 10, 120], qet: false }), still: trec({ qp: [-5, 100, -2, 120], qet: false }) });
+  assert.deepEqual(turnReasons('TURN', YES, NO), []);
+  assert.equal(turnReasons('POS', YES, NO)[0], 'F32: Not an earnings turnaround - Sep-2026 profit was already positive in the previous quarter (8 cr)');
+  assert.equal(turnReasons('ZERO', YES, NO)[0], 'F32: Not an earnings turnaround - profit in the previous quarter was zero, not a loss');
+  assert.equal(turnReasons('STILL', YES, NO)[0], 'F32: Not an earnings turnaround - still loss-making (-2 cr vs -5 cr the quarter before)');
+});
+
+test('F33: no sales in the previous quarter and some now passes; otherwise it says so', () => {
+  withData({ turn: trec({ qp: [3, 0, 5, 50], qet: false, qst: true }), pos: trec({ qp: [3, 80, 5, 50], qet: false, qst: false }), none: trec({ qp: [3, 0, 5, 0], qet: false, qst: false }) });
+  assert.deepEqual(turnReasons('TURN', NO, YES), []);
+  assert.equal(turnReasons('POS', NO, YES)[0], 'F33: Not a sales turnaround - Sep-2026 sales were already positive in the previous quarter (80 cr)');
+  assert.equal(turnReasons('NONE', NO, YES)[0], 'F33: Not a sales turnaround - no sales this quarter either');
+});
+
+test('F32 / F33 together: each failure is listed under its own code; nothing on = nothing checked', () => {
+  withData({ a: trec({ qp: [8, 100, 10, 120], qet: false, qst: false }), b: trec({ qp: [-5, 0, 10, 50], qet: true, qst: true }) });
+  assert.deepEqual(turnReasons('A', YES, YES).map(r => r.slice(0, 3)), ['F32', 'F33']);
+  assert.deepEqual(turnReasons('B', YES, YES), []);
+  assert.deepEqual(turnReasons('A', NO, NO), []);
+  assert.deepEqual(turnReasons('A', undefined, undefined), []);
+});
+
+test('F32 / F33: no previous quarter on file, none on a shared basis, no results, no file, still loading', () => {
+  withData({ noq: rec({}), basis: rec({ qp: null, qet: false, qst: false }), ok: trec({}) });   // `noq` has no qp field at all: the previous quarter is not on file
+  assert.equal(turnReasons('NOQ', YES, NO)[0], 'F32: No quarter before Sep-2026 on file to compare with');
+  assert.equal(turnReasons('BASIS', NO, YES)[0], 'F33: Sep-2026 and the previous quarter are on different bases (standalone vs consolidated)');
+  assert.match(turnReasons('NOBODY', YES, NO)[0], /^F32: No quarterly results for this stock$/);
+  sb.Store.quarterly = null; sb.Store.quarterlyState = 'missing';
+  assert.match(turnReasons('OK', YES, NO)[0], /^F32: No quarterly results file/);
+  sb.Store.quarterlyState = 'loading';
+  assert.match(turnReasons('OK', NO, YES)[0], /^F33: Quarterly results still loading$/);
+});
+
+test("they judge the stock's own latest quarter and need no year-ago quarter (a new listing can be a turnaround)", () => {
+  withData({ newco: trec({ cmp: 'no-prev', sp: null, ep: null, eg: null, sg: null }), old: trec({ q: '2026-06-30' }) });
+  assert.deepEqual(turnReasons('NEWCO', YES, NO), []);
+  assert.deepEqual(turnReasons('OLD', YES, NO), []);                       // an older-quarter stock passes too: there is no latest-quarter version of these two
+});
+
+test('qrFilterState carries F32 / F33; qrApplyToStock records the amounts and combines every reason list', () => {
+  withData({ a: trec({ qp: [8, 100, 10, 120], qet: false, qe: 25 }) });
+  const dom = installFakeDom(sb, { scrF28Val: '0' });
+  dom.el('scrF32On').checked = true; dom.el('scrF28On').checked = true;
+  const s = JSON.parse(JSON.stringify(sb.qrFilterState()));
+  assert.deepEqual([s.f32, s.f33], [{ on: true }, { on: false }]);
+  assert.equal(s.any, true);
+  const stock = { symbol: 'A' };
+  const r = Array.from(sb.qrApplyToStock(stock, sb.qrFilterState()));
+  assert.deepEqual(r.map(x => x.slice(0, 3)), ['F32']);                    // QoQ Earnings (+25% > 0) passes; the turnaround fails
+  assert.deepEqual([stock._qrQPrevE, stock._qrQPrevS, stock._qrQNowE, stock._qrQNowS], [8, 100, 10, 120]);
+  const none = { symbol: 'NOBODY' };
+  sb.qrApplyToStock(none, sb.qrFilterState());
+  assert.ok(Number.isNaN(none._qrQPrevE) && Number.isNaN(none._qrQNowS));
+});
+
+test('the tab counts them; each turnaround filter adds an amounts column "prev qtr -> now"; Reset All and presets cover them', () => {
+  const dom = installFakeDom(sb, {});
+  withData({ a: trec({}) });
+  dom.el('scrF32On').checked = true;
+  assert.equal(sb.qrActiveCount(), 1);
+  dom.el('scrF33On').checked = true;
+  assert.equal(sb.qrActiveCount(), 2);
+  sb.qrUpdateBadge();
+  assert.equal(dom.el('scrTabQtrCount').textContent, 2);
+  const cols = Array.from(sb.qrColumns());
+  assert.deepEqual(cols.map(c => c.label), ['Result Qtr', 'Profit Cr (prev qtr → now)', 'Sales Cr (prev qtr → now)']);
+  assert.equal(cols[1].fmt(10, { _qrQPrevE: -5 }), '-5 → 10'); assert.equal(cols[1].fmt(NaN, {}), '-');
+  assert.equal(cols[2].fmt(120, { _qrQPrevS: 0 }), '0 → 120');
+  sb.qrReset();
+  assert.equal(dom.el('scrF32On').checked, false); assert.equal(dom.el('scrF33On').checked, false);
+  const ids = Array.from(vm.runInContext('PRESET_FIELDS', sb), f => f.id), def = vm.runInContext('DEFAULT_FILTER_STATE', sb);
+  assert.ok(ids.includes('scrF32On') && ids.includes('scrF33On'));
+  assert.equal(def.scrF32On, false); assert.equal(def.scrF33On, false);
+});
+
+test('index.html: the two turnaround rows are at the bottom of the right column, worded as asked', () => {
+  const html = read('index.html');
+  const pane = html.indexOf('id="scrPaneQuarterly"'), multi = html.indexOf('id="scrPaneMulti"');
+  for (const id of ['scrF32On', 'scrF33On']) { const at = html.indexOf(`id="${id}"`); assert.ok(at > pane && at < multi, id); }
+  assert.ok(html.indexOf('id="scrF32On"') > html.indexOf('id="scrF31On"') && html.indexOf('id="scrF33On"') > html.indexOf('id="scrF32On"'));
+  assert.match(html, />QoQ Earnings turnaround:<\/span>/); assert.match(html, />QoQ Sales turnaround:<\/span>/);
+  assert.match(html, /loss a quarter ago, profit now/); assert.match(html, /no sales a quarter ago, sales now/);
 });

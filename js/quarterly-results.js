@@ -148,10 +148,46 @@ function qrQoqReasons(symbol, f28, f29, f30, f31) {
   return reasons;
 }
 
+// F32 "QoQ Earnings turnaround" (a LOSS in the previous quarter, a profit now) and F33 "QoQ Sales turnaround" (NO sales in the previous quarter,
+// some now): the sequential twins of F22 / F23, kept apart from F28 / F29 because a growth % needs a positive base. No % is used. They judge
+// the stock's own latest declared quarter against the quarter before it; the server's qet / qst flags decide, qp carries the amounts for the
+// reasons. A stock with no previous quarter on file, or none on a basis both quarters hold, fails with that reason.
+function qrQoqTurnaroundReasons(symbol, f32, f33) {
+  const checks = [];
+  if (f32 && f32.on) checks.push({ code: 'F32', earnings: true });
+  if (f33 && f33.on) checks.push({ code: 'F33', earnings: false });
+  const reasons = [];
+  if (!checks.length) return reasons;
+  const rec = qrLookup(symbol);
+  for (const c of checks) {
+    if (Store.quarterlyState === 'loading') { reasons.push(`${c.code}: Quarterly results still loading`); continue; }
+    if (!Store.quarterly) { reasons.push(`${c.code}: No quarterly results file (run Download-NSE-Bhavcopy.ps1 -FetchResults)`); continue; }
+    if (!rec) { reasons.push(`${c.code}: No quarterly results for this stock`); continue; }
+    const q = qrQuarterLabel(rec.q), p = rec.qp;
+    if (!Array.isArray(p)) {
+      reasons.push(`${c.code}: ` + (p === null ? `${q} and the previous quarter are on different bases (standalone vs consolidated)` : `No quarter before ${q} on file to compare with`));
+      continue;
+    }
+    if (c.earnings) {
+      if (rec.qet) continue;                                               // passes
+      const prev = p[0], cur = p[2];
+      if (prev > 0) reasons.push(`F32: Not an earnings turnaround - ${q} profit was already positive in the previous quarter (${qrFmtCr(prev)} cr)`);
+      else if (prev === 0) reasons.push('F32: Not an earnings turnaround - profit in the previous quarter was zero, not a loss');
+      else reasons.push(`F32: Not an earnings turnaround - still loss-making (${qrFmtCr(cur)} cr vs ${qrFmtCr(prev)} cr the quarter before)`);
+    } else {
+      if (rec.qst) continue;
+      const prev = p[1];
+      if (prev > 0) reasons.push(`F33: Not a sales turnaround - ${q} sales were already positive in the previous quarter (${qrFmtCr(prev)} cr)`);
+      else reasons.push('F33: Not a sales turnaround - no sales this quarter either');
+    }
+  }
+  return reasons;
+}
+
 // ── Hooks for the Stock Scanner (js/screener.js calls these, each guarded by typeof - the same way it calls the As of Date
 // module's) - so the scanner itself knows nothing about the four filters' controls, fields or columns. ──────────────────
 
-const QR_FILTER_IDS = ['scrF20On', 'scrF21On', 'scrF22On', 'scrF23On', 'scrF26On', 'scrF27On', 'scrF28On', 'scrF29On', 'scrF30On', 'scrF31On'];
+const QR_FILTER_IDS = ['scrF20On', 'scrF21On', 'scrF22On', 'scrF23On', 'scrF26On', 'scrF27On', 'scrF28On', 'scrF29On', 'scrF30On', 'scrF31On', 'scrF32On', 'scrF33On'];
 
 // The four filters as the scanner should apply them now: { f20:{on,min}, f21:{on,min}, f22:{on}, f23:{on}, any }
 function qrFilterState() {
@@ -168,8 +204,10 @@ function qrFilterState() {
     f29: { on: on('scrF29On'), min: num('scrF29Val') },
     f30: { on: on('scrF30On'), min: num('scrF30Val') },
     f31: { on: on('scrF31On'), min: num('scrF31Val') },
+    f32: { on: on('scrF32On') },
+    f33: { on: on('scrF33On') },
   };
-  s.any = s.f20.on || s.f21.on || s.f22.on || s.f23.on || s.f26.on || s.f27.on || s.f28.on || s.f29.on || s.f30.on || s.f31.on;
+  s.any = s.f20.on || s.f21.on || s.f22.on || s.f23.on || s.f26.on || s.f27.on || s.f28.on || s.f29.on || s.f30.on || s.f31.on || s.f32.on || s.f33.on;
   return s;
 }
 
@@ -188,8 +226,12 @@ function qrApplyToStock(stock, state) {
   stock._qrSalesPrev = rec ? num(rec.sp) : NaN;
   stock._qrQoqE = rec ? num(rec.qe) : NaN;                         // profit vs the previous quarter, %
   stock._qrQoqS = rec ? num(rec.qs) : NaN;                         // sales vs the previous quarter, %
+  const qp = rec && Array.isArray(rec.qp) ? rec.qp : null;         // [previous profit, previous sales, profit now, sales now], Rs crore
+  stock._qrQPrevE = qp ? qp[0] : NaN; stock._qrQPrevS = qp ? qp[1] : NaN;
+  stock._qrQNowE = qp ? qp[2] : NaN; stock._qrQNowS = qp ? qp[3] : NaN;
   return qrFailReasons(stock.symbol, state.f20, state.f21, state.f22, state.f23, state.f26, state.f27)
-    .concat(qrQoqReasons(stock.symbol, state.f28, state.f29, state.f30, state.f31));
+    .concat(qrQoqReasons(stock.symbol, state.f28, state.f29, state.f30, state.f31))
+    .concat(qrQoqTurnaroundReasons(stock.symbol, state.f32, state.f33));
 }
 
 // How many of the four filters are switched on (the scanner adds it to its active-filter count and badge)
@@ -223,6 +265,8 @@ function qrColumns() {
   if (s.f29.on || s.f31.on) cols.push(growthCol('_qrQoqS', 'QoQ Sales%'));
   if (s.f22.on) cols.push(fromTo('_qrProfitNow', '_qrProfitPrev', 'Profit Cr (yr ago → now)'));
   if (s.f23.on) cols.push(fromTo('_qrSalesNow', '_qrSalesPrev', 'Sales Cr (yr ago → now)'));
+  if (s.f32.on) cols.push(fromTo('_qrQNowE', '_qrQPrevE', 'Profit Cr (prev qtr → now)'));
+  if (s.f33.on) cols.push(fromTo('_qrQNowS', '_qrQPrevS', 'Sales Cr (prev qtr → now)'));
   return cols;
 }
 
@@ -239,6 +283,8 @@ function qrReset() {
   set('scrF29On', 'checked', false); set('scrF29Val', 'value', '0');
   set('scrF30On', 'checked', false); set('scrF30Val', 'value', '0');
   set('scrF31On', 'checked', false); set('scrF31Val', 'value', '0');
+  set('scrF32On', 'checked', false);
+  set('scrF33On', 'checked', false);
 }
 
 // The quarter name in the F26 / F27 labels: the newest quarter any stock has declared (blank until the data is loaded)
