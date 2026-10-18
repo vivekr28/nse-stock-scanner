@@ -122,10 +122,36 @@ function qrFailReasons(symbol, f20, f21, f22, f23, f26, f27) {
   return reasons;
 }
 
+// F28 "QoQ Earnings" and F29 "QoQ Sales": growth of the stock's latest declared quarter against the quarter BEFORE it (a sequential step,
+// not the year-ago comparison F20 / F21 make), strictly above X %. F30 / F31 are the same two tests restricted to stocks that have declared
+// the NEWEST quarter any company has declared (like F26 / F27 are to F20 / F21): a stock whose latest result is an older quarter is left
+// out. Each is { on, min }. Returns the reasons a stock fails the ones that are on ([] = passes).
+// A stock whose previous quarter is missing, or had zero / negative profit (or no sales), has no sequential % and fails with that reason.
+function qrQoqReasons(symbol, f28, f29, f30, f31) {
+  const checks = [];
+  if (f28 && f28.on) checks.push({ code: 'F28', name: 'Earnings', key: 'qe', min: f28.min, missing: 'the previous quarter is missing, zero or a loss' });
+  if (f29 && f29.on) checks.push({ code: 'F29', name: 'Sales', key: 'qs', min: f29.min, missing: 'the previous quarter is missing or had no sales' });
+  if (f30 && f30.on) checks.push({ code: 'F30', name: 'Earnings', key: 'qe', min: f30.min, missing: 'the previous quarter is missing, zero or a loss', latest: true });
+  if (f31 && f31.on) checks.push({ code: 'F31', name: 'Sales', key: 'qs', min: f31.min, missing: 'the previous quarter is missing or had no sales', latest: true });
+  const reasons = [];
+  if (!checks.length) return reasons;
+  const rec = qrLookup(symbol);
+  for (const c of checks) {
+    if (Store.quarterlyState === 'loading') { reasons.push(`${c.code}: Quarterly results still loading`); continue; }
+    if (!Store.quarterly) { reasons.push(`${c.code}: No quarterly results file (run Download-NSE-Bhavcopy.ps1 -FetchResults)`); continue; }
+    if (!rec) { reasons.push(`${c.code}: No quarterly results for this stock`); continue; }
+    const q = qrQuarterLabel(rec.q), v = rec[c.key];
+    if (c.latest && rec.q !== Store.quarterly.latestQuarter) { reasons.push(`${c.code}: No ${qrQuarterLabel(Store.quarterly.latestQuarter)} result yet (its latest is ${q})`); continue; }
+    if (v === undefined || v === null) reasons.push(`${c.code}: No ${q} ${c.name.toLowerCase()} growth vs the previous quarter (${c.missing})`);
+    else if (!(v > c.min)) reasons.push(`${c.code}: ${c.name} ${q} ${v >= 0 ? '+' : ''}${v.toFixed(1)}% vs the previous quarter, not > ${c.min}%`);
+  }
+  return reasons;
+}
+
 // ── Hooks for the Stock Scanner (js/screener.js calls these, each guarded by typeof - the same way it calls the As of Date
 // module's) - so the scanner itself knows nothing about the four filters' controls, fields or columns. ──────────────────
 
-const QR_FILTER_IDS = ['scrF20On', 'scrF21On', 'scrF22On', 'scrF23On', 'scrF26On', 'scrF27On'];
+const QR_FILTER_IDS = ['scrF20On', 'scrF21On', 'scrF22On', 'scrF23On', 'scrF26On', 'scrF27On', 'scrF28On', 'scrF29On', 'scrF30On', 'scrF31On'];
 
 // The four filters as the scanner should apply them now: { f20:{on,min}, f21:{on,min}, f22:{on}, f23:{on}, any }
 function qrFilterState() {
@@ -138,8 +164,12 @@ function qrFilterState() {
     f23: { on: on('scrF23On') },
     f26: { on: on('scrF26On'), min: num('scrF26Val') },
     f27: { on: on('scrF27On'), min: num('scrF27Val') },
+    f28: { on: on('scrF28On'), min: num('scrF28Val') },
+    f29: { on: on('scrF29On'), min: num('scrF29Val') },
+    f30: { on: on('scrF30On'), min: num('scrF30Val') },
+    f31: { on: on('scrF31On'), min: num('scrF31Val') },
   };
-  s.any = s.f20.on || s.f21.on || s.f22.on || s.f23.on || s.f26.on || s.f27.on;
+  s.any = s.f20.on || s.f21.on || s.f22.on || s.f23.on || s.f26.on || s.f27.on || s.f28.on || s.f29.on || s.f30.on || s.f31.on;
   return s;
 }
 
@@ -156,7 +186,10 @@ function qrApplyToStock(stock, state) {
   stock._qrProfitPrev = rec ? num(rec.ep) : NaN;
   stock._qrSalesNow = rec ? num(rec.s) : NaN;
   stock._qrSalesPrev = rec ? num(rec.sp) : NaN;
-  return qrFailReasons(stock.symbol, state.f20, state.f21, state.f22, state.f23, state.f26, state.f27);
+  stock._qrQoqE = rec ? num(rec.qe) : NaN;                         // profit vs the previous quarter, %
+  stock._qrQoqS = rec ? num(rec.qs) : NaN;                         // sales vs the previous quarter, %
+  return qrFailReasons(stock.symbol, state.f20, state.f21, state.f22, state.f23, state.f26, state.f27)
+    .concat(qrQoqReasons(stock.symbol, state.f28, state.f29, state.f30, state.f31));
 }
 
 // How many of the four filters are switched on (the scanner adds it to its active-filter count and badge)
@@ -186,6 +219,8 @@ function qrColumns() {
     const prev = row[prevKey];
     return isNaN(v) || isNaN(prev) ? '-' : `${qrFmtCr(prev)} → ${qrFmtCr(v)}`;
   }, cls: v => isNaN(v) ? '' : (v >= 0 ? 'positive' : 'negative') });
+  if (s.f28.on || s.f30.on) cols.push(growthCol('_qrQoqE', 'QoQ Earnings%'));     // one column however many of the two earnings / sales filters are on
+  if (s.f29.on || s.f31.on) cols.push(growthCol('_qrQoqS', 'QoQ Sales%'));
   if (s.f22.on) cols.push(fromTo('_qrProfitNow', '_qrProfitPrev', 'Profit Cr (yr ago → now)'));
   if (s.f23.on) cols.push(fromTo('_qrSalesNow', '_qrSalesPrev', 'Sales Cr (yr ago → now)'));
   return cols;
@@ -200,12 +235,16 @@ function qrReset() {
   set('scrF23On', 'checked', false);
   set('scrF26On', 'checked', false); set('scrF26Val', 'value', '20');
   set('scrF27On', 'checked', false); set('scrF27Val', 'value', '10');
+  set('scrF28On', 'checked', false); set('scrF28Val', 'value', '0');
+  set('scrF29On', 'checked', false); set('scrF29Val', 'value', '0');
+  set('scrF30On', 'checked', false); set('scrF30Val', 'value', '0');
+  set('scrF31On', 'checked', false); set('scrF31Val', 'value', '0');
 }
 
 // The quarter name in the F26 / F27 labels: the newest quarter any stock has declared (blank until the data is loaded)
 function qrUpdateLatestLabels() {
   const text = Store.quarterly && Store.quarterly.latestQuarter ? `(${qrQuarterLabel(Store.quarterly.latestQuarter)})` : '';
-  for (const id of ['scrF26Q', 'scrF27Q']) { const el = document.getElementById(id); if (el) el.textContent = text; }
+  for (const id of ['scrF26Q', 'scrF27Q', 'scrF30Q', 'scrF31Q']) { const el = document.getElementById(id); if (el) el.textContent = text; }
 }
 
 // The tab's one-line status: what is loaded and how fresh it is
