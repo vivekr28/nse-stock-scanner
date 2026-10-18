@@ -1173,7 +1173,7 @@ function updateApplyBtn() {
 }
 
 function updateFilterBadge() {
-  const techIds = ['scrF1On','scrF2On','scrF3On','scrF4On','scrF5On','scrF6On','scrF7On','scrF8On','scrF10On','scrF15On','scrF18On','scrF19On'];   // F16 (% Change) lives on the Relative Strength tab now
+  const techIds = ['scrF1On','scrF2On','scrF3On','scrF4On','scrF5On','scrF6On','scrF7On','scrF8On','scrF10On','scrF18On','scrF19On'];   // F15 (Performance) and F16 (% Change) live on the Relative Strength tab now
   const indIds  = ['scrF9On','scrF11On','scrF12On','scrF13On','scrF14On','scrF17On'];
   const countChecked = ids => ids.filter(id => { const el = document.getElementById(id); return el && el.checked; }).length;
 

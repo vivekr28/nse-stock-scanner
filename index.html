@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NSE EOD Dashboard</title>
-<link rel="stylesheet" href="css/styles.css?v=13">
+<link rel="stylesheet" href="css/styles.css?v=14">
 </head>
 <body>
 
@@ -263,26 +263,6 @@
                 <input type="number" id="scrF8Max" value="1.10" step="0.01" style="width:70px;"> <span class="scr-unit">× Price</span>
               </div>
             </div>
-
-            <!-- F4: Co-occurrence (main row + sub row grouped so the grid treats them as one cell) -->
-            <div class="scr-filter-pair">
-              <div class="scr-filter-row scr-highlight">
-                <input type="checkbox" id="scrF4On">
-                <div class="scr-inputs">
-                  <span class="scr-inline-label">Day Chg &gt;</span> <input type="number" id="scrF4Val" value="2" step="0.5" style="width:55px;"> <span class="scr-unit">%</span>
-                  <span class="scr-unit" style="font-weight:600;color:var(--accent);">AND</span>
-                  <span class="scr-inline-label">T/O &gt;</span> <input type="number" id="scrF4Mult" value="3" min="1" step="0.5" style="width:50px;"> <span class="scr-unit">×</span>
-                  <input type="number" id="scrF4SmaLen" value="50" min="5" step="1" style="width:50px;"> <span class="scr-unit">Day Avg Turnover</span>
-                </div>
-              </div>
-              <div class="scr-filter-row scr-sub">
-                <span class="scr-unit">Both on same day, at least</span>
-                <input type="number" id="scrF4MinTimes" value="1" min="1" step="1" style="width:45px;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-size:14px;text-align:center;">
-                <span class="scr-unit">time(s) in last</span>
-                <input type="number" id="scrF4Lookback" value="10" min="1" step="1" style="width:55px;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-size:14px;text-align:center;">
-                <span class="scr-unit">trading days</span>
-              </div>
-            </div>
             </div>
 
             <div class="scr-tech-col">
@@ -329,24 +309,6 @@
               </div>
             </div>
 
-            <!-- F15: Performance (price change over period) -->
-            <div class="scr-filter-row">
-              <input type="checkbox" id="scrF15On">
-              <span class="scr-label">Performance:</span>
-              <div class="scr-inputs">
-                <select id="scrF15Period" style="min-width:70px;">
-                  <option value="1d">1D</option>
-                  <option value="1w">1W</option>
-                  <option value="1m" selected>1M</option>
-                  <option value="3m">3M</option>
-                  <option value="6m">6M</option>
-                  <option value="1y">1Y</option>
-                </select>
-                <span class="scr-unit">&ge;</span>
-                <input type="number" id="scrF15Val" value="0" step="5" style="width:70px;"> <span class="scr-unit">%</span>
-              </div>
-            </div>
-
             <!-- F19: Listed Date - stocks listed on or after the chosen date -->
             <div class="scr-filter-row">
               <input type="checkbox" id="scrF19On">
@@ -356,6 +318,24 @@
                 <input type="date" id="scrF19Date" title="Passes stocks listed on this date or later (listing date from NSE's EQUITY_L.csv)">
               </div>
             </div>
+            </div>
+
+            <!-- F4: Co-occurrence, one row: Day Chg AND Turnover on the same day, at least N times in the last M trading days. A direct child of the grid, below both columns, spanning both (CSS: #scrPaneTechnicals .scr-filter-pair) -->
+            <div class="scr-filter-pair">
+              <div class="scr-filter-row scr-highlight">
+                <input type="checkbox" id="scrF4On">
+                <div class="scr-inputs">
+                  <span class="scr-inline-label">Day Chg &gt;</span> <input type="number" id="scrF4Val" value="2" step="0.5" style="width:55px;"> <span class="scr-unit">%</span>
+                  <span class="scr-unit" style="font-weight:600;color:var(--accent);">AND</span>
+                  <span class="scr-inline-label">T/O &gt;</span> <input type="number" id="scrF4Mult" value="3" min="1" step="0.5" style="width:50px;"> <span class="scr-unit">&times;</span>
+                  <input type="number" id="scrF4SmaLen" value="50" min="5" step="1" style="width:50px;"> <span class="scr-unit">Day Avg Turnover</span>
+                  <span class="scr-unit">&mdash; both on the same day, at least</span>
+                  <input type="number" id="scrF4MinTimes" value="1" min="1" step="1" style="width:50px;">
+                  <span class="scr-unit">time(s) in last</span>
+                  <input type="number" id="scrF4Lookback" value="10" min="1" step="1" style="width:55px;">
+                  <span class="scr-unit">trading days</span>
+                </div>
+              </div>
             </div>
 
           </div>
@@ -450,9 +430,27 @@
           </div>
         </div>
 
-        <!-- ═══ Relative Strength Tab (js/relative-strength.js): % Change between two dates (F16, moved from Technicals) and Close Above (F24) ═══ -->
+        <!-- ═══ Relative Strength Tab (js/relative-strength.js): Performance (F15) and % Change between two dates (F16), both moved from Technicals, Close Above (F24), High Above (F25) ═══ -->
         <div id="scrPaneRelStrength" class="scr-filter-pane" style="display:none;">
           <div class="scr-filters-list">
+
+            <!-- F15: Performance (price change over period) -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF15On">
+              <span class="scr-label">Performance:</span>
+              <div class="scr-inputs">
+                <select id="scrF15Period" style="min-width:70px;">
+                  <option value="1d">1D</option>
+                  <option value="1w">1W</option>
+                  <option value="1m" selected>1M</option>
+                  <option value="3m">3M</option>
+                  <option value="6m">6M</option>
+                  <option value="1y">1Y</option>
+                </select>
+                <span class="scr-unit">&ge;</span>
+                <input type="number" id="scrF15Val" value="0" step="5" style="width:70px;"> <span class="scr-unit">%</span>
+              </div>
+            </div>
 
             <!-- F16: % change between two chosen dates, each on a chosen O/H/L/C field -->
             <div class="scr-filter-row">
@@ -495,6 +493,25 @@
                 <input type="date" id="scrF24Date">
                 <span class="scr-unit">in any of the next</span>
                 <input type="number" id="scrF24Days" value="5" min="1" step="1" style="width:60px;">
+                <span class="scr-unit">days</span>
+              </div>
+            </div>
+
+            <!-- F25: High above the Open / High / Low / Close of a chosen date, on any of the next n trading days (js/relative-strength.js) -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF25On">
+              <span class="scr-label" title="Passes stocks whose HIGH traded above the chosen Open / High / Low / Close of the chosen date on at least one of the next n trading days after it (strictly above; the date itself is not one of the n days). Unlike Close Above, an intraday spike counts even if the stock closed back below. A date that is not a trading day uses the nearest earlier one.">High Above:</span>
+              <div class="scr-inputs">
+                <select id="scrF25Field">
+                  <option value="open">Open</option>
+                  <option value="high" selected>High</option>
+                  <option value="low">Low</option>
+                  <option value="close">Close</option>
+                </select>
+                <span class="scr-unit">of</span>
+                <input type="date" id="scrF25Date">
+                <span class="scr-unit">in any of the next</span>
+                <input type="number" id="scrF25Days" value="5" min="1" step="1" style="width:60px;">
                 <span class="scr-unit">days</span>
               </div>
             </div>
@@ -1211,9 +1228,9 @@
 <script src="js/cache.js?v=2"></script>
 <script src="js/data-processor.js?v=2"></script>
 <script src="js/scanner.js?v=2"></script>
-<script src="js/screener.js?v=20"></script>
+<script src="js/screener.js?v=21"></script>
 <script src="js/quarterly-results.js?v=7"></script>
-<script src="js/relative-strength.js?v=1"></script>
+<script src="js/relative-strength.js?v=3"></script>
 <script src="js/quarterly-chart-table.js?v=1"></script>
 <script src="js/breadth.js?v=14"></script>
 <script src="js/sector.js?v=2"></script>
@@ -1225,7 +1242,7 @@
 <script src="js/industry-charts.js?v=24"></script>
 <script src="js/data-quality.js?v=12"></script>
 <script src="js/quarterly-results-fetch.js?v=1"></script>
-<script src="js/presets.js?v=14"></script>
+<script src="js/presets.js?v=15"></script>
 <script src="js/asof-scan.js?v=3"></script>
 <script src="js/ui.js?v=12"></script>
 <script src="js/nse-download.js?v=5"></script>

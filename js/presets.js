@@ -82,6 +82,10 @@ const PRESET_FIELDS = [
   { id: 'scrF24Field', type: 'select' },
   { id: 'scrF24Date', type: 'date' },
   { id: 'scrF24Days', type: 'number' },
+  { id: 'scrF25On', type: 'checkbox' },
+  { id: 'scrF25Field', type: 'select' },
+  { id: 'scrF25Date', type: 'date' },
+  { id: 'scrF25Days', type: 'number' },
   { id: 'scrAllowPartial', type: 'checkbox' },
   // Stock Scanner 'As of Date' tab (js/asof-scan.js): its own date + filters, saved in presets like the other tabs'
   { id: 'asofAOn', type: 'checkbox' },
@@ -150,6 +154,7 @@ const DEFAULT_FILTER_STATE = {
   scrF21On: false, scrF21Val: '10',
   scrF22On: false, scrF23On: false,
   scrF24On: false, scrF24Field: 'high', scrF24Days: '5',
+  scrF25On: false, scrF25Field: 'high', scrF25Days: '5',
   scrAllowPartial: true,
   // As of Date tab defaults (all off; blank dates - the tab fills in its own default date when opened)
   asofAOn: false, asofA20: true, asofA50: false, asofA200: false, asofAE200: false,
