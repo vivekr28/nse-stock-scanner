@@ -363,6 +363,9 @@ function runScreener() {
   const f19On = document.getElementById('scrF19On').checked;
   const f19Date = document.getElementById('scrF19Date').value; // 'YYYY-MM-DD'; a blank date restricts nothing
 
+  // Quarterly Results tab (F20 - F23, js/quarterly-results.js): read here, applied per stock below
+  const qr = typeof qrFilterState === 'function' ? qrFilterState() : null;
+
   // Pre-compute industry RS map if needed
   let indRSMap = {};
   if (f9On) {
@@ -635,6 +638,9 @@ function runScreener() {
       }
     }
 
+    // F20 - F23: growth / turnaround of the latest declared quarter vs the same quarter last year (js/quarterly-results.js)
+    if (qr && qr.any) failReasons.push(...qrApplyToStock(s, qr));
+
     // F18: Making a new 1M / 3M / 52W high today (every ticked window must be one)
     if (f18On) {
       const results = {};
@@ -675,7 +681,7 @@ function runScreener() {
   scrSortCol = null;
 
   // Count active filters
-  const activeCount = [f1On, f2On, f3On, f4On, f5On, f6On, f7On, f8On, f9On, f10On, f11On, f12On, f13On, f14On, f15On, f16On, f17On, f18On].filter(Boolean).length;
+  const activeCount = [f1On, f2On, f3On, f4On, f5On, f6On, f7On, f8On, f9On, f10On, f11On, f12On, f13On, f14On, f15On, f16On, f17On, f18On].filter(Boolean).length + (typeof qrActiveCount === 'function' ? qrActiveCount() : 0);
 
   // Stats
   const advancing = passed.filter(s => s.changePct > 0).length;
@@ -800,6 +806,7 @@ function renderScreenerTable() {
   if (f19On) {
     cols.push({ key: 'listingDate', label: 'Listed On', fmt: v => v || '-' });
   }
+  if (typeof qrColumns === 'function') cols.push(...qrColumns());   // Quarterly Results filters' columns (js/quarterly-results.js)
   cols.push({ key: 'marketCap', label: 'MCap(Cr)', fmt: v => fmtCr(v) });
 
   if (showFailed) {
@@ -910,6 +917,7 @@ function resetScreener() {
   initF16Dates();
   document.getElementById('scrF19On').checked = false;
   document.getElementById('scrF19Date').value = '';
+  if (typeof qrReset === 'function') qrReset(); // the Quarterly Results tab's controls (js/quarterly-results.js)
   if (typeof asOfReset === 'function') asOfReset(); // the As of Date tab's controls reset with everything else
   scrShowingFailed = false;
   document.getElementById('scrSearch').value = '';
@@ -1164,11 +1172,12 @@ function updateFilterBadge() {
 
   const techCount = countChecked(techIds);
   const indCount  = countChecked(indIds);
+  const qtrCount  = typeof qrActiveCount === 'function' ? qrActiveCount() : 0; // Quarterly Results tab (js/quarterly-results.js)
   const asOfCount = typeof asOfActiveCount === 'function' ? asOfActiveCount() : 0; // As of Date tab (js/asof-scan.js)
 
   const badge = document.getElementById('scrActiveFilterBadge');
   if (badge) {
-    const total = techCount + indCount + asOfCount;
+    const total = techCount + indCount + qtrCount + asOfCount;
     badge.textContent = total;
     badge.style.display = total > 0 ? '' : 'none';
   }
@@ -1187,6 +1196,8 @@ function updateFilterBadge() {
     indBadge.style.display = indCount > 0 ? 'inline-block' : 'none';
   }
 
+  if (typeof qrUpdateBadge === 'function') qrUpdateBadge();
+
   if (typeof asOfUpdateBadge === 'function') asOfUpdateBadge();
 }
 
@@ -1195,16 +1206,20 @@ function updateFilterBadge() {
 function switchFilterTab(tab) {
   const techPane  = document.getElementById('scrPaneTechnicals');
   const indPane   = document.getElementById('scrPaneIndustry');
+  const qtrPane   = document.getElementById('scrPaneQuarterly');
   const multiPane = document.getElementById('scrPaneMulti');
   const techTab   = document.getElementById('scrTabTechnicals');
   const indTab    = document.getElementById('scrTabIndustry');
+  const qtrTab    = document.getElementById('scrTabQuarterly');
   const multiTab  = document.getElementById('scrTabMulti');
 
   techPane.style.display  = tab === 'technicals' ? '' : 'none';
   indPane.style.display   = tab === 'industry'   ? '' : 'none';
+  qtrPane.style.display   = tab === 'quarterly'  ? '' : 'none';
   multiPane.style.display = tab === 'multi'      ? '' : 'none';
   techTab.classList.toggle('active', tab === 'technicals');
   indTab.classList.toggle('active', tab === 'industry');
+  qtrTab.classList.toggle('active', tab === 'quarterly');
   multiTab.classList.toggle('active', tab === 'multi');
 
   if (tab === 'multi' && typeof populateMultiPresetList === 'function') populateMultiPresetList();

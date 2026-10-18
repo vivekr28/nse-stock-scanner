@@ -24,6 +24,7 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
 import tv_adjust  # TradingView-assisted corrections; does nothing until the Data Quality button is clicked
+import quarterly_results  # Quarterly Results filters / chart table: growth maths + the /api/quarterly-growth payload (pure)
 import tv_report  # report of a full "verify every stock" run (pure functions)
 
 # ─── Configuration ───────────────────────────────────────────────────────────
@@ -277,7 +278,6 @@ def build_band_history(band_path):
                 last = band
         out[sym] = changes
     return out
-
 
 
 # Preference when NSE lists the same symbol under several series (EQ is the main board)
@@ -2233,6 +2233,8 @@ class NSEHandler(http.server.SimpleHTTPRequestHandler):
             self._serve_daily()
         elif path == '/api/band-history':
             self._serve_band_history()
+        elif path == '/api/quarterly-growth':
+            self._serve_quarterly_growth()
         elif path == '/api/presets':
             self._serve_presets()
         elif path == '/api/reprocess':
@@ -2392,6 +2394,24 @@ class NSEHandler(http.server.SimpleHTTPRequestHandler):
                 body = json.dumps({'bySymbol': build_band_history(band_path)}, separators=(',', ':')).encode('utf-8')
                 cached = _band_history_cache['v'] = (stamp, gzip.compress(body, 5))
         gz = cached[1]
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Encoding', 'gzip')
+        self.send_header('Content-Length', len(gz))
+        self.send_header('Cache-Control', 'no-cache')
+        self._cors_headers()
+        self.end_headers()
+        self.wfile.write(gz)
+
+    def _serve_quarterly_growth(self):
+        """GET /api/quarterly-growth - see quarterly_results.py. 404 until reference-data/QuarterlyResults.csv exists
+        (it is created on demand by Download-NSE-Bhavcopy.ps1 -FetchResults)."""
+        path = os.path.join(self.server.base_dir, REFERENCE_SUBDIR, quarterly_results.RESULTS_FILE)
+        try:
+            gz = quarterly_results.gzipped_payload(path)
+        except FileNotFoundError:
+            self.send_error(404, 'No quarterly results file')
+            return
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Encoding', 'gzip')

@@ -252,6 +252,7 @@ function icRenderSingleStock() {
   document.getElementById('icSingleNextBtn').disabled = icSingleIndex >= icTotalSingle() - 1;
   document.getElementById('icSingleSelectCb').checked = isStockSelected(stock.isin);
   document.getElementById('icSingleSelectCb').onchange = () => toggleStockSelection(stock.isin);
+  if (typeof qctRender === 'function') qctRender(stock);   // the quarterly table (js/quarterly-chart-table.js)
 
   icDisposeCharts();
   icDisposeIndustryChart();
@@ -264,11 +265,13 @@ function icRenderSingleStock() {
   icIndustryChartInst = icCreateChart(container, 'icVolumeSingle', icLegendStock(stock));
   icWatchManualRange(icIndustryChartInst, container);
   icSetChartData(icIndustryChartInst, candleData, volumeData, closes, icVisibleCandles(), icRightOffset);
+  if (typeof qctWatch === 'function') qctWatch(container);
 }
 
 function closeIndustryCharts() {
   document.getElementById('industryChartsModal').classList.remove('active');
   if (typeof icSetIndicatorsOpen === 'function') icSetIndicatorsOpen(false);
+  if (typeof qctRelease === 'function') qctRelease();
   icDisposeCharts();
   icDisposeIndustryChart();
   icDisposeMoneyFlowChart();
@@ -289,6 +292,7 @@ function icUpdateControlVisibility() {
   const syncWrap = document.getElementById('icSyncCrosshairWrap');
   const mfWrap = document.getElementById('icMoneyFlowWrap');
   const modalBox = document.querySelector('#industryChartsModal .ic-modal-box');
+  if (typeof qctShow === 'function') qctShow(icMode === 'single');   // quarterly table: single-stock chart only
 
   // The money flow tab has none of the candlestick controls (SMAs, dots, layout,
   // pagination...), so its header controls are hidden wholesale via this class.

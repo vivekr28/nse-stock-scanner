@@ -675,8 +675,27 @@ canvas { max-width: 100%; display: block; }
 .ic-tab:hover { color: var(--text); }
 .ic-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 .ic-modal-body { flex: 1; padding: 12px; min-height: 0; }
-.ic-industry-chart-wrap { height: 100%; display: flex; flex-direction: column; }
+.ic-industry-chart-wrap { height: 100%; display: flex; flex-direction: column; position: relative; } /* position: the single-stock table is overlaid on it */
 .ic-industry-chart-container { flex: 1; min-height: 0; }
+
+/* Single-stock chart: table OVERLAID on the chart - the last 10 quarters (newest first) with EPS, sales and their change vs the
+   same quarter a year earlier, then the price band. js/industry-charts.js (icPositionSingleFooter) re-pins it to the bottom-right
+   corner of the CANDLE pane, left of the price scale and above the volume pane, and sets max-height to the pane's height; the
+   right / bottom / max-height here are only the fallback until that has measured the chart. Semi-transparent so candles show
+   through; scrolls (header stays) when the pane is short. */
+.ic-single-footer { position: absolute; right: 76px; bottom: 32px; z-index: 6; max-height: 62%; overflow-y: auto; border-radius: 6px; }
+.ic-qtr-table { width: auto; max-width: 100%; border-collapse: collapse; font-size: 11px; background: rgba(15, 23, 42, 0.82); border: 1px solid var(--border); border-radius: 6px; }
+.ic-qtr-table th, .ic-qtr-table td { padding: 2px 9px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--border); }
+.ic-qtr-table tr:last-child th, .ic-qtr-table tr:last-child td { border-bottom: none; }
+.ic-qtr-table th { color: var(--text2); font-weight: 500; }
+.ic-qtr-table tr th:first-child { text-align: left; }   /* the quarter / row label */
+.ic-qtr-table tr:first-child th { position: sticky; top: 0; background: rgba(30, 41, 59, 0.96); color: var(--text); font-weight: 600; }
+.ic-qtr-table td { color: var(--text); font-weight: 600; }
+.ic-qtr-table td.positive { color: var(--green); }
+.ic-qtr-table td.negative { color: var(--red); }
+.ic-qtr-table td.ic-qtr-note { color: var(--text2); font-weight: 400; text-align: left; white-space: normal; max-width: 200px; }
+.ic-qtr-table td.ic-qtr-band { text-align: right; }
+.ic-qtr-mark { color: var(--orange, #f59e0b); margin-left: 1px; }
 /* Industry Money Flow Chart tab: period selector row above the chart; the candlestick
    header controls (SMAs, dots, layout, pagination) don't apply there, so they hide */
 .ic-mf-toolbar { display: flex; align-items: center; gap: 12px; padding: 0 4px 10px; flex-shrink: 0; }

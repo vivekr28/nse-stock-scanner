@@ -58,6 +58,8 @@ async function tryAutoFetchJSON() {
 
     // Phase 2: Fetch daily data in background (large payload — parsed off main thread)
     loadDailyDataInBackground();
+    // Quarterly Results filters' data (small; the filters stay inert until it arrives) - js/quarterly-results.js
+    if (typeof loadQuarterlyResults === 'function') loadQuarterlyResults();
 
     hideProgress();
     return true;

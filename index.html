@@ -195,6 +195,7 @@
         <div class="scr-filter-tabbar">
           <button id="scrTabTechnicals" class="scr-filter-tab active" onclick="switchFilterTab('technicals')">Technicals<span id="scrTabTechCount" class="scr-tab-count"></span></button>
           <button id="scrTabIndustry" class="scr-filter-tab" onclick="switchFilterTab('industry')">Sector & Industry<span id="scrTabIndCount" class="scr-tab-count"></span></button>
+          <button id="scrTabQuarterly" class="scr-filter-tab" onclick="switchFilterTab('quarterly')">Quarterly Results<span id="scrTabQtrCount" class="scr-tab-count"></span></button>
           <button id="scrTabMulti" class="scr-filter-tab" onclick="switchFilterTab('multi')">Multi-Preset<span id="scrTabMultiCount" class="scr-tab-count"></span></button>
           <button id="scrTabAsOf" class="scr-filter-tab" onclick="asOfShowTab()">As of Date<span id="scrTabAsOfCount" class="scr-tab-count"></span></button>
         </div>
@@ -474,6 +475,54 @@
           </div>
         </div>
 
+        <!-- ═══ Quarterly Results Tab (js/quarterly-results.js): growth of each stock's latest declared quarter vs the same quarter a year earlier ═══ -->
+        <div id="scrPaneQuarterly" class="scr-filter-pane" style="display:none;">
+          <div class="scr-filters-list">
+            <p id="scrQtrStatus" style="color:var(--text2);font-size:12px;margin:0;">Loading quarterly results...</p>
+
+            <!-- F20: Earnings (net profit) growth, latest quarter vs the same quarter last year -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF20On">
+              <span class="scr-label" title="Net profit of the stock's latest declared quarter vs the same quarter a year earlier, in %. Stocks that were loss-making a year ago have no % growth and do not pass.">QoQ Y Earnings:</span>
+              <div class="scr-inputs">
+                <span class="scr-unit">&gt;</span>
+                <input type="number" id="scrF20Val" value="20" step="5" style="width:70px;">
+                <span class="scr-unit">%</span>
+              </div>
+            </div>
+
+            <!-- F21: Sales growth, latest quarter vs the same quarter last year -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF21On">
+              <span class="scr-label" title="Sales (revenue from operations; total income for banks) of the stock's latest declared quarter vs the same quarter a year earlier, in %.">QoQ Y Sales:</span>
+              <div class="scr-inputs">
+                <span class="scr-unit">&gt;</span>
+                <input type="number" id="scrF21Val" value="10" step="5" style="width:70px;">
+                <span class="scr-unit">%</span>
+              </div>
+            </div>
+
+            <!-- F22: Earnings turnaround - a loss in the same quarter a year ago, a profit now. Kept apart from F20: growth % needs a positive base -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF22On">
+              <span class="scr-label" title="Net profit this quarter after a LOSS in the same quarter a year earlier. No % is computed (a percentage from a loss means nothing); the table shows the two amounts instead.">QoQ Y Earnings turnaround:</span>
+              <div class="scr-inputs">
+                <span class="scr-unit">loss a year ago, profit now</span>
+              </div>
+            </div>
+
+            <!-- F23: Sales turnaround - no sales in the same quarter a year ago, some now. Kept apart from F21 -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF23On">
+              <span class="scr-label" title="Sales this quarter after NO sales in the same quarter a year earlier (sales cannot be negative, so zero is the only 'before'). Rare: only a handful of stocks.">QoQ Y Sales turnaround:</span>
+              <div class="scr-inputs">
+                <span class="scr-unit">no sales a year ago, sales now</span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
         <!-- ═══ Multi-Preset Tab: run several saved presets combined ═══ -->
         <div id="scrPaneMulti" class="scr-filter-pane" style="display:none;">
           <div class="scr-multi-wrap">
@@ -669,6 +718,8 @@
       <div id="icGrid" class="ic-grid"></div>
       <div id="icIndustryChartWrap" class="ic-industry-chart-wrap" style="display:none;">
         <div id="icIndustryChartContainer" class="ic-industry-chart-container"></div>
+        <!-- Single-stock mode only: last 4 quarters of YoY earnings / sales growth + the price band (js/quarterly-results.js qrChartTableHtml) -->
+        <div id="icSingleFooter" class="ic-single-footer" style="display:none;"></div>
       </div>
       <div id="icMoneyFlowWrap" class="ic-industry-chart-wrap" style="display:none;">
         <div class="ic-mf-toolbar">
@@ -1119,7 +1170,9 @@
 <script src="js/cache.js?v=2"></script>
 <script src="js/data-processor.js?v=2"></script>
 <script src="js/scanner.js?v=2"></script>
-<script src="js/screener.js?v=16"></script>
+<script src="js/screener.js?v=19"></script>
+<script src="js/quarterly-results.js?v=7"></script>
+<script src="js/quarterly-chart-table.js?v=1"></script>
 <script src="js/breadth.js?v=14"></script>
 <script src="js/sector.js?v=2"></script>
 <script src="js/industry.js?v=13"></script>
@@ -1127,12 +1180,12 @@
 <script src="js/ew-index.js?v=6"></script>
 <script src="js/chart-tools.js?v=6"></script>
 <script src="js/market-overview.js?v=7"></script>
-<script src="js/industry-charts.js?v=21"></script>
+<script src="js/industry-charts.js?v=24"></script>
 <script src="js/data-quality.js?v=11"></script>
-<script src="js/presets.js?v=11"></script>
-<script src="js/asof-scan.js?v=1"></script>
+<script src="js/presets.js?v=13"></script>
+<script src="js/asof-scan.js?v=2"></script>
 <script src="js/ui.js?v=11"></script>
-<script src="js/nse-download.js?v=4"></script>
+<script src="js/nse-download.js?v=5"></script>
 
 </body>
 </html>
