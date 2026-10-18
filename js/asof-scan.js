@@ -14,8 +14,8 @@ function asofIso(ds) {
 }
 
 /* ---------- tab show / hide (own handlers, the existing tab code is untouched) ---------- */
-const ASOF_OTHER_PANES = ['scrPaneTechnicals', 'scrPaneIndustry', 'scrPaneQuarterly', 'scrPaneMulti'];
-const ASOF_OTHER_TABS = ['scrTabTechnicals', 'scrTabIndustry', 'scrTabQuarterly', 'scrTabMulti'];
+const ASOF_OTHER_PANES = ['scrPaneTechnicals', 'scrPaneIndustry', 'scrPaneRelStrength', 'scrPaneQuarterly', 'scrPaneMulti'];
+const ASOF_OTHER_TABS = ['scrTabTechnicals', 'scrTabIndustry', 'scrTabRelStrength', 'scrTabQuarterly', 'scrTabMulti'];
 
 function asOfShowTab() {
   ASOF_OTHER_PANES.forEach(id => { const p = asofEl(id); if (p) p.style.display = 'none'; });
