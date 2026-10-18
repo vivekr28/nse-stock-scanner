@@ -113,6 +113,8 @@ function qrFailReasons(symbol, f20, f21, f22, f23) {
       reasons.push(`${c.code}: ${c.name} ${q} ${g >= 0 ? '+' : ''}${g.toFixed(1)}% YoY, not > ${c.min}%`);
     }
   }
+  // a stock compared on the OTHER basis (its year-ago quarter was filed standalone vs consolidated) says so in every reason
+  if (rec && rec.ab && reasons.length) return reasons.map(r => r + ` (compared on ${rec.ab === 'S' ? 'Standalone' : 'Consolidated'} results)`);
   return reasons;
 }
 
@@ -141,6 +143,7 @@ function qrApplyToStock(stock, state) {
   const rec = qrLookup(stock.symbol);
   const num = v => (v === null || v === undefined ? NaN : v);
   stock._qrQtr = rec ? rec.q : '';
+  stock._qrBasis = rec && rec.ab ? rec.ab : '';   // 'S' / 'C' when compared on the other basis, else ''
   stock._qrEarn = rec ? num(rec.eg) : NaN;
   stock._qrSales = rec ? num(rec.sg) : NaN;
   stock._qrProfitNow = rec ? num(rec.e) : NaN;   // Rs crore, for the turnaround columns
@@ -169,7 +172,7 @@ function qrUpdateBadge() {
 function qrColumns() {
   const s = qrFilterState();
   if (!s.any) return [];
-  const cols = [{ key: '_qrQtr', label: 'Result Qtr', fmt: v => qrQuarterLabel(v) }];
+  const cols = [{ key: '_qrQtr', label: 'Result Qtr', fmt: (v, row) => qrQuarterLabel(v) + (row && row._qrBasis ? ` (${row._qrBasis})` : '') }];   // (S) / (C): compared on the other basis
   const growthCol = (key, label) => ({ key, label, fmt: v => isNaN(v) ? '-' : (v >= 0 ? '+' : '') + v.toFixed(1) + '%', cls: v => isNaN(v) ? '' : (v >= 0 ? 'positive' : 'negative') });
   if (s.f20.on) cols.push(growthCol('_qrEarn', 'Earnings YoY%'));
   if (s.f21.on) cols.push(growthCol('_qrSales', 'Sales YoY%'));

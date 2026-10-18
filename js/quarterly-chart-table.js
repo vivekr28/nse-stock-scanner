@@ -16,7 +16,9 @@
 // ── The single-stock chart's table (bottom-right corner): the last 10 quarters, newest first ───────────────────────
 //   Quarterly | EPS | %Chg | Sales (Cr) | %Chg      - each %Chg is against the same quarter a year earlier
 // from the `h` list of /api/quarterly-growth: [quarter-end, sales Rs cr, sales growth %, EPS, EPS growth %, cmp, EPS turnaround 1/0],
-// oldest first (the table shows it reversed). EPS is as filed - NOT restated for splits/bonuses - so a quarter pair that
+// oldest first (the table shows it reversed). A quarter whose year-ago quarter was filed on the OTHER basis (standalone vs
+// consolidated) but was compared on a basis both hold carries three more items, ['S'|'C', sales, sales a year ago] on that
+// basis: its two %Chg cells are marked (S) / (C) with a hover saying so (the sales and EPS shown stay the quarter's own). EPS is as filed - NOT restated for splits/bonuses - so a quarter pair that
 // straddles one is marked with * (qctEpsSplitNote).
 
 // "No Band%" is how the server stores a stock with no price band (it appends % to every band); show it as "No Band"
@@ -77,7 +79,7 @@ function qctEpsSplitNote(stock, quarterIso) {
 // HTML of the table for a stock (the object from Store.latestBySymbol / the results list): a header, one row per quarter
 // (up to 10, latest at the top) and the stock's current price band. Pure apart from reading Store.
 function qctTableHtml(stock) {
-  const cell = c => `<td class="${c.cls}"${c.title ? ` title="${escapeHtml(c.title)}"` : ''}>${escapeHtml(c.text)}${c.mark ? '<span class="ic-qtr-mark">*</span>' : ''}</td>`;
+  const cell = c => `<td class="${c.cls}"${c.title ? ` title="${escapeHtml(c.title)}"` : ''}>${escapeHtml(c.text)}${c.mark ? '<span class="ic-qtr-mark">*</span>' : ''}${c.basis ? `<span class="ic-qtr-basis">(${escapeHtml(c.basis)})</span>` : ''}</td>`;
   const band = `<tr><th title="Current price band (circuit limit)">Band</th><td colspan="4" class="ic-qtr-band">${escapeHtml(qctBandLabel(stock && stock.bandPct))}</td></tr>`;
   const rec = stock ? qrLookup(stock.symbol) : undefined;
   let body;
@@ -90,7 +92,7 @@ function qctTableHtml(stock) {
   } else {
     const head = '<tr><th>Quarterly</th><th>EPS</th><th>%Chg</th><th>Sales (Cr)</th><th>%Chg</th></tr>';
     const rows = rec.h.slice().reverse().filter(h => h[5] !== 'none' || h[1] !== null).map(h => {
-      const [q, sales, salesG, eps, epsG, cmp, epsT] = h;
+      const [q, sales, salesG, eps, epsG, cmp, epsT, ab, abSales, abSalesPrev] = h;
       const epsCell = { text: eps === null || eps === undefined ? '-' : eps.toFixed(2), cls: '', title: eps === null || eps === undefined ? 'No EPS reported in this filing' : '' };
       const epsPct = qctPctCell(epsG, cmp === 'scale' || cmp === 'blank' ? 'ok' : cmp, { turnaround: !!epsT, naTitle: 'No % change: the same quarter a year ago had a loss or zero EPS' });
       if (eps === null || eps === undefined) { epsPct.text = '-'; epsPct.cls = ''; epsPct.title = 'No EPS reported in this filing'; }
@@ -98,6 +100,12 @@ function qctTableHtml(stock) {
       if (note) { epsPct.mark = true; epsPct.title = note; }
       const salesCell = { text: sales === null || sales === undefined ? '-' : qctFmtSales(sales), cls: '', title: sales === null || sales === undefined ? (QCT_CMP_NOTE[cmp === 'ok' ? 'blank' : cmp] || '') : '' };
       const salesPct = qctPctCell(salesG, cmp, { naTitle: 'No % change: sales a year ago were zero' });
+      if (ab) {   // compared on the one basis both quarters hold - say so on the cells that show a number
+        const name = ab === 'S' ? 'Standalone' : 'Consolidated';
+        const why = `The year-ago quarter was filed on a different basis, so this change is computed on ${name} results`;
+        if (salesPct.text !== '-' && salesPct.text !== 'n/a') { salesPct.basis = ab; salesPct.title = `${why}: sales ${qctFmtSales(abSales)} Cr vs ${qctFmtSales(abSalesPrev)} Cr a year ago. The sales shown are the quarter's own figure.`; }
+        if (epsPct.text !== '-' && epsPct.text !== 'n/a') { epsPct.basis = ab; epsPct.title = (epsPct.title ? epsPct.title + ' ' : '') + `${why}.`; }
+      }
       return `<tr><th>${escapeHtml(qrQuarterShort(q))}</th>${cell(epsCell)}${cell(epsPct)}${cell(salesCell)}${cell(salesPct)}</tr>`;
     });
     body = head + rows.join('');

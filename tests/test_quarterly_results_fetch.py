@@ -37,6 +37,9 @@ def test_progress_lines_are_understood():
     assert p('Filings to read: 1,234') == {'step': 'Reading result filings', 'current': 0, 'total': 1234}
     assert p('Filings to read: 0')['step'] == 'No new result filings to read'
     assert p('Results: 1,500 / 14,000 filings processed...') == {'step': 'Reading result filings', 'current': 1500, 'total': 14000}
+    assert p('Other-basis filings to read: 309') == {'step': 'Reading other-basis filings (standalone vs consolidated)', 'current': 0, 'total': 309}
+    assert p('Other-basis filings to read: 0')['step'] == 'No other-basis filings to read'
+    assert p('Other-basis: 50 / 309 filings processed...') == {'step': 'Reading other-basis filings (standalone vs consolidated)', 'current': 50, 'total': 309}
     assert p('Quarterly results: 29571 rows (12 new; 12 read, 0 without numbers, 0 failed) updated in 40s')['step'] == 'Saving the results file'
     assert p('Downloading market-cap file...')['step'].startswith('Updating NSE price files')
     assert p('something unrelated') is None

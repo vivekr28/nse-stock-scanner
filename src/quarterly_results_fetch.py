@@ -55,6 +55,14 @@ def parse_progress(line):
     if m:
         n = int(m.group(1).replace(',', ''))
         return {'step': 'Reading result filings' if n else 'No new result filings to read', 'current': 0, 'total': n}
+    m = re.match(r'Other-basis filings to read: ([\d,]+)', line)
+    if m:
+        n = int(m.group(1).replace(',', ''))
+        return {'step': 'Reading other-basis filings (standalone vs consolidated)' if n else 'No other-basis filings to read', 'current': 0, 'total': n}
+    m = re.match(r'Other-basis: ([\d,]+) / ([\d,]+) filings processed', line)
+    if m:
+        return {'step': 'Reading other-basis filings (standalone vs consolidated)', 'current': int(m.group(1).replace(',', '')),
+                'total': int(m.group(2).replace(',', ''))}
     m = re.match(r'Results: ([\d,]+) / ([\d,]+) filings processed', line)
     if m:
         return {'step': 'Reading result filings', 'current': int(m.group(1).replace(',', '')),
