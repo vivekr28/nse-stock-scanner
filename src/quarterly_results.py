@@ -147,6 +147,8 @@ def build_quarterly_growth(path):
             three more items, [..., 'S'|'C', sales this quarter, sales a year ago] on that basis, and the two growth figures
             are on that basis too);
             a quarter with no result on file is [d, None, None, None, None, 'none', 0]
+      hx    DISPLAY ONLY, present only when needed: {index into h: {'e': plain (new - old) / old % of EPS}} for a quarter whose year-ago EPS was a
+            loss, whatever the EPS is now (h's own EPS growth is None there: it needs a positive base). The scanner's filters never use it
     Sales is revenue from operations (total income for banks); profit is the owners' share where reported."""
     if not os.path.exists(path):
         return {}
@@ -183,6 +185,7 @@ def build_quarterly_growth(path):
         # A quarter with no result on file is [quarter-end, None, None, None, None, 'none', 0]. EPS is as filed (NOT restated
         # for later splits/bonuses; the browser flags those), so its growth is None unless the year-ago EPS is positive.
         hist = []
+        hx = {}
         for n in range(-9, 1):
             d = _shift_quarter(latest, n)
             row = quarters.get(d)
@@ -192,12 +195,13 @@ def build_quarterly_growth(path):
             c = _compare_quarter(quarters, sales_by_date, d)
             eps = _result_num(row.get('EPS_BASIC'))
             prev = quarters.get(_shift_quarter(d, -4))
-            eps_growth, eps_turnaround = None, 0
+            eps_growth, eps_turnaround, eps_pair = None, 0, None
             if prev is not None and prev.get('BASIS') == row.get('BASIS') and eps is not None:
                 prev_eps = _result_num(prev.get('EPS_BASIC'))
                 if prev_eps is not None:
                     eps_growth = _growth_pct(eps, prev_eps)
                     eps_turnaround = int(prev_eps < 0 and eps > 0)
+                    eps_pair = (eps, prev_eps)
             elif prev is not None and c.get('ab'):
                 # different stored bases, compared on the one both hold: the EPS growth is on that basis too
                 basis = 'Consolidated' if c['ab'] == 'C' else 'Standalone'
@@ -205,6 +209,10 @@ def build_quarterly_growth(path):
                 if cur_eps is not None and prev_eps is not None:
                     eps_growth = _growth_pct(cur_eps, prev_eps)
                     eps_turnaround = int(prev_eps < 0 and cur_eps > 0)
+                    eps_pair = (cur_eps, prev_eps)
+            # a year-ago LOSS: the plain mathematical % (new - old) / old, for the table to show instead of n/a (or the word "Turnaround")
+            if eps_pair and eps_pair[1] < 0:
+                hx[n + 9] = {'e': round((eps_pair[0] - eps_pair[1]) / eps_pair[1] * 100, 2)}
             # a quarter whose own figures look mis-scaled shows no sales (its EPS is per share and is unaffected)
             shown = _result_num(row.get('REVENUE_CR'))       # the stored figure, whatever basis the comparison used
             sales = None if _looks_mis_scaled(sales_by_date, d) or shown is None else round(shown, 1)
@@ -213,6 +221,8 @@ def build_quarterly_growth(path):
                 entry += [c['ab'], round(c['s'], 1), round(c['sp'], 1)]
             hist.append(entry)
         rec['h'] = hist
+        if hx:
+            rec['hx'] = hx
         out[sym] = rec
     return out
 
