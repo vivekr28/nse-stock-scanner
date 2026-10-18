@@ -67,10 +67,11 @@ test('chart table: changes are whole percents coloured by sign; sales use one de
   assert.match(jun, /<td class="positive"[^>]*>\+13%<\/td>/);
 });
 
-test('chart table: an EPS turnaround is labelled; a change from a zero or loss base reads n/a', () => {
+test('chart table: the word "Turnaround" is never shown; without a number from the server a loss / zero base reads n/a', () => {
   withData({ aaa: rec({ h: [H('2025-09-30', 100, 5, 4, null, 'ok', 0), H('2025-12-31', 100, 5, 4, null, 'ok', 1)] }) });
-  const rows = bodyRows(sb.qctTableHtml({ symbol: 'AAA', bandPct: '20%' }));
-  assert.deepEqual(rows.map(r => r[2]), ['Turnaround', 'n/a']);   // newest first: Dec-25 is the turnaround
+  const html = sb.qctTableHtml({ symbol: 'AAA', bandPct: '20%' });
+  assert.deepEqual(bodyRows(html).map(r => r[2]), ['n/a', 'n/a']);
+  assert.ok(!/turnaround/i.test(html));
 });
 
 test('chart table: a quarter that cannot be compared shows its figures with a dash and the reason on hover', () => {

@@ -44,7 +44,6 @@ function qctFmtSales(v) {
 // A %Chg cell: whole percent with its sign (+30%, -34%), coloured; or why there is no number
 function qctPctCell(growth, cmp, extra) {
   if (cmp === 'none' || cmp === 'no-prev' || cmp === 'basis' || cmp === 'scale' || cmp === 'blank') return { text: '-', cls: '', title: QCT_CMP_NOTE[cmp] };
-  if (extra && extra.turnaround) return { text: 'Turnaround', cls: 'positive', title: 'A loss in the same quarter a year ago, a profit now' };
   if (growth === null || growth === undefined) return { text: 'n/a', cls: '', title: (extra && extra.naTitle) || 'No % change: the same quarter a year ago was a loss or zero' };
   const r = Math.round(growth);
   return { text: r === 0 ? '0%' : (r > 0 ? '+' : '') + r.toLocaleString('en-IN') + '%', cls: growth >= 0 ? 'positive' : 'negative', title: '' };
@@ -91,10 +90,13 @@ function qctTableHtml(stock) {
     body = '<tr><td colspan="5" class="ic-qtr-note">No quarterly results for this stock</td></tr>';
   } else {
     const head = '<tr><th>Quarterly</th><th>EPS</th><th>%Chg</th><th>Sales (Cr)</th><th>%Chg</th></tr>';
-    const rows = rec.h.slice().reverse().filter(h => h[5] !== 'none' || h[1] !== null).map(h => {
+    const rows = rec.h.map((h, i) => ({ h, i })).reverse().filter(({ h }) => h[5] !== 'none' || h[1] !== null).map(({ h, i }) => {
       const [q, sales, salesG, eps, epsG, cmp, epsT, ab, abSales, abSalesPrev] = h;
       const epsCell = { text: eps === null || eps === undefined ? '-' : eps.toFixed(2), cls: '', title: eps === null || eps === undefined ? 'No EPS reported in this filing' : '' };
-      const epsPct = qctPctCell(epsG, cmp === 'scale' || cmp === 'blank' ? 'ok' : cmp, { turnaround: !!epsT, naTitle: 'No % change: the same quarter a year ago had a loss or zero EPS' });
+      const epsPct = qctPctCell(epsG, cmp === 'scale' || cmp === 'blank' ? 'ok' : cmp, { naTitle: 'No % change: the same quarter a year ago had zero EPS' });
+      // the year-ago EPS was a loss: just the plain mathematical % (new - old) / old, which the server sends for display (rec.hx)
+      const lossPct = rec.hx && rec.hx[i] ? rec.hx[i].e : undefined;
+      if (lossPct !== undefined) Object.assign(epsPct, qctPctCell(lossPct, 'ok'));
       if (eps === null || eps === undefined) { epsPct.text = '-'; epsPct.cls = ''; epsPct.title = 'No EPS reported in this filing'; }
       const note = epsPct.text !== '-' && epsPct.text !== 'n/a' ? qctEpsSplitNote(stock, q) : '';
       if (note) { epsPct.mark = true; epsPct.title = note; }
