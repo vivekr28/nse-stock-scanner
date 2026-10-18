@@ -145,6 +145,7 @@ function renderDataQuality() {
   dqLoadTvVerify();
   dqLoadTvFull();
   dqLoadSectorStatus();
+  if (typeof qrfLoadStatus === 'function') qrfLoadStatus();   // Quarterly results (earnings) section: js/quarterly-results-fetch.js
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
