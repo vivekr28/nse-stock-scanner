@@ -77,3 +77,51 @@ def test_it_travels_in_the_payload_only_for_stocks_that_have_it(tmp_path):
     doc = json.loads(json.dumps(qr.payload(str(f))))
     assert doc['bySymbol']['a']['qe'] == 50.0 and doc['bySymbol']['a']['qs'] == 0.0
     assert 'qe' not in doc['bySymbol']['b'] and 'qs' not in doc['bySymbol']['b']
+
+
+# ── the turnaround flags: a LOSS in the previous quarter and a profit now / NO sales in the previous quarter and some now ──────
+
+def test_a_loss_then_a_profit_now_is_an_earnings_turnaround_with_the_amounts(tmp_path):
+    g = growth(tmp_path, arow('AAA', '31-Mar-2026', 'Consolidated', 100, -5), arow('AAA', '30-Jun-2026', 'Consolidated', 120, 10))
+    assert g['aaa']['qet'] is True and g['aaa']['qst'] is False
+    assert g['aaa']['qp'] == [-5.0, 100.0, 10.0, 120.0]       # [previous profit, previous sales, profit now, sales now]
+    assert g['aaa']['qe'] is None                              # a turnaround has no percentage: kept apart from the growth figure
+
+
+def test_only_a_real_loss_to_profit_counts_as_an_earnings_turnaround(tmp_path):
+    for prev, now, expected in ((0, 10, False), (5, 10, False), (-5, -2, False), (-5, 0, False), (-5, 0.01, True)):
+        g = growth(tmp_path, arow('AAA', '31-Mar-2026', 'Consolidated', 100, prev), arow('AAA', '30-Jun-2026', 'Consolidated', 100, now))
+        assert g['aaa']['qet'] is expected, (prev, now)        # a zero is not a loss, and a profit still has to be positive
+
+
+def test_no_sales_then_some_is_a_sales_turnaround(tmp_path):
+    g = growth(tmp_path, arow('AAA', '31-Mar-2026', 'Consolidated', 0, 3), arow('AAA', '30-Jun-2026', 'Consolidated', 50, 5))
+    assert g['aaa']['qst'] is True and g['aaa']['qs'] is None and g['aaa']['qet'] is False
+    for prev, now, expected in ((10, 50, False), (0, 0, False), (0, 0.5, True)):
+        g = growth(tmp_path, arow('AAA', '31-Mar-2026', 'Consolidated', prev, 3), arow('AAA', '30-Jun-2026', 'Consolidated', now, 5))
+        assert g['aaa']['qst'] is expected, (prev, now)
+
+
+def test_the_turnaround_fields_are_absent_without_a_previous_quarter(tmp_path):
+    g = growth(tmp_path, arow('AAA', '30-Jun-2026', 'Consolidated', 100, 15))
+    assert 'qp' not in g['aaa'] and 'qet' not in g['aaa'] and 'qst' not in g['aaa']
+
+
+def test_without_a_common_basis_the_flags_are_false_and_the_amounts_none(tmp_path):
+    g = growth(tmp_path, arow('XX', '31-Mar-2026', 'Standalone', 100, -5), arow('XX', '30-Jun-2026', 'Consolidated', 120, 99))
+    assert g['xx']['qp'] is None and g['xx']['qet'] is False and g['xx']['qst'] is False
+
+
+def test_the_turnaround_is_judged_on_a_basis_both_quarters_hold(tmp_path):
+    # the latest quarter's consolidated profit is 99, but on Standalone (the previous quarter's basis) it is 8: a loss of 5 then, 8 now
+    g = growth(tmp_path,
+               arow('XX', '31-Mar-2026', 'Standalone', 100, -5),
+               arow('XX', '30-Jun-2026', 'Consolidated', 300, 99, alt=('Standalone', 118, 8)))
+    assert g['xx']['qet'] is True and g['xx']['qp'] == [-5.0, 100.0, 8.0, 118.0]
+
+
+def test_the_turnaround_fields_travel_in_the_payload(tmp_path):
+    f = tmp_path / 'q.csv'
+    f.write_text('﻿' + HEADER + arow('A', '31-Mar-2026', 'Consolidated', 0, -2) + arow('A', '30-Jun-2026', 'Consolidated', 40, 6), encoding='utf-8')
+    rec = json.loads(json.dumps(qr.payload(str(f))))['bySymbol']['a']
+    assert rec['qet'] is True and rec['qst'] is True and rec['qp'] == [-2.0, 0.0, 6.0, 40.0]
