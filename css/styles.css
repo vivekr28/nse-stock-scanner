@@ -199,6 +199,8 @@ select option {
   gap: 10px 16px;
 }
 .scr-filter-pair { display: flex; flex-direction: column; gap: 10px; }
+/* Technicals: the Day Chg / Turnover co-occurrence card (F4) spans both columns, below them */
+#scrPaneTechnicals .scr-filter-pair { grid-column: 1 / -1; }
 /* Technicals: two independent stacks so spacing stays uniform regardless of tall rows in the other column */
 .scr-tech-col { display: flex; flex-direction: column; gap: 10px; }
 /* Free up room for inputs in the narrower 2-column cells — the sitewide 180px label
