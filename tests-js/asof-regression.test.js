@@ -62,11 +62,11 @@ test('the module only READS the other modules\' globals it needs; it assigns jus
 test('the existing popup keeps exactly its 33 filter switches (19 + the Relative Strength tab\'s F24-F25 + the Quarterly Results tab\'s F20-F23 and F26-F33), and the As of Date tab adds none the existing code would count', () => {
   const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map(m => m[1]);
   const switches = ids.filter(id => /^scrF\d+On$/.test(id)).sort();
-  assert.equal(switches.length, 33);
-  for (let n = 1; n <= 33; n++) assert.ok(switches.includes(`scrF${n}On`), `scrF${n}On is missing`);
+  assert.equal(switches.length, 35);
+  for (let n = 1; n <= 35; n++) assert.ok(switches.includes(`scrF${n}On`), `scrF${n}On is missing`);
   // the existing code counts filters with  input[id^="scrF"][id$="On"]  (screener.js singleFilterCount) - new ids must not match it
   const matchesExisting = ids.filter(id => id.startsWith('scrF') && id.endsWith('On'));
-  assert.equal(matchesExisting.length, 33);
+  assert.equal(matchesExisting.length, 35);
   for (const id of ids.filter(i => /^asof/i.test(i))) assert.ok(!(id.startsWith('scrF') && id.endsWith('On')), id);
 });
 
