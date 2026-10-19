@@ -367,6 +367,9 @@ function runScreener() {
   const qr = typeof qrFilterState === 'function' ? qrFilterState() : null;
   // Relative Strength tab's F24 (js/relative-strength.js): read here, applied per stock below
   const rs = typeof rsFilterState === 'function' ? rsFilterState() : null;
+  // Sector & Industry tab's F34 / F35 (js/group-breadth.js): the breadth of the stock's own industry / sector, read here, applied per stock below
+  const gb = typeof gbFilterState === 'function' ? gbFilterState() : null;
+  const gbMaps = gb && gb.any ? gbPrepare(gb) : null;
 
   // Pre-compute industry RS map if needed
   let indRSMap = {};
@@ -643,6 +646,9 @@ function runScreener() {
     // F20 - F23: growth / turnaround of the latest declared quarter vs the same quarter last year (js/quarterly-results.js)
     if (qr && qr.any) failReasons.push(...qrApplyToStock(s, qr));
 
+    // F34 / F35: breadth of the stock's industry / sector (js/group-breadth.js)
+    if (gb && gb.any) failReasons.push(...gbApplyToStock(s, gb, gbMaps));
+
     // F24: closed above the O/H/L/C of a chosen date within the next n trading days (js/relative-strength.js)
     if (rs && rs.any) failReasons.push(...rsApplyToStock(s, days, rs, allowPartial));
 
@@ -686,7 +692,7 @@ function runScreener() {
   scrSortCol = null;
 
   // Count active filters
-  const activeCount = [f1On, f2On, f3On, f4On, f5On, f6On, f7On, f8On, f9On, f10On, f11On, f12On, f13On, f14On, f15On, f16On, f17On, f18On].filter(Boolean).length + (typeof qrActiveCount === 'function' ? qrActiveCount() : 0);
+  const activeCount = [f1On, f2On, f3On, f4On, f5On, f6On, f7On, f8On, f9On, f10On, f11On, f12On, f13On, f14On, f15On, f16On, f17On, f18On].filter(Boolean).length + (typeof qrActiveCount === 'function' ? qrActiveCount() : 0) + (typeof gbActiveCount === 'function' ? gbActiveCount() : 0);
 
   // Stats
   const advancing = passed.filter(s => s.changePct > 0).length;
@@ -811,6 +817,7 @@ function renderScreenerTable() {
   if (f19On) {
     cols.push({ key: 'listingDate', label: 'Listed On', fmt: v => v || '-' });
   }
+  if (typeof gbColumns === 'function') cols.push(...gbColumns());   // Sector & Industry tab's F34 / F35 columns (js/group-breadth.js)
   if (typeof rsColumns === 'function') cols.push(...rsColumns());   // Relative Strength tab's F24 columns (js/relative-strength.js)
   if (typeof qrColumns === 'function') cols.push(...qrColumns());   // Quarterly Results filters' columns (js/quarterly-results.js)
   cols.push({ key: 'marketCap', label: 'MCap(Cr)', fmt: v => fmtCr(v) });
@@ -923,6 +930,7 @@ function resetScreener() {
   initF16Dates();
   document.getElementById('scrF19On').checked = false;
   document.getElementById('scrF19Date').value = '';
+  if (typeof gbReset === 'function') gbReset(); // the Sector & Industry tab's F34 / F35 controls (js/group-breadth.js)
   if (typeof rsReset === 'function') rsReset(); // the Relative Strength tab's F24 controls (js/relative-strength.js)
   if (typeof qrReset === 'function') qrReset(); // the Quarterly Results tab's controls (js/quarterly-results.js)
   if (typeof asOfReset === 'function') asOfReset(); // the As of Date tab's controls reset with everything else
@@ -1178,7 +1186,7 @@ function updateFilterBadge() {
   const countChecked = ids => ids.filter(id => { const el = document.getElementById(id); return el && el.checked; }).length;
 
   const techCount = countChecked(techIds);
-  const indCount  = countChecked(indIds);
+  const indCount  = countChecked(indIds) + (typeof gbActiveCount === 'function' ? gbActiveCount() : 0); // + F34 / F35 (js/group-breadth.js)
   const rsCount   = typeof rsActiveCount === 'function' ? rsActiveCount() : 0; // Relative Strength tab: F16 + F24 (js/relative-strength.js)
   const qtrCount  = typeof qrActiveCount === 'function' ? qrActiveCount() : 0; // Quarterly Results tab (js/quarterly-results.js)
   const asOfCount = typeof asOfActiveCount === 'function' ? asOfActiveCount() : 0; // As of Date tab (js/asof-scan.js)

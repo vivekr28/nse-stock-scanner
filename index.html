@@ -427,6 +427,28 @@
               </div>
             </div>
 
+            <!-- F34: breadth of the stock's own industry (js/group-breadth.js) -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF34On">
+              <span class="scr-label" title="Passes stocks whose INDUSTRY has more than this % of its stocks above their 20 SMA - the same Breadth figure as the Industry Analysis tab (stocks above their 20 SMA divided by all the stocks of the industry). A one-stock industry is 0% or 100%: pair it with Min Stocks in Industry.">Industry breadth (% of stocks above 20 SMA):</span>
+              <div class="scr-inputs">
+                <span class="scr-unit">&gt;</span>
+                <input type="number" id="scrF34Val" value="50" min="0" max="100" step="5" style="width:70px;">
+                <span class="scr-unit">%</span>
+              </div>
+            </div>
+
+            <!-- F35: breadth of the stock's own sector (js/group-breadth.js) -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF35On">
+              <span class="scr-label" title="Passes stocks whose SECTOR has more than this % of its stocks above their 20 SMA - the same Breadth figure as the Sector Analysis tab (stocks above their 20 SMA divided by all the stocks of the sector).">Sector breadth (% of stocks above 20 SMA):</span>
+              <div class="scr-inputs">
+                <span class="scr-unit">&gt;</span>
+                <input type="number" id="scrF35Val" value="50" min="0" max="100" step="5" style="width:70px;">
+                <span class="scr-unit">%</span>
+              </div>
+            </div>
+
           </div>
         </div>
 
@@ -1360,9 +1382,10 @@
 <script src="js/cache.js?v=2"></script>
 <script src="js/data-processor.js?v=2"></script>
 <script src="js/scanner.js?v=2"></script>
-<script src="js/screener.js?v=21"></script>
+<script src="js/screener.js?v=22"></script>
 <script src="js/quarterly-results.js?v=11"></script>
 <script src="js/relative-strength.js?v=3"></script>
+<script src="js/group-breadth.js?v=1"></script>
 <script src="js/quarterly-chart-table.js?v=2"></script>
 <script src="js/breadth.js?v=16"></script>
 <script src="js/breadth-universe.js?v=2"></script>
@@ -1375,7 +1398,7 @@
 <script src="js/industry-charts.js?v=24"></script>
 <script src="js/data-quality.js?v=12"></script>
 <script src="js/quarterly-results-fetch.js?v=1"></script>
-<script src="js/presets.js?v=18"></script>
+<script src="js/presets.js?v=19"></script>
 <script src="js/asof-scan.js?v=3"></script>
 <script src="js/ui.js?v=12"></script>
 <script src="js/nse-download.js?v=5"></script>
