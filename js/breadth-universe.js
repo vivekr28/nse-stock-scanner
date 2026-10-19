@@ -10,6 +10,8 @@
 //   bruTitleSuffix() / bruNote()    the chart title's ending and the note line under it
 //   bruTag()                        changes whenever the plotted VALUES change (universe, smoothing): the drawing tools reset on it
 //   bruSyncControls(isMulti)        enable / disable the "vs market" box (it applies to single-line charts of a sub-universe only)
+//   bruLeaders(metricKey)           the ranking table beside the chart: every sector / industry sorted by the active metric's latest value
+//                                   (with its change over 5 and 20 trading days); a click on a row selects that universe
 // Classification is TODAY's (Store.latestBySymbol sector / industry applied to the whole history), like the market-wide chart's universe is
 // today's list of stocks. Small groups are jumpy (one stock crossing its average moves a 7-stock industry by 14 points), so industries
 // under BRU_SMALL stocks are listed last, under their own heading.
@@ -153,4 +155,89 @@ function bruReset(allHistory, numDays) {
 function brdUniverseChanged() {
   brdUpdateHeader();
   brdRenderActiveTab();
+}
+
+// ── Leaders: which sectors / industries lead the breadth right now ───────────
+// One row per sector or industry (the "Stocks" box leaves out the small ones), ranked by the ACTIVE chart's latest value - e.g. the % of its
+// stocks above the 20 SMA - with the change in percentage points over 5 and 20 trading days, so the leaders AND the ones turning up are visible
+// without opening 66 charts. It reads the same cached per-universe histories the chart uses (all industries together cost about one pass over
+// the market the first time, and the dropdown then opens instantly). The values are the raw ones, never smoothed.
+const BRU_LEAD_MULTI = { aboveBoth: 'above20', highAll: 'high1m' };   // the overlay views rank by their first line
+let _bruLeadSort = { key: 'now', dir: -1 };
+let _bruLeadMetric = 'above20';
+let _bruLeadRows = [];
+
+function bruLeaderRows(kind, minStocks, prefix) {
+  const g = bruGroups();
+  const groups = kind === 'sec' ? g.sectors : g.industries.concat(g.small);
+  const rows = [];
+  for (const x of groups) {
+    if (x.count < minStocks) continue;
+    const h = bruHistoryOf(kind + ':' + x.name);
+    const n = h.length;
+    if (!n) continue;
+    const now = h[n - 1][prefix + 'OHLC'].close;
+    const back = k => (n > k ? now - h[n - 1 - k][prefix + 'OHLC'].close : null);
+    rows.push({ value: kind + ':' + x.name, name: x.name, count: x.count, now, d5: back(5), d20: back(20) });
+  }
+  return rows;
+}
+
+function bruLeadSorted(rows) {
+  const { key, dir } = _bruLeadSort;
+  // a missing change (not enough history) always sorts last
+  const val = r => (key === 'name' ? r.name.toLowerCase() : r[key]);
+  return rows.slice().sort((a, b) => {
+    const x = val(a), y = val(b);
+    if (x === null || y === null) return x === y ? 0 : (x === null ? 1 : -1);
+    return (x < y ? -1 : x > y ? 1 : a.name.localeCompare(b.name)) * dir;
+  });
+}
+
+function bruLeadersChanged() { bruLeaders(_bruLeadMetric); }
+function bruLeadSort(key) {
+  _bruLeadSort = _bruLeadSort.key === key ? { key, dir: -_bruLeadSort.dir } : { key, dir: key === 'name' ? 1 : -1 };
+  bruLeaders(_bruLeadMetric);
+}
+
+function bruLeaders(metricKey) {
+  const body = bruEl('brdLeadersBody');
+  if (!body || !_bruAll.length) return;
+  _bruLeadMetric = metricKey;
+  const key = BRU_LEAD_MULTI[metricKey] || metricKey;
+  const prefix = BRD_METRICS[key].prefix;
+  const kindEl = bruEl('brdLeadKind'), minEl = bruEl('brdLeadMin');
+  const kind = kindEl && kindEl.value === 'sec' ? 'sec' : 'ind';
+  const min = Math.max(1, parseInt(minEl && minEl.value, 10) || BRU_SMALL);
+  _bruLeadRows = bruLeadSorted(bruLeaderRows(kind, kind === 'sec' ? 1 : min, prefix));
+  const selected = bruValue();
+  const esc = typeof escapeHtml === 'function' ? escapeHtml : (s => s);
+  const pp = v => v === null ? '<span class="neutral">-</span>' : `<span class="${v > 0 ? 'positive' : v < 0 ? 'negative' : 'neutral'}">${v > 0 ? '+' : ''}${v.toFixed(1)}</span>`;
+  body.innerHTML = _bruLeadRows.map((r, i) => {
+    const w = Math.max(0, Math.min(100, r.now)).toFixed(1);
+    return `<tr data-uni="${esc(r.value)}"${r.value === selected ? ' class="brd-lead-selected"' : ''} title="${esc(r.name)} - click to chart it">` +
+      `<td>${i + 1}</td><td>${esc(r.name)}</td><td>${r.count}</td>` +
+      `<td style="background:linear-gradient(90deg, rgba(24,238,231,0.22) ${w}%, transparent ${w}%)"><b>${r.now.toFixed(1)}%</b></td>` +
+      `<td>${pp(r.d5)}</td><td>${pp(r.d20)}</td></tr>`;
+  }).join('');
+  const title = bruEl('brdLeadersTitle');
+  if (title) title.textContent = (kind === 'sec' ? 'Sectors' : 'Industries') + ' ranked';
+  const note = bruEl('brdLeadersNote');
+  if (note) note.textContent = BRD_METRICS[key].label + ' - latest day, and the change in points over 5 / 20 days. Click a row to chart it.';
+}
+
+// A row was clicked: show that sector / industry on the chart
+function bruLeaderClick(ev) {
+  let el = ev && ev.target;
+  while (el && !(el.dataset && el.dataset.uni)) el = el.parentNode;
+  if (el) bruSelect(el.dataset.uni);
+}
+function bruSelect(value) {
+  const sel = bruEl('brdUniverse');
+  if (!sel) return;
+  sel.value = value;
+  if (sel.value !== value) return;
+  brdUniverseChanged();
+  const chart = bruEl('brdChartContainer');
+  if (chart && chart.scrollIntoView) chart.scrollIntoView({ block: 'nearest' });
 }

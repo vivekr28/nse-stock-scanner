@@ -411,6 +411,7 @@ function brdRenderActiveTab() {
   if (!brdChart) return; // library failed to load
   brdUpdateHeader();
   const history = brdPlotHistory(), compare = brdCompareHistory();
+  if (typeof bruLeaders === 'function') bruLeaders(brdActiveMetricKey());   // the sector / industry ranking beside the chart (breadth-universe.js)
 
   const metric = BRD_METRICS[brdActiveMetricKey()];
   if (metric.multi) { brdRenderMulti(); return; }

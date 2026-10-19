@@ -832,6 +832,17 @@ canvas { max-width: 100%; display: block; }
 .brd-universe-check input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); }
 .brd-universe-check:has(input:disabled) { opacity: 0.5; cursor: default; }
 #brdChartOhlc { display: inline-flex; flex-wrap: wrap; gap: 4px 12px; }
+.brd-main { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 12px; align-items: start; }
+@media (max-width: 1100px) { .brd-main { grid-template-columns: minmax(0, 1fr); } }
+.brd-leaders { display: flex; flex-direction: column; min-width: 0; }
+.brd-leaders-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 4px; }
+.brd-leaders-head select { font-size: 12px; }
+.brd-leaders-wrap { max-height: calc(100vh - 300px); min-height: 360px; }
+.brd-leaders td:nth-child(2) { max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+.brd-leaders td, .brd-leaders th { padding: 5px 8px; }
+.brd-leaders td:nth-child(n+3) { text-align: right; font-variant-numeric: tabular-nums; }
+.brd-leaders tbody tr { cursor: pointer; }
+.brd-leaders tbody tr.brd-lead-selected { background: rgba(79,143,247,0.18); }
 .brd-chart-container { display: flex; flex-direction: column; }
 .brd-chart { height: calc(100vh - 340px); min-height: 480px; }
 

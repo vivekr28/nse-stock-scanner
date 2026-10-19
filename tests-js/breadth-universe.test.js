@@ -341,6 +341,93 @@ test('without breadth-universe.js, breadth.js still works: market-wide chart, pl
   assert.equal(lone.__s[1].data.length, 60);
 });
 
+// ── Leaders: the ranking table beside the chart ───────────────────────────
+function leaders(opts = {}) {
+  const all = reset();
+  dom.el('brdLeadKind').value = opts.kind || 'ind';
+  dom.el('brdLeadMin').value = opts.min || '1';
+  sb._brdTmp2 = opts.metric || 'above20';
+  run('_bruLeadSort = { key: "now", dir: -1 }');
+  run('bruLeaders(_brdTmp2)');
+  return all;
+}
+// the table's rows as [name, stocks, now, d5, d20] from the markup
+const leadRows = () => [...dom.el('brdLeadersBody').innerHTML.matchAll(/<tr data-uni="([^"]*)"[^>]*><td>(\d+)<\/td><td>([^<]*)<\/td><td>(\d+)<\/td><td[^>]*><b>([\d.]+)%<\/b><\/td><td>(.*?)<\/td><td>(.*?)<\/td><\/tr>/g)]
+  .map(m => ({ uni: m[1], rank: +m[2], name: m[3], count: +m[4], now: +m[5], d5: m[6].replace(/<[^>]*>/g, ''), d20: m[7].replace(/<[^>]*>/g, '') }));
+
+test('leaders: every industry ranked by the active metric\'s latest value, with the 5 and 20 day change in points', () => {
+  leaders();
+  const rows = leadRows();
+  assert.deepEqual(rows.map(r => r.name).sort(), ['Drugs', 'Labs', 'Lenders', 'Undefined-Diversified']);
+  assert.deepEqual(rows.map(r => r.rank), [1, 2, 3, 4]);
+  for (let i = 1; i < rows.length; i++) assert.ok(rows[i - 1].now >= rows[i].now);        // best first
+  for (const r of rows) {
+    const h = sb.bruHistoryOf(r.uni), c = closes(h), n = c.length;
+    assert.equal(r.now, +c[n - 1].toFixed(1), r.name);
+    const d = k => { const v = c[n - 1] - c[n - 1 - k]; return (v > 0 ? '+' : '') + v.toFixed(1); };
+    assert.equal(r.d5, d(5), r.name);
+    assert.equal(r.d20, d(20), r.name);
+  }
+});
+
+test('leaders: the minimum-stocks box leaves out small industries; sectors are all listed', () => {
+  leaders({ min: '10' });
+  assert.deepEqual(leadRows().map(r => r.name), ['Drugs']);
+  leaders({ kind: 'sec', min: '10' });
+  assert.deepEqual(leadRows().map(r => r.name).sort(), ['Banks', 'Pharma', 'Undefined-Diversified']);
+  assert.match(dom.el('brdLeadersTitle').textContent, /^Sectors/);
+});
+
+test('leaders: follow the active chart - another metric ranks by that one; an overlay ranks by its first line', () => {
+  leaders({ metric: 'move4d' });
+  for (const r of leadRows()) assert.equal(r.now, +closes(sb.bruHistoryOf(r.uni), 'move4d').pop().toFixed(1), r.name);
+  assert.match(dom.el('brdLeadersNote').textContent, /4%\+ Move \(Day\)/);
+  leaders({ metric: 'aboveBoth' });
+  for (const r of leadRows()) assert.equal(r.now, +closes(sb.bruHistoryOf(r.uni), 'above20').pop().toFixed(1), r.name);
+  leaders({ metric: 'highAll' });
+  for (const r of leadRows()) assert.equal(r.now, +closes(sb.bruHistoryOf(r.uni), 'high1m').pop().toFixed(1), r.name);
+});
+
+test('leaders: clicking a header sorts by it, again reverses; a missing change sorts last', () => {
+  leaders();
+  sb.bruLeadSort('name');
+  assert.deepEqual(leadRows().map(r => r.name), ['Drugs', 'Labs', 'Lenders', 'Undefined-Diversified']);
+  sb.bruLeadSort('name');
+  assert.deepEqual(leadRows().map(r => r.name), ['Undefined-Diversified', 'Lenders', 'Labs', 'Drugs']);
+  sb.bruLeadSort('count');
+  assert.deepEqual(leadRows().map(r => r.count), [10, 3, 2, 1]);
+  const rows = [{ name: 'a', d5: null }, { name: 'b', d5: 1 }, { name: 'c', d5: 5 }];
+  run('_bruLeadSort = { key: "d5", dir: -1 }');
+  assert.deepEqual(Array.from(sb.bruLeadSorted(rows), r => r.name), ['c', 'b', 'a']);
+  run('_bruLeadSort = { key: "d5", dir: 1 }');
+  assert.deepEqual(Array.from(sb.bruLeadSorted(rows), r => r.name), ['b', 'c', 'a']);
+});
+
+test('leaders: clicking a row charts that universe and marks the row', () => {
+  const all = leaders();
+  setupChart();
+  run('_brdActiveTab = "above20"; _brdTmp = null');
+  sb._brdTmp = all; run('_brdHistory = _brdTmp');
+  const row = { dataset: { uni: 'ind:Labs' }, parentNode: null };
+  sb.bruLeaderClick({ target: { dataset: {}, parentNode: row } });     // a click on a cell inside the row
+  assert.equal(dom.el('brdUniverse').value, 'ind:Labs');
+  assert.equal(dom.el('brdChartTitle').textContent, '% Stocks Above 20 SMA - Labs');
+  assert.match(dom.el('brdLeadersBody').innerHTML, /<tr data-uni="ind:Labs" class="brd-lead-selected"/);
+  sb.bruLeaderClick({ target: { dataset: {}, parentNode: null } });    // a click outside any row does nothing
+  assert.equal(dom.el('brdUniverse').value, 'ind:Labs');
+  dom.el('brdUniverse').value = 'all';
+});
+
+test('leaders: the chart render refreshes the table', () => {
+  const all = reset();
+  setupChart();
+  dom.el('brdLeadMin').value = '1';
+  dom.el('brdLeadersBody').innerHTML = '';
+  render(all, 'above50');
+  assert.equal(leadRows().length, 4);
+  assert.match(dom.el('brdLeadersNote').textContent, /Above 50 SMA/);
+});
+
 test('guard: breadth.js holds none of the universe feature\'s ids or classification logic (it only calls the bru* hooks, typeof-guarded)', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'js', 'breadth.js'), 'utf8');
   for (const needle of ["'brdUniverse'", "'brdCompare'", "'brdSmooth'", '.industry', '.sector', 'Undefined-Diversified']) assert.ok(!src.includes(needle), needle);
