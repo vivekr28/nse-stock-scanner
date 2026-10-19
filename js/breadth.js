@@ -18,6 +18,7 @@
 const BRD_CHART_BG = '#000000';
 const BRD_UP_COLOR = '#18eee7';
 const BRD_DOWN_COLOR = '#ff1616';
+const BRD_COMPARE_COLOR = '#94a3b8'; // the dashed all-stocks line of the "vs market" box
 const BRD_DAY_MOVE_PCT = 4;    // day change% threshold, either direction
 const BRD_WEEK_MOVE_PCT = 10;  // 5-trading-day change% threshold, either direction
 const BRD_MONTH_MOVE_PCT = 20; // 21-trading-day change% threshold, either direction
@@ -52,7 +53,7 @@ const BRD_SMA_LINES = [
 const BRD_HIGH_WINDOWS = { high1m: 21, high3m: 63, high1y: 252 };
 const BRD_ATH_MIN_BARS = 252; // ATH only counts stocks with >= 1y of history, so early bars of the dataset don't all read as "new highs"
 
-let _brdHistory = [];       // cached per renderBreadth() call - [{date, above20Pct, above20Count, ...}]
+let _brdHistory = [];       // cached per renderBreadth() call - [{date, above20Pct, above20Count, ...}] - the MARKET-WIDE history
 let _brdActiveTab = 'aboveSma';
 
 // The SMA lengths ticked on the "Above SMA" tab, in 20 / 50 order. Never empty: with no box ticked it falls back to 20.
@@ -80,8 +81,22 @@ function brdIsMulti() {
 }
 let brdChart = null, brdCandleSeries = null, brdLineSeries = null, brdCountSeries = null;
 let brdMultiSeries = [], _brdMultiData = {};
+let brdCompareSeries = null, _brdCompareData = [];   // the market-wide line (dashed) behind a sector / industry's, when "vs market" is ticked
 let _brdCandles = [], _brdCounts = []; // currently-displayed series data, for the crosshair legend below
 let brdTools = null, _brdToolsSeries = null, _brdToolsKey = null; // one-shot Measure / Trend Line tools (chart-tools.js), the series they draw on and the metric they were drawn for
+
+// The history the chart plots: the market-wide one, or - when the Universe selector (breadth-universe.js) holds a sector / industry
+// and / or the Smooth box is ticked - that universe's. brdCompareHistory() is the market-wide line drawn behind it, or null.
+function brdPlotHistory() { return typeof bruCurrent === 'function' ? bruCurrent() : _brdHistory; }
+function brdCompareHistory() { return typeof bruCompare === 'function' ? bruCompare() : null; }
+// The chart title (metric + universe), the note under the chart and the "vs market" box
+function brdUpdateHeader() {
+  const title = document.getElementById('brdChartTitle');
+  if (title) title.textContent = BRD_METRICS[brdActiveMetricKey()].label + (typeof bruTitleSuffix === 'function' ? bruTitleSuffix() : '');
+  if (typeof bruSyncControls === 'function') bruSyncControls(brdIsMulti());
+  const noteEl = document.getElementById('brdUniverseNote');
+  if (noteEl) noteEl.textContent = (typeof bruNote === 'function' && bruNote()) || 'Universe: all NSE stocks';
+}
 
 // Drawings are anchored to a metric's values on one series (candles, a line, or the first overlay line, which
 // two metrics can share), so the tools are rebuilt - dropping any drawings - whenever the metric or its series
@@ -89,7 +104,8 @@ let brdTools = null, _brdToolsSeries = null, _brdToolsKey = null; // one-shot Me
 function brdRefreshTools() {
   const series = brdIsMulti() ? brdMultiSeries[0]
     : (BRD_METRICS[brdActiveMetricKey()].line ? brdLineSeries : brdCandleSeries);
-  const key = brdActiveMetricKey();
+  // a different universe / smoothing plots different values, so it resets the drawings too
+  const key = brdActiveMetricKey() + (typeof bruTag === 'function' ? '|' + bruTag() : '');
   if (brdTools && _brdToolsSeries === series && _brdToolsKey === key) return;
   if (brdTools) brdTools.destroy();
   _brdToolsSeries = series; _brdToolsKey = key;
@@ -127,9 +143,8 @@ function renderBreadth() {
 
   const numDays = Math.min(Store.dates.length, 510);
   _brdHistory = computeBreadthHistories(numDays);
-
-  const noteEl = document.getElementById('brdUniverseNote');
-  if (noteEl) noteEl.textContent = 'Universe: all NSE stocks';
+  if (typeof bruReset === 'function') bruReset(_brdHistory, numDays);   // breadth-universe.js: rebuild the Universe dropdown for the new data
+  brdUpdateHeader();
   // (New Highs tab: windows are 21 / 63 / 252 trading days; ATH = highest high in the data loaded, stocks with >= 1y of history only.)
 
   // Only render the chart immediately if this panel already happens to be the
@@ -145,10 +160,10 @@ function renderBreadth() {
 // Single pass over every stock's own chronological daily array (not a
 // per-date x per-stock nested loop) - each stock contributes to a shared,
 // pre-indexed set of per-day counters via a rolling SMA20/SMA50 sum and
-// direct index offsets for the day/week/month change lookups. Each metric
+// direct index offsets for the day/week/month change lookups. `filter(isin)`, when given, restricts it to a subset of the stocks. Each metric
 // tracks 4 independent OHLC-field counters (see file header) plus one shared
 // denominator (same stocks have data either way).
-function computeBreadthHistories(numDays) {
+function computeBreadthHistories(numDays, filter) {
   const historyDates = Store.dates.slice(-numDays);
   const n = historyDates.length;
   const dateIndex = {};
@@ -177,6 +192,7 @@ function computeBreadthHistories(numDays) {
   }
 
   for (const key in Store.dailyBySymbol) {
+    if (filter && !filter(key)) continue;   // optional: only these stocks (a sector / industry - breadth-universe.js)
     const days = Store.dailyBySymbol[key];
     const len = days.length;
     let sum20 = 0, sum50 = 0;
@@ -270,7 +286,7 @@ function brdSwitchTab(tab) {
   document.querySelectorAll('#brdTabbar .brd-tab').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.tab === tab);
   });
-  document.getElementById('brdChartTitle').textContent = BRD_METRICS[brdActiveMetricKey()].label;
+  brdUpdateHeader();
   brdRenderActiveTab();
 }
 
@@ -279,12 +295,12 @@ function brdSmaChanged(changed) {
   if (changed && !changed.checked && !BRD_SMA_LINES.some(l => document.getElementById('brdSma' + l.key.slice(5)).checked)) {
     changed.checked = true;
   }
-  document.getElementById('brdChartTitle').textContent = BRD_METRICS[brdActiveMetricKey()].label;
+  brdUpdateHeader();
   brdRenderActiveTab();
 }
 
 function brdHighSelectChanged() {
-  document.getElementById('brdChartTitle').textContent = BRD_METRICS[brdActiveMetricKey()].label;
+  brdUpdateHeader();
   brdRenderActiveTab();
 }
 
@@ -329,6 +345,12 @@ function brdEnsureChart() {
   });
   brdLineSeries.priceScale().applyOptions({ scaleMargins: { top: 0.1, bottom: 0.1 } });
 
+  // the all-stocks line drawn behind a sector / industry's (breadth-universe.js); empty otherwise
+  brdCompareSeries = brdChart.addSeries(LightweightCharts.LineSeries, {
+    color: BRD_COMPARE_COLOR, lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+    priceFormat: { type: 'custom', formatter: v => v.toFixed(1) + '%' },
+  });
+
   brdMultiSeries = BRD_HIGH_LINES.map(l => brdChart.addSeries(LightweightCharts.LineSeries, {
     color: l.color, lineWidth: 2, priceLineVisible: false,
     priceFormat: { type: 'custom', formatter: v => v.toFixed(1) + '%' },
@@ -362,7 +384,9 @@ function brdEnsureChart() {
       return;
     }
     if (BRD_METRICS[brdActiveMetricKey()].line) {
-      legendEl.innerHTML = `<span>% <b>${bar.close.toFixed(1)}%</b></span><span>Stocks <b>${cnt ? cnt.value : 0}</b></span>`;
+      const cmp = _brdCompareData[i];
+      legendEl.innerHTML = `<span>% <b>${bar.close.toFixed(1)}%</b></span><span>Stocks <b>${cnt ? cnt.value : 0}</b></span>` +
+        (cmp ? `<span>All stocks <b style="color:${BRD_COMPARE_COLOR}">${cmp.value.toFixed(1)}%</b></span>` : '');
       return;
     }
     legendEl.innerHTML =
@@ -385,6 +409,9 @@ function brdRenderActiveTab() {
   if (!_brdHistory.length) return;
   brdEnsureChart();
   if (!brdChart) return; // library failed to load
+  brdUpdateHeader();
+  const history = brdPlotHistory(), compare = brdCompareHistory();
+  if (typeof bruLeaders === 'function') bruLeaders(brdActiveMetricKey());   // the sector / industry ranking beside the chart (breadth-universe.js)
 
   const metric = BRD_METRICS[brdActiveMetricKey()];
   if (metric.multi) { brdRenderMulti(); return; }
@@ -392,7 +419,7 @@ function brdRenderActiveTab() {
   _brdMultiData = {};
   const ohlcKey = metric.prefix + 'OHLC';
   const candles = [], counts = [];
-  _brdHistory.forEach(d => {
+  history.forEach(d => {
     const time = ewToBusinessDay(d.date);
     if (!time) return;
     const bar = d[ohlcKey];
@@ -406,6 +433,11 @@ function brdRenderActiveTab() {
   brdCandleSeries.setData(isLine ? [] : candles);
   brdLineSeries.setData(isLine ? candles.map(c => ({ time: c.time, value: c.close })) : []);
   brdCountSeries.setData(counts);
+  _brdCompareData = [];
+  if (compare && isLine) {
+    compare.forEach(d => { const time = ewToBusinessDay(d.date); if (time) _brdCompareData.push({ time, value: d[ohlcKey].close }); });
+  }
+  brdCompareSeries.setData(_brdCompareData);
   _brdCandles = candles;
   _brdCounts = counts;
   if (brdChart._updateBrdLegend) brdChart._updateBrdLegend(); // show the latest bar by default, like the stock-chart popup does
@@ -424,16 +456,19 @@ function brdRenderActiveTab() {
 // Overlay view (all four new-high percentages, or the 20 + 50 SMA percentages) as lines on the one price scale;
 // the raw-count pane is left empty since the counts don't share a single meaningful bar.
 function brdRenderMulti() {
+  const history = brdPlotHistory();
   brdCandleSeries.setData([]);
   brdLineSeries.setData([]);
   brdCountSeries.setData([]);
+  brdCompareSeries.setData([]);
+  _brdCompareData = [];
   _brdMultiData = {};
   _brdCandles = [];
   const lines = brdMultiLines();
   brdMultiSeries.forEach(sr => sr.setData([])); // the SMA overlay uses fewer series than the new-highs one
   lines.forEach((l, idx) => {
     const data = [];
-    _brdHistory.forEach(d => {
+    history.forEach(d => {
       const time = ewToBusinessDay(d.date);
       if (time) data.push({ time, value: d[l.key + 'OHLC'].close });
     });
