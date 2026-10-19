@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NSE EOD Dashboard</title>
-<link rel="stylesheet" href="css/styles.css?v=16">
+<link rel="stylesheet" href="css/styles.css?v=17">
 </head>
 <body>
 
@@ -917,6 +917,15 @@
       <option value="highAll">All (overlay)</option>
     </select>
   </div>
+  <div class="brd-universe-row">
+    <label class="brd-universe-label">Universe
+      <select id="brdUniverse" onchange="brdUniverseChanged()" title="Show the charts below for all stocks, one sector or one industry (today's classification)">
+        <option value="all">All stocks</option>
+      </select>
+    </label>
+    <label id="brdCompareLabel" class="brd-universe-check" title="Pick a sector or an industry to compare it with the whole market"><input type="checkbox" id="brdCompare" onchange="brdUniverseChanged()" disabled> vs all stocks</label>
+    <label class="brd-universe-check" title="Trailing 5-day average of the % line (the counts and the O/H/L are left as they are)"><input type="checkbox" id="brdSmooth" onchange="brdUniverseChanged()"> Smooth 5D</label>
+  </div>
   <div class="chart-container brd-chart-container">
     <div class="ic-title-line1" style="margin-bottom:2px;">
       <h3 id="brdChartTitle" style="margin:0;">% Stocks Above 20 SMA</h3>
@@ -1324,7 +1333,8 @@
 <script src="js/quarterly-results.js?v=11"></script>
 <script src="js/relative-strength.js?v=3"></script>
 <script src="js/quarterly-chart-table.js?v=2"></script>
-<script src="js/breadth.js?v=14"></script>
+<script src="js/breadth.js?v=15"></script>
+<script src="js/breadth-universe.js?v=1"></script>
 <script src="js/sector.js?v=2"></script>
 <script src="js/industry.js?v=13"></script>
 <script src="js/lib/lightweight-charts.standalone.production.js"></script>

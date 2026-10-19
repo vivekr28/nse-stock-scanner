@@ -825,6 +825,13 @@ canvas { max-width: 100%; display: block; }
 .brd-sma-checks { display: inline-flex; align-items: center; gap: 12px; margin-left: 8px; }
 .brd-sma-checks label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--text); cursor: pointer; }
 .brd-sma-checks input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); }
+.brd-universe-row { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; margin: 0 0 10px; }
+.brd-universe-label { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--text); }
+.brd-universe-label select { max-width: 340px; }
+.brd-universe-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--text); cursor: pointer; }
+.brd-universe-check input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); }
+.brd-universe-check:has(input:disabled) { opacity: 0.5; cursor: default; }
+#brdChartOhlc { display: inline-flex; flex-wrap: wrap; gap: 4px 12px; }
 .brd-chart-container { display: flex; flex-direction: column; }
 .brd-chart { height: calc(100vh - 340px); min-height: 480px; }
 
