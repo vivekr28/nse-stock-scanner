@@ -87,7 +87,7 @@ AGASTYAEN,15-JUL-2019,Specialty Chemicals,Chemicals,Commodities,Chemicals & Petr
 AGI,31-MAY-2000,Packaging,Capital Goods,Industrials,Industrial Products,walk,2026-09-30
 AGIIL,15-JUL-2024,"Residential, Commercial Projects",Realty,Consumer Discretionary,Realty,company,2026-09-30
 AGL,03-JUL-2026,Logistics Solution Provider,Services,Services,Transport Services,walk,2026-09-30
-AGOL,12-OCT-2026,,,,,,
+AGOL,12-OCT-2026,"Gems, Jewellery And Watches",Consumer Durables,Consumer Discretionary,Consumer Durables,company,2026-10-21
 AGRITECH,28-JAN-2014,Other Agricultural Products,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Agricultural Food & other Products,company,2026-09-30
 AGROPHOS,08-MAR-2019,Fertilizers,Chemicals,Commodities,Fertilizers & Agrochemicals,walk,2026-09-30
 AGSTRA,31-JAN-2022,Financial Technology (Fintech),Financial Services,Financial Services,Financial Technology (Fintech),walk,2026-09-30
@@ -328,7 +328,7 @@ BECTORFOOD,24-DEC-2020,Packaged Foods,Fast Moving Consumer Goods,Fast Moving Con
 BEDMUTHA,14-OCT-2010,Iron & Steel Products,Capital Goods,Industrials,Industrial Products,company,2026-09-30
 BEEKAY,20-APR-2026,Iron & Steel Products,Capital Goods,Industrials,Industrial Products,company,2026-09-30
 BEL,19-JUL-2000,Aerospace & Defense,Capital Goods,Industrials,Aerospace & Defense,walk,2026-09-30
-BELDING,12-OCT-2026,,,,,,
+BELDING,12-OCT-2026,"Aluminium, Copper & Zinc Products",Capital Goods,Industrials,Industrial Products,company,2026-10-21
 BELLACASA,18-JUL-2025,Garments & Apparels,Textiles,Consumer Discretionary,Textiles & Apparels,walk,2026-09-30
 BELRISE,28-MAY-2025,Auto Components & Equipments,Automobile and Auto Components,Consumer Discretionary,Auto Components,walk,2026-09-30
 BEML,05-NOV-2003,Construction Vehicles,Capital Goods,Industrials,"Agricultural, Commercial & Construction Vehicles",walk,2026-09-30
@@ -377,6 +377,7 @@ BLISSGVS,26-JUL-2010,Pharmaceuticals,Healthcare,Healthcare,Pharmaceuticals & Bio
 BLKASHYAP,17-MAR-2006,Civil Construction,Construction,Industrials,Construction,company,2026-09-30
 BLS,14-JUN-2016,"Tour, Travel Related Services",Consumer Services,Consumer Discretionary,Leisure Services,walk,2026-09-30
 BLSE,06-FEB-2024,IT Enabled Services,Information Technology,Information Technology,IT - Services,walk,2026-09-30
+BLUECHIP,12-MAR-1997,Investment Company,Financial Services,Financial Services,Finance,company,2026-10-21
 BLUECLOUDS,17-AUG-2026,Software Products,Information Technology,Information Technology,IT - Software,walk,2026-09-30
 BLUECOAST,16-FEB-2000,Hotels & Resorts,Consumer Services,Consumer Discretionary,Leisure Services,company,2026-09-30
 BLUEDART,12-DEC-2002,Logistics Solution Provider,Services,Services,Transport Services,walk,2026-09-30
@@ -802,7 +803,6 @@ GEOJITFSL,01-JUL-2005,Stockbroking & Allied,Financial Services,Financial Service
 GERMAN,05-OCT-2026,Iron & Steel Products,Capital Goods,Industrials,Industrial Products,company,2026-10-10
 GESHIP,27-NOV-2006,Shipping,Services,Services,Transport Services,walk,2026-09-30
 GFLLIMITED,25-MAY-1995,Holding Company,Financial Services,Financial Services,Finance,walk,2026-09-30
-GFSTEELS,22-JUL-2019,Iron & Steel Products,Capital Goods,Industrials,Industrial Products,company,2026-09-30
 GHCL,31-JUL-2003,Commodity Chemicals,Chemicals,Commodities,Chemicals & Petrochemicals,walk,2026-09-30
 GHCLTEXTIL,12-JUN-2023,Other Textile Products,Textiles,Consumer Discretionary,Textiles & Apparels,walk,2026-09-30
 GICHSGFIN,08-MAY-1996,Housing Finance Company,Financial Services,Financial Services,Finance,walk,2026-09-30
@@ -934,6 +934,7 @@ HDBFS,02-JUL-2025,Non Banking Financial Company (NBFC),Financial Services,Financ
 HDFCAMC,06-AUG-2018,Asset Management Company,Financial Services,Financial Services,Capital Markets,walk,2026-09-30
 HDFCBANK,08-NOV-1995,Private Sector Bank,Financial Services,Financial Services,Banks,walk,2026-09-30
 HDFCLIFE,17-NOV-2017,Life Insurance,Financial Services,Financial Services,Insurance,walk,2026-09-30
+HDFIRE,21-OCT-2026,,,,,,
 HDIL,24-JUL-2007,"Residential, Commercial Projects",Realty,Consumer Discretionary,Realty,company,2026-09-30
 HEADSUP,14-DEC-2016,Trading - Textile Products,Textiles,Consumer Discretionary,Textiles & Apparels,walk,2026-09-30
 HEALTHX,05-OCT-2010,Healthcare Service Provider,Healthcare,Healthcare,Healthcare Services,walk,2026-09-30
@@ -1021,6 +1022,7 @@ IGL,26-DEC-2003,LPG/CNG/PNG/LNG Supplier,"Oil, Gas & Consumable Fuels",Energy,Ga
 IGPL,29-JAN-2007,Commodity Chemicals,Chemicals,Commodities,Chemicals & Petrochemicals,walk,2026-09-30
 IIFL,17-MAY-2005,Non Banking Financial Company (NBFC),Financial Services,Financial Services,Finance,walk,2026-09-30
 IIFLCAPS,20-SEP-2019,Stockbroking & Allied,Financial Services,Financial Services,Capital Markets,walk,2026-09-30
+IIRM,22-OCT-2026,,,,,,
 IITL,17-AUG-2010,Investment Company,Financial Services,Financial Services,Finance,company,2026-09-30
 IKIO,16-JUN-2023,Consumer Electronics,Consumer Durables,Consumer Discretionary,Consumer Durables,walk,2026-09-30
 IKS,19-DEC-2024,IT Enabled Services,Information Technology,Information Technology,IT - Services,walk,2026-09-30
@@ -1299,7 +1301,7 @@ LAL,10-APR-2023,Garments & Apparels,Textiles,Consumer Discretionary,Textiles & A
 LALITHAA,24-AUG-2026,"Gems, Jewellery And Watches",Consumer Durables,Consumer Discretionary,Consumer Durables,walk,2026-09-30
 LALPATHLAB,23-DEC-2015,Healthcare Service Provider,Healthcare,Healthcare,Healthcare Services,walk,2026-09-30
 LAMBODHARA,04-FEB-2015,Other Textile Products,Textiles,Consumer Discretionary,Textiles & Apparels,company,2026-09-30
-LANCER,17-AUG-2026,Logistics Solution Provider,Services,Services,Transport Services,company,2026-09-30
+LANCER,14-OCT-2026,Logistics Solution Provider,Services,Services,Transport Services,company,2026-09-30
 LANCORHOL,12-MAR-2024,"Residential, Commercial Projects",Realty,Consumer Discretionary,Realty,company,2026-09-30
 LANDMARK,23-DEC-2022,Auto Dealer,Automobile and Auto Components,Consumer Discretionary,Automobiles,walk,2026-09-30
 LANDSMILL,03-AUG-2009,Trading & Distributors,Services,Services,Commercial Services & Supplies,company,2026-09-30
@@ -1494,6 +1496,7 @@ MONARCH,06-JAN-2022,Stockbroking & Allied,Financial Services,Financial Services,
 MONEYBOXX,15-OCT-2025,Non Banking Financial Company (NBFC),Financial Services,Financial Services,Finance,company,2026-09-30
 MONEYVIEW,01-OCT-2026,Financial Technology (Fintech),Financial Services,Financial Services,Financial Technology (Fintech),company,2026-10-10
 MONTECARLO,19-DEC-2014,Garments & Apparels,Textiles,Consumer Discretionary,Textiles & Apparels,walk,2026-09-30
+MORARJEE,14-SEP-2012,Other Textile Products,Textiles,Consumer Discretionary,Textiles & Apparels,company,2026-10-21
 MOREPENLAB,24-NOV-1999,Pharmaceuticals,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,company,2026-09-30
 MOSCHIP,05-FEB-2025,Computers Hardware & Equipments,Information Technology,Information Technology,IT - Hardware,walk,2026-09-30
 MOTHERSON,14-AUG-1996,Auto Components & Equipments,Automobile and Auto Components,Consumer Discretionary,Auto Components,walk,2026-09-30
@@ -1539,7 +1542,6 @@ NAHARSPING,23-MAR-2007,Other Textile Products,Textiles,Consumer Discretionary,Te
 NAM-INDIA,06-NOV-2017,Asset Management Company,Financial Services,Financial Services,Capital Markets,walk,2026-09-30
 NARMADA,27-OCT-2022,Animal Feed,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Food Products,walk,2026-09-30
 NATCAPSUQ,14-FEB-2025,Pharmaceuticals,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,company,2026-09-30
-NATCO-RE,12-OCT-2026,,,,,,
 NATCOPHARM,27-DEC-1995,Pharmaceuticals,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,company,2026-09-30
 NATHBIOGEN,28-JAN-2014,Other Agricultural Products,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Agricultural Food & other Products,walk,2026-09-30
 NATIONALUM,28-APR-1999,Aluminium,Metals & Mining,Commodities,Non - Ferrous Metals,walk,2026-09-30
@@ -1635,6 +1637,7 @@ OFSS,28-JUN-2002,Software Products,Information Technology,Information Technology
 OIL,30-SEP-2009,Oil Exploration & Production,"Oil, Gas & Consumable Fuels",Energy,Oil,walk,2026-09-30
 OILCOUNTUB,30-AUG-1995,Oil Equipment & Services,"Oil, Gas & Consumable Fuels",Energy,Oil,walk,2026-09-30
 OLAELEC,09-AUG-2024,2/3 Wheelers,Automobile and Auto Components,Consumer Discretionary,Automobiles,walk,2026-09-30
+OLAELEC-RE,22-OCT-2026,,,,,,
 OLECTRA,20-MAR-2002,Passenger Cars & Utility Vehicles,Automobile and Auto Components,Consumer Discretionary,Automobiles,walk,2026-09-30
 OMAXAUTO,20-FEB-2003,Auto Components & Equipments,Automobile and Auto Components,Consumer Discretionary,Auto Components,company,2026-09-30
 OMAXE,09-AUG-2007,"Residential, Commercial Projects",Realty,Consumer Discretionary,Realty,company,2026-09-30
@@ -2341,6 +2344,7 @@ TIGERLOGS,18-SEP-2025,Logistics Solution Provider,Services,Services,Transport Se
 TIIL,12-FEB-2007,Iron & Steel Products,Capital Goods,Industrials,Industrial Products,walk,2026-09-30
 TIINDIA,02-NOV-2017,Auto Components & Equipments,Automobile and Auto Components,Consumer Discretionary,Auto Components,walk,2026-09-30
 TIJARIA,14-OCT-2011,Plastic Products - Industrial,Capital Goods,Industrials,Industrial Products,company,2026-09-30
+TIKONA,22-JUL-2019,Other Telecom Services,Telecommunication,Telecommunication,Telecom - Services,company,2026-10-21
 TIL,27-SEP-1995,Construction Vehicles,Capital Goods,Industrials,"Agricultural, Commercial & Construction Vehicles",walk,2026-09-30
 TIMETECHNO,13-JUN-2007,Plastic Products - Industrial,Capital Goods,Industrials,Industrial Products,walk,2026-09-30
 TIMEX,20-APR-2026,"Gems, Jewellery And Watches",Consumer Durables,Consumer Discretionary,Consumer Durables,walk,2026-09-30
@@ -2383,6 +2387,7 @@ TRIGYN,09-APR-1998,Computers - Software & Consulting,Information Technology,Info
 TRITONV,17-AUG-2026,Auto Components & Equipments,Automobile and Auto Components,Consumer Discretionary,Auto Components,company,2026-09-30
 TRITURBINE,28-OCT-2011,Heavy Electrical Equipment,Capital Goods,Industrials,Electrical Equipment,walk,2026-09-30
 TRIVENI,13-DEC-2005,Sugar,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Agricultural Food & other Products,walk,2026-09-30
+TRIVENIPT,12-OCT-2026,Power - Transmission,Power,Utilities,Power,company,2026-10-21
 TRU,20-JUN-2023,Non Banking Financial Company (NBFC),Financial Services,Financial Services,Finance,company,2026-09-30
 TRUALT,03-OCT-2025,Other Agricultural Products,Fast Moving Consumer Goods,Fast Moving Consumer Goods,Agricultural Food & other Products,walk,2026-09-30
 TSFINV,26-MAR-2018,Investment Company,Financial Services,Financial Services,Finance,walk,2026-09-30

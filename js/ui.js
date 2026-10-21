@@ -13,6 +13,7 @@ function showDashboard() {
   document.getElementById('latestDate').textContent = Store.latestDate || '-';
 
   if (typeof initF16Dates === 'function') initF16Dates();
+  if (typeof gtInitDates === 'function') gtInitDates();   // Sector & Industry tab's F39 dates (js/group-trend.js)
   if (typeof rsInitDates === 'function') rsInitDates();   // Relative Strength tab's F24 date (js/relative-strength.js)
   runScanner();
   renderBreadth();
