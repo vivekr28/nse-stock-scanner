@@ -323,9 +323,6 @@ function runScreener() {
   const f10_200sma = document.getElementById('scrF10_200sma').checked;
   const f10_200ema = document.getElementById('scrF10_200ema').checked;
 
-  const f11On = document.getElementById('scrF11On').checked;
-  const f11Sector = document.getElementById('scrF11Sector').value;
-
   const f12On = document.getElementById('scrF12On').checked;
   const f12Period = document.getElementById('scrF12Period').value;
   const f12Val = parseFloat(document.getElementById('scrF12Val').value) || 0;
@@ -370,6 +367,11 @@ function runScreener() {
   // Sector & Industry tab's F34 / F35 (js/group-breadth.js): the breadth of the stock's own industry / sector, read here, applied per stock below
   const gb = typeof gbFilterState === 'function' ? gbFilterState() : null;
   const gbMaps = gb && gb.any ? gbPrepare(gb) : null;
+  // Sector & Industry tab's F37 / F38 (js/group-trend.js): is the equal-weight index of the stock's own sector / industry above its 10 / 20 / 50 SMA
+  const gt = typeof gtFilterState === 'function' ? gtFilterState() : null;
+  const gtMaps = gt && gt.any ? gtPrepare(gt) : null;
+  // Sector & Industry tab's F11 / F36 (js/group-select.js): the sectors / industries ticked from a list, read here, applied per stock below
+  const gs = typeof gsFilterState === 'function' ? gsFilterState() : null;
 
   // Pre-compute industry RS map if needed
   let indRSMap = {};
@@ -565,12 +567,8 @@ function runScreener() {
       }
     }
 
-    // F11: Sector filter
-    if (f11On && f11Sector) {
-      if (s.sector !== f11Sector) {
-        failReasons.push(`F11: Sector '${s.sector}' ≠ '${f11Sector}'`);
-      }
-    }
+    // F11 / F36: the stock's sector / industry is one of those ticked in the list (js/group-select.js)
+    if (gs && gs.any) failReasons.push(...gsApplyToStock(s, gs));
 
     // F12: Industry Money Flow
     if (f12On) {
@@ -649,6 +647,9 @@ function runScreener() {
     // F34 / F35: breadth of the stock's industry / sector (js/group-breadth.js)
     if (gb && gb.any) failReasons.push(...gbApplyToStock(s, gb, gbMaps));
 
+    // F37 / F38: the equal-weight index of the stock's sector / industry above its 10 / 20 / 50 SMA (js/group-trend.js)
+    if (gt && gt.any) failReasons.push(...gtApplyToStock(s, gt, gtMaps));
+
     // F24: closed above the O/H/L/C of a chosen date within the next n trading days (js/relative-strength.js)
     if (rs && rs.any) failReasons.push(...rsApplyToStock(s, days, rs, allowPartial));
 
@@ -692,7 +693,7 @@ function runScreener() {
   scrSortCol = null;
 
   // Count active filters
-  const activeCount = [f1On, f2On, f3On, f4On, f5On, f6On, f7On, f8On, f9On, f10On, f11On, f12On, f13On, f14On, f15On, f16On, f17On, f18On].filter(Boolean).length + (typeof qrActiveCount === 'function' ? qrActiveCount() : 0) + (typeof gbActiveCount === 'function' ? gbActiveCount() : 0);
+  const activeCount = [f1On, f2On, f3On, f4On, f5On, f6On, f7On, f8On, f9On, f10On, f12On, f13On, f14On, f15On, f16On, f17On, f18On].filter(Boolean).length + (typeof qrActiveCount === 'function' ? qrActiveCount() : 0) + (typeof gbActiveCount === 'function' ? gbActiveCount() : 0) + (typeof gtActiveCount === 'function' ? gtActiveCount() : 0) + (typeof gsActiveCount === 'function' ? gsActiveCount() : 0);
 
   // Stats
   const advancing = passed.filter(s => s.changePct > 0).length;
@@ -818,6 +819,7 @@ function renderScreenerTable() {
     cols.push({ key: 'listingDate', label: 'Listed On', fmt: v => v || '-' });
   }
   if (typeof gbColumns === 'function') cols.push(...gbColumns());   // Sector & Industry tab's F34 / F35 columns (js/group-breadth.js)
+  if (typeof gtColumns === 'function') cols.push(...gtColumns());   // Sector & Industry tab's F37 / F38 columns (js/group-trend.js)
   if (typeof rsColumns === 'function') cols.push(...rsColumns());   // Relative Strength tab's F24 columns (js/relative-strength.js)
   if (typeof qrColumns === 'function') cols.push(...qrColumns());   // Quarterly Results filters' columns (js/quarterly-results.js)
   cols.push({ key: 'marketCap', label: 'MCap(Cr)', fmt: v => fmtCr(v) });
@@ -902,8 +904,6 @@ function resetScreener() {
   document.getElementById('scrF10_50sma').checked = false;
   document.getElementById('scrF10_200sma').checked = false;
   document.getElementById('scrF10_200ema').checked = false;
-  document.getElementById('scrF11On').checked = false;
-  document.getElementById('scrF11Sector').value = '';
   document.getElementById('scrF12On').checked = false;
   document.getElementById('scrF12Period').value = '6m';
   document.getElementById('scrF12Val').value = '0';
@@ -931,6 +931,8 @@ function resetScreener() {
   document.getElementById('scrF19On').checked = false;
   document.getElementById('scrF19Date').value = '';
   if (typeof gbReset === 'function') gbReset(); // the Sector & Industry tab's F34 / F35 controls (js/group-breadth.js)
+  if (typeof gtReset === 'function') gtReset(); // the Sector & Industry tab's F37 / F38 controls (js/group-trend.js)
+  if (typeof gsReset === 'function') gsReset(); // the Sector & Industry tab's F11 / F36 pickers (js/group-select.js)
   if (typeof rsReset === 'function') rsReset(); // the Relative Strength tab's F24 controls (js/relative-strength.js)
   if (typeof qrReset === 'function') qrReset(); // the Quarterly Results tab's controls (js/quarterly-results.js)
   if (typeof asOfReset === 'function') asOfReset(); // the As of Date tab's controls reset with everything else
@@ -1182,11 +1184,11 @@ function updateApplyBtn() {
 
 function updateFilterBadge() {
   const techIds = ['scrF1On','scrF2On','scrF3On','scrF4On','scrF5On','scrF6On','scrF7On','scrF8On','scrF10On','scrF18On','scrF19On'];   // F15 (Performance) and F16 (% Change) live on the Relative Strength tab now
-  const indIds  = ['scrF9On','scrF11On','scrF12On','scrF13On','scrF14On','scrF17On'];
+  const indIds  = ['scrF9On','scrF12On','scrF13On','scrF14On','scrF17On'];
   const countChecked = ids => ids.filter(id => { const el = document.getElementById(id); return el && el.checked; }).length;
 
   const techCount = countChecked(techIds);
-  const indCount  = countChecked(indIds) + (typeof gbActiveCount === 'function' ? gbActiveCount() : 0); // + F34 / F35 (js/group-breadth.js)
+  const indCount  = countChecked(indIds) + (typeof gbActiveCount === 'function' ? gbActiveCount() : 0) + (typeof gtActiveCount === 'function' ? gtActiveCount() : 0) + (typeof gsActiveCount === 'function' ? gsActiveCount() : 0); // + F34 / F35 (js/group-breadth.js), F37 / F38 (js/group-trend.js), F11 / F36 (js/group-select.js)
   const rsCount   = typeof rsActiveCount === 'function' ? rsActiveCount() : 0; // Relative Strength tab: F16 + F24 (js/relative-strength.js)
   const qtrCount  = typeof qrActiveCount === 'function' ? qrActiveCount() : 0; // Quarterly Results tab (js/quarterly-results.js)
   const asOfCount = typeof asOfActiveCount === 'function' ? asOfActiveCount() : 0; // As of Date tab (js/asof-scan.js)

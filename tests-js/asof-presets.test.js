@@ -70,7 +70,7 @@ test('an older preset (no As of Date keys) leaves the tab alone when applied alo
 
 test('the existing filters\' preset state is unaffected: same scrF fields captured and restored as before', () => {
   const scrFields = Array.from(fields, f => f.id).filter(id => id.startsWith('scr'));
-  assert.equal(scrFields.length, 98);                          // the existing controls (matches the 94 keys in a saved preset): 64, plus the Listed Date filter's two, the Quarterly Results filters' (F20-F23) six, (F26-F27) four and (F28-F33) ten, and the Relative Strength tab's F24 and F25 four each, and the Sector & Industry tab's F34 and F35 two each
+  assert.equal(scrFields.length, 108);                         // the existing controls (matches the 94 keys in a saved preset): 64, plus the Listed Date filter's two, the Quarterly Results filters' (F20-F23) six, (F26-F27) four and (F28-F33) ten, and the Relative Strength tab's F24 and F25 four each, and the Sector & Industry tab's F34 and F35 two each, plus the Industry picker's two (F36), and the Sector & Industry tab's F37 and F38 four each (an On switch and the 10 / 20 / 50 SMA ticks)
   assert.ok(scrFields.includes('scrF18_52w') && scrFields.includes('scrF16ToDate') && scrFields.includes('scrAllowPartial'));
 });
 

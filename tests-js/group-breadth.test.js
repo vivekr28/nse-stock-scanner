@@ -196,10 +196,10 @@ test('presets: the four fields are captured and restored, and default to off / 5
   assert.equal(dom.el('scrF34On').checked, false);
 });
 
-test('index.html: both rows sit on the Sector & Industry tab, after the existing filters, with the script loaded after screener.js', () => {
+test('index.html: both rows sit on the Sector & Industry tab (two filters per row), with the script loaded after screener.js', () => {
   const pane = html.slice(html.indexOf('id="scrPaneIndustry"'), html.indexOf('id="scrPaneRelStrength"'));
   const ids = [...pane.matchAll(/id="(scrF\d+On)"/g)].map(m => m[1]);
-  assert.deepEqual(ids, ['scrF11On', 'scrF9On', 'scrF13On', 'scrF14On', 'scrF12On', 'scrF17On', 'scrF34On', 'scrF35On']);
+  assert.deepEqual(ids, ['scrF11On', 'scrF36On', 'scrF37On', 'scrF38On', 'scrF35On', 'scrF34On', 'scrF13On', 'scrF14On', 'scrF9On', 'scrF12On', 'scrF17On']);
   assert.match(pane, /Industry breadth \(% of stocks above 20 SMA\):/);
   assert.match(pane, /Sector breadth \(% of stocks above 20 SMA\):/);
   assert.ok(html.indexOf('src="js/group-breadth.js') > html.indexOf('src="js/screener.js'));

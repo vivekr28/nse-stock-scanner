@@ -183,3 +183,40 @@ function computeRSScores(indList) {
     ind.rsScore = (ind.breadth_rank || 0) * 0.4 + (ind.avgMonthlyChange_rank || 0) * 0.3 + (ind.avgDist52H_rank || 0) * 0.3;
   });
 }
+
+// ── Clipboard ──
+// Copy text; resolves true / false. navigator.clipboard where the page may use it (https / localhost), else a hidden textarea and execCommand.
+function copyTextToClipboard(text) {
+  if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text).then(() => true, () => false);
+  }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;left:-9999px;top:0;';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return Promise.resolve(!!ok);
+  } catch (e) {
+    return Promise.resolve(false);
+  }
+}
+
+// Copy a list of names as one comma-separated line, the way the scanner's TradingView watchlist copy does it (so a comma INSIDE a name
+// - "Gems, Jewellery And Watches" - becomes a space, exactly as it does there), and say so on the button for a moment: "Copied 12 ✓" /
+// "Copy failed" / "Nothing to copy". Resolves true when it was copied.
+function copyNamesToClipboard(names, btn) {
+  const flash = text => {
+    if (!btn) return;
+    if (btn.dataset.label === undefined) btn.dataset.label = btn.textContent;
+    btn.textContent = text;
+    setTimeout(() => { btn.textContent = btn.dataset.label; }, 1500);
+  };
+  if (!names.length) { flash('Nothing to copy'); return Promise.resolve(false); }
+  return copyTextToClipboard(names.map(n => n.replace(/\s*,\s*/g, ' ')).join(',')).then(ok => {
+    flash(ok ? 'Copied ' + names.length + ' \u2713' : 'Copy failed');
+    return ok;
+  });
+}

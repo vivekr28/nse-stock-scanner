@@ -45,7 +45,9 @@ const PRESET_FIELDS = [
   { id: 'scrF10_200sma', type: 'checkbox' },
   { id: 'scrF10_200ema', type: 'checkbox' },
   { id: 'scrF11On', type: 'checkbox' },
-  { id: 'scrF11Sector', type: 'select' },
+  { id: 'scrF11Sector', type: 'multi' },      // a JSON list of sectors (an older preset has one plain name) - js/group-select.js
+  { id: 'scrF36On', type: 'checkbox' },
+  { id: 'scrF36Industry', type: 'multi' },    // a JSON list of industries
   { id: 'scrF12On', type: 'checkbox' },
   { id: 'scrF12Period', type: 'select' },
   { id: 'scrF12Val', type: 'number' },
@@ -96,6 +98,14 @@ const PRESET_FIELDS = [
   { id: 'scrF34Val', type: 'number' },
   { id: 'scrF35On', type: 'checkbox' },
   { id: 'scrF35Val', type: 'number' },
+  { id: 'scrF37On', type: 'checkbox' },
+  { id: 'scrF37Sma10', type: 'checkbox' },
+  { id: 'scrF37Sma20', type: 'checkbox' },
+  { id: 'scrF37Sma50', type: 'checkbox' },
+  { id: 'scrF38On', type: 'checkbox' },
+  { id: 'scrF38Sma10', type: 'checkbox' },
+  { id: 'scrF38Sma20', type: 'checkbox' },
+  { id: 'scrF38Sma50', type: 'checkbox' },
   { id: 'scrF24On', type: 'checkbox' },
   { id: 'scrF24Field', type: 'select' },
   { id: 'scrF24Date', type: 'date' },
@@ -159,7 +169,7 @@ const DEFAULT_FILTER_STATE = {
   scrF8On: false, scrF8Len: '50', scrF8Min: '0.97', scrF8Max: '1.10',
   scrF9On: false, scrF9Val: '60', scrF9MinStk: '3', scrF9MinMcap: '0',
   scrF10On: false, scrF10_20sma: true, scrF10_50sma: false, scrF10_200sma: false, scrF10_200ema: false,
-  scrF11On: false, scrF11Sector: '',
+  scrF11On: false, scrF11Sector: '', scrF36On: false, scrF36Industry: '',
   scrF12On: false, scrF12Period: '6m', scrF12Val: '0',
   scrF17On: false, scrF17Period: '3m', scrF17Lag: '3m', scrF17Val: '0',
   scrF18On: false, scrF18_1m: false, scrF18_3m: true, scrF18_52w: false,
@@ -174,6 +184,7 @@ const DEFAULT_FILTER_STATE = {
   scrF26On: false, scrF26Val: '20', scrF27On: false, scrF27Val: '10',
   scrF28On: false, scrF28Val: '0', scrF29On: false, scrF29Val: '0', scrF30On: false, scrF30Val: '0', scrF31On: false, scrF31Val: '0', scrF32On: false, scrF33On: false,
   scrF34On: false, scrF34Val: '50', scrF35On: false, scrF35Val: '50',
+  scrF37On: false, scrF37Sma10: false, scrF37Sma20: false, scrF37Sma50: false, scrF38On: false, scrF38Sma10: false, scrF38Sma20: false, scrF38Sma50: false,
   scrF24On: false, scrF24Field: 'high', scrF24Days: '5',
   scrF25On: false, scrF25Field: 'high', scrF25Days: '5',
   scrAllowPartial: true,
@@ -217,6 +228,7 @@ function applyPresetState(state) {
     else el.value = state[f.id];
   }
   if (typeof mfRocSyncLagSelect === 'function') mfRocSyncLagSelect('scrF17Period', 'scrF17Lag');
+  if (typeof gsSync === 'function') gsSync();   // the Sector / Industry pickers redraw from the restored values (js/group-select.js)
 }
 
 // ── API helpers ──

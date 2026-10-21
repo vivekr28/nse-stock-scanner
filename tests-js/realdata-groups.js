@@ -17,8 +17,7 @@ const dom = installFakeDom(sb, {
   sectorSort: 'avg_change', industrySort: 'rs_score', indMinStocks: '1', indMinMcap: '0',
   moneyFlowPeriod: '1m', mfRocPeriod: '1m', mfRocLag: '1m',
 });
-// charts / big tables are drawn to canvases and are not what is being checked
-sb.renderMetricChart = () => {};
+// big tables are not what is being checked
 sb.renderIndustryBreakdownTable = () => {};
 sb.renderMoneyFlowAllPeriodsTable = () => {};
 
