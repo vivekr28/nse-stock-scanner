@@ -6,6 +6,8 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 let icIndustry = null;
+let icIndList = [];      // the industries the popup was opened from (Industry Analysis: the table's order); Up / Down on the Industry and Money Flow tabs loop through them
+let icIndIndex = -1;     // the open industry's position in icIndList
 let icStocks = [];       // stocks in the clicked industry, sorted by market cap desc
 let icPage = 0;
 let icActiveCell = 0;    // Stock Charts grid: position (0 = first) of the chart the X / R keys act on; click a chart to move it
@@ -182,9 +184,11 @@ function copySelectedStocksWatchlist() {
 }
 
 // ── Open / close ─────────────────────────────────────────────────────────────
-function openIndustryCharts(industryName) {
+function openIndustryCharts(industryName, list, tab) {
   icMode = 'industry';
   icIndustry = industryName;
+  icIndList = Array.isArray(list) && list.length > 1 && list.includes(industryName) ? list.slice() : [];
+  icIndIndex = icIndList.indexOf(industryName);
   icStocks = [];
   for (const key in Store.latestBySymbol) {
     const s = Store.latestBySymbol[key];
@@ -214,7 +218,20 @@ function openIndustryCharts(industryName) {
   titleEl.onclick = null;
   document.getElementById('industryChartsModal').classList.add('active');
 
-  icSwitchTab('stocks');
+  icSwitchTab(tab || 'stocks');
+}
+
+// Previous (-1) / next (+1) industry of the list the popup was opened from, wrapping round at the ends, on the tab that is showing -
+// so the Industry Chart can be flipped through industry after industry without closing the popup.
+function icStepIndustry(delta) {
+  const n = icIndList.length;
+  if (icMode === 'single' || n < 2) return;
+  const tab = icActiveTab;
+  icDisposeCharts();
+  icDisposeIndustryChart();
+  icDisposeMoneyFlowChart();
+  icDisposeMfRocChart();
+  openIndustryCharts(icIndList[(icIndIndex + delta + n) % n], icIndList, tab);
 }
 
 // Single-stock mode: opened from the Symbol column — one big chart, no tabs, with
@@ -270,6 +287,7 @@ function icRenderSingleStock() {
 
 function closeIndustryCharts() {
   document.getElementById('industryChartsModal').classList.remove('active');
+  icIndList = []; icIndIndex = -1;
   if (typeof icSetIndicatorsOpen === 'function') icSetIndicatorsOpen(false);
   if (typeof qctRelease === 'function') qctRelease();
   icDisposeCharts();
@@ -321,6 +339,13 @@ function icUpdateControlVisibility() {
     if (mfWrap) mfWrap.style.display = icActiveTab === 'moneyflow' ? '' : 'none';
     if (layoutToggle) layoutToggle.style.display = showGrid ? '' : 'none';
     if (rangeToggle) rangeToggle.style.display = showGrid ? '' : 'none';
+  }
+  // Industry-to-industry stepping: only when the popup was opened from a list of industries (Industry Analysis)
+  const indNav = document.getElementById('icIndNavWrap');
+  if (indNav) {
+    indNav.style.display = icMode !== 'single' && icIndList.length > 1 ? '' : 'none';
+    const info = document.getElementById('icIndNavInfo');
+    if (info) info.textContent = `${icIndIndex + 1} of ${icIndList.length} industries`;
   }
   // Crosshair sync links the grid's charts, so it only means something with several on screen
   if (syncWrap) syncWrap.style.display = icMode !== 'single' && icActiveTab === 'stocks' && icLayout !== '1x1' ? '' : 'none';
@@ -1317,7 +1342,7 @@ function icHandleSelectKey(e) {
   return true;
 }
 
-// ── Keyboard: Down = next stock/page, Up = previous stock/page (single and grid views); X / R = select / deselect; Escape = close ──────────────────────────
+// ── Keyboard: Down = next stock/page, Up = previous stock/page (single and grid views); Up / Down on the Industry / Money Flow tabs = next / previous industry; X / R = select / deselect; Escape = close ──────────────────────────
 document.addEventListener('keydown', e => {
   if (!document.getElementById('industryChartsModal').classList.contains('active')) return;
   if (e.key === 'Escape') {
@@ -1330,6 +1355,11 @@ document.addEventListener('keydown', e => {
     if (e.key === 'ArrowDown') { e.preventDefault(); icNextStock(); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); icPrevStock(); }
     return;
+  }
+  // Opened from a list of industries: Up / Down flip to the previous / next industry on the Industry and Money Flow tabs (and
+  // Shift + Up / Down on the Stock Charts tab too, where plain Up / Down page through the stocks)
+  if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && icIndList.length > 1 && (icActiveTab !== 'stocks' || e.shiftKey)) {
+    e.preventDefault(); icStepIndustry(e.key === 'ArrowDown' ? 1 : -1); return;
   }
   if (icActiveTab !== 'stocks') return;
   if (e.key === 'ArrowDown') { e.preventDefault(); icNextPage(); }

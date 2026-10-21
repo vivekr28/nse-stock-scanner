@@ -116,16 +116,19 @@ const dom = installFakeDom(sb, {
   industrySort: 'ipo', ipoPeriod: '3m', indMinStocks: '1', indMinMcap: '0',
   moneyFlowPeriod: '1m', mfRocPeriod: '1m', mfRocLag: '1m',
 });
-let charted = null;
-run('renderMetricChart = (data, sortBy, mfPeriod, mfData, rocLag, ipoInfo) => { __charted = { names: data.map(d => d.name), counts: data.map(d => d.ipoCount), sortBy, ipoInfo }; }');
-sb.__charted = null;
-
+// The bar chart is gone: what it used to chart (the industries with at least one listing, most first) is the top of the table's list.
+// `charted` keeps that view of the last render; `note` is the line above the Industry Breakdown table.
 function render(period = '3m') {
   dom.el('industrySort').value = 'ipo';
   dom.el('ipoPeriod').value = period;
   dom.el('industrySort').selectedOptions = [{ textContent: 'IPOs Listed' }];
   run('renderIndustryAnalysis()');
-  return { charted: sb.__charted, list: run('_chartData'), bd: run('_indBreakdown') };
+  const list = run('_chartData');
+  const listed = list.filter(i => i.ipoCount > 0);
+  return {
+    charted: { names: listed.map(d => d.name), counts: listed.map(d => d.ipoCount), sortBy: run('_indBreakdown.sortBy') },
+    list, bd: run('_indBreakdown'), note: dom.el('indMetricNote').textContent,
+  };
 }
 
 const fixture = () => loadStore([
@@ -136,14 +139,15 @@ const fixture = () => loadStore([
   ...Array.from({ length: 20 }, (_, i) => stock('BU' + i, 'Beta', '2026-08-17')),
 ]);
 
-test('IPO sort: the chart gets only industries with a listing, most first, and the bulk day is not counted', () => {
+test('IPO sort: industries with a listing come first, most first, and the bulk day is not counted - the note above the table says so', () => {
   fixture();
-  const { charted } = render('3m');
+  const { charted, list, note } = render('3m');
   same(charted.names, ['Alpha', 'Beta']);
   same(charted.counts, [2, 1]);
   assert.equal(charted.sortBy, 'ipo');
-  assert.equal(charted.ipoInfo.period, '3m');
-  same(charted.ipoInfo.bulkDays, [{ date: '2026-08-17', count: 20, kept: [] }]);
+  same(list.slice(0, 2).map(i => i.name), ['Alpha', 'Beta'], 'the table is in that order too');
+  assert.match(note, /^IPOs Listed by Industry — Last 3 Months/);
+  assert.match(note, /Left out as bulk admissions of existing companies, not IPOs: 17-Aug-2026 \(20 of 20 stocks\)\./);
 });
 
 test('IPO sort: a real IPO on a bulk day shows under its industry', () => {
@@ -184,7 +188,7 @@ test('IPO sort: ties keep the stronger industry first', () => {
   same(render('3m').charted.names, ['Strong', 'Weak']);
 });
 
-test('IPO sort: nothing listed in the period gives an empty chart list, not an error', () => {
+test('IPO sort: nothing listed in the period gives an empty list of listings, not an error', () => {
   loadStore([stock('OLD', 'Alpha', '2019-05-05')]);
   same(render('1m').charted.names, []);
 });
@@ -208,13 +212,49 @@ test('IPO sort: the default table order is by IPO count, high to low', () => {
   assert.equal(def.dir, -1);
 });
 
-test('other sorts are unaffected: no IPO columns, and the chart gets the full list', () => {
+test('other sorts are unaffected: no IPO columns, every industry stays in the list', () => {
   fixture();
   dom.el('industrySort').value = 'stocks';
   dom.el('industrySort').selectedOptions = [{ textContent: 'Stock Count' }];
   run('renderIndustryAnalysis()');
   assert.equal(run('_indBreakdown.ipoLabel'), null);
-  assert.equal(sb.__charted.sortBy, 'stocks');
-  assert.equal(sb.__charted.names.length, 4, 'Alpha, Beta, Gamma, Delta - every industry');
+  assert.equal(run('_indBreakdown.sortBy'), 'stocks');
+  assert.equal(run('_chartData').length, 4, 'Alpha, Beta, Gamma, Delta - every industry');
+  assert.match(dom.el('indMetricNote').textContent, /^Industry by Number of Stocks — /);
   assert.equal(run('indBreakdownCols("1M", false, "3M", null).some(c => c.key === "ipoCount")'), false);
+});
+
+// ── "Copy industries" on the Industry Breakdown table ───────────────────────────────────────────────────────────────────────────────
+
+test('Copy industries (Industry Breakdown): the names the table lists, in the order shown, one comma-separated line', async () => {
+  fixture();
+  render('3m');
+  let clip = null;
+  sb.navigator = { clipboard: { writeText: t => { clip = t; return Promise.resolve(); } } };
+  sb.setTimeout = () => {};
+  dom.el('indBreakdownCopy').dataset = {};
+  dom.el('indBreakdownCopy').textContent = 'Copy industries';
+  assert.equal(await sb.copyBreakdownIndustries(), true);
+  assert.equal(clip, run('_chartData').map(i => i.name).join(','));
+  assert.equal(clip.split(',').length, 4, 'Alpha, Beta, Gamma, Delta');
+  assert.equal(dom.el('indBreakdownCopy').textContent, 'Copied 4 ✓');
+  // a manual column sort changes the order it copies in (it copies what the table shows)
+  run("sortIndustryBreakdown('name')");
+  await sb.copyBreakdownIndustries();
+  assert.equal(clip, 'Alpha,Beta,Delta,Gamma');
+  delete sb.navigator; delete sb.setTimeout;
+});
+
+test('Copy industries (Industry Breakdown): Min Stocks / Min Market Cap leave industries out of the copy, as they do the table', async () => {
+  fixture();
+  dom.el('indMinStocks').value = '2';                              // Alpha has 3 stocks and Beta 21; Gamma and Delta have 1 each
+  render('3m');
+  let clip = null;
+  sb.navigator = { clipboard: { writeText: t => { clip = t; return Promise.resolve(); } } };
+  sb.setTimeout = () => {};
+  dom.el('indBreakdownCopy').dataset = {};
+  await sb.copyBreakdownIndustries();
+  assert.equal(clip, 'Alpha,Beta');
+  dom.el('indMinStocks').value = '1';
+  delete sb.navigator; delete sb.setTimeout;
 });

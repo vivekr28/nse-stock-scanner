@@ -170,9 +170,8 @@ function isoToDmy(iso) { // '2026-04-20' -> '20-Apr-2026'
   return m ? `${m[3]}-${IND_MONTH_NAMES[parseInt(m[2], 10) - 1]}-${m[1]}` : (iso || '');
 }
 
-// ── Store chart bar regions for hover/click ──
-let _chartBars = [];   // [{x, y, w, h, ind}]
-let _chartData = [];   // full indList reference for popup
+// ── Last render's industry list ──
+let _chartData = [];   // the filtered, sorted industry list of the last render (the table and heatmap draw from it; tests read it)
 
 function renderIndustryAnalysis() {
   const minStocks = parseInt(document.getElementById('indMinStocks').value) || 1;
@@ -183,6 +182,10 @@ function renderIndustryAnalysis() {
   const mfRocPeriod = document.getElementById('mfRocPeriod').value;
   const effectivePeriod = isRoc ? mfRocPeriod : mfPeriod;
   const isIpo = sortBy === 'ipo';
+  const isEw = sortBy === 'ew_sma';
+  const ewLens = isEw ? indEwLens() : [];
+  const ewGroup = document.getElementById('ewSmaGroup');
+  if (ewGroup) ewGroup.style.display = isEw ? '' : 'none';
   const ipoPeriod = ((document.getElementById('ipoPeriod') || {}).value) || '3m';
   const ipoWin = ipoWindow(ipoPeriod);
   const ipoGroup = document.getElementById('ipoPeriodGroup');
@@ -305,6 +308,17 @@ function renderIndustryAnalysis() {
   // ── Compute Relative Strength Score (shared with screener.js F9 — see utils.js) ──
   computeRSScores(indList);
 
+  // EW Chart Above SMA: keep the industries whose equal-weight index closes above EVERY ticked SMA (after the RS scores, so those stay
+  // what the other views show). The index and its SMAs are js/group-trend.js's gtGroupMap - the same figures as the Stock Scanner's F38.
+  if (isEw) {
+    const ew = typeof gtGroupMap === 'function' ? gtGroupMap('industry') : {};
+    indList.forEach(i => {
+      const g = ew[i.name];
+      for (const len of IND_EW_LENGTHS) i['ewDist' + len] = g && g.sma[len] > 0 ? (g.close / g.sma[len] - 1) * 100 : NaN;
+    });
+    indList = indList.filter(i => ewLens.every(len => i['ewDist' + len] > 0));
+  }
+
   // Sort
   switch (sortBy) {
     case 'rs_score': indList.sort((a, b) => b.rsScore - a.rsScore); break;
@@ -318,9 +332,10 @@ function renderIndustryAnalysis() {
     case 'money_flow_roc': indList.sort((a, b) => b.moneyFlowRoc - a.moneyFlowRoc); break;
     // ties (most industries have 0-2) go to the stronger industry
     case 'ipo': indList.sort((a, b) => (b.ipoCount - a.ipoCount) || (b.rsScore - a.rsScore)); break;
+    // furthest above the longest ticked SMA first
+    case 'ew_sma': { const k = 'ewDist' + ewLens[ewLens.length - 1]; indList.sort((a, b) => b[k] - a[k]); break; }
   }
 
-  // Save for popup lookups
   _chartData = indList;
 
   // ── Summary stats ──
@@ -335,20 +350,17 @@ function renderIndustryAnalysis() {
   document.getElementById('indTotalMcap').textContent = fmtCr(totalMcap);
   document.getElementById('indAvgBreadth').textContent = avgBreadth.toFixed(1) + '%';
 
-  // ── Horizontal Bar Chart (replaced by the all-periods table when that's shown) ──
-  const rsChartSection = document.getElementById('rsChartSection');
-  if (rsChartSection) rsChartSection.style.display = allPeriodsOn ? 'none' : '';
-  // The IPO chart only lists industries that had at least one listing; the table and heatmap still show the rest.
+  // ── What the Sort By metric means: the line above the Industry Breakdown table (the IPO view also names the bulk days left out) ──
   const ipoInfo = isIpo ? { period: ipoPeriod, from: ipoWin.from, to: ipoWin.to, bulkDays: ipoWin.bulkDays } : null;
-  const chartList = isIpo ? indList.filter(i => i.ipoCount > 0) : indList;
-  if (!allPeriodsOn) renderMetricChart(chartList.slice(0, 40), sortBy, effectivePeriod, mfData, mfRocLag, ipoInfo);
+  renderMetricNote(sortBy, effectivePeriod, mfData, mfRocLag, ipoInfo, ewLens);
 
   // ── Industry Table (all filtered industries; manual header sort layered on the filter order) ──
   // A manual column sort only lasts until the Sort By metric / MF period changes, so picking a
-  // new Sort By always brings the table back in step with the chart.
+  // new Sort By always brings the table back in step with the Sort By metric.
   const sortTrack = sortBy === 'money_flow_roc' ? sortBy + '|' + effectivePeriod + '|' + mfRocLag
     : sortBy === 'money_flow' ? sortBy + '|' + effectivePeriod
-    : isIpo ? sortBy + '|' + ipoPeriod : sortBy;
+    : isIpo ? sortBy + '|' + ipoPeriod
+    : isEw ? sortBy + '|' + ewLens.join() : sortBy;
   if (sortTrack !== _indSortTrack) {
     _indSortTrack = sortTrack;
     indSortCol = null;
@@ -361,7 +373,8 @@ function renderIndustryAnalysis() {
     mfLabel: periodLabels[effectivePeriod] || '6M',
     isRoc,
     rocPeriodLabel: periodLabels[mfRocLag] || '3M',
-    ipoLabel: isIpo ? (IPO_PERIOD_SHORT[ipoPeriod] || '3M') : null
+    ipoLabel: isIpo ? (IPO_PERIOD_SHORT[ipoPeriod] || '3M') : null,
+    ewLens
   };
   renderIndustryBreakdownTable();
 
@@ -379,7 +392,7 @@ function renderIndustryAnalysis() {
       ? `<tr><td style="color:var(--text2)">MF RoC</td><td style="text-align:right;color:${ind.moneyFlowRoc >= 0 ? 'var(--green)' : 'var(--red)'}">${ind.moneyFlowRoc >= 0 ? '+' : ''}${ind.moneyFlowRoc.toFixed(1)}pp</td></tr>`
       : '';
     return `
-      <div class="sector-card" style="background:${bg};border-color:${border};cursor:pointer;" onclick="openIndustryCharts('${ind.name.replace(/'/g, "\\'")}')">
+      <div class="sector-card" style="background:${bg};border-color:${border};cursor:pointer;" onclick="openIndustryCharts('${ind.name.replace(/'/g, "\\'")}', _indBreakdownNames)">
         <h4>
           <span>${ind.name}</span>
           <span style="color:${scoreColor};font-weight:700">${ind.rsScore.toFixed(0)}</span>
@@ -413,7 +426,20 @@ let _indBreakdown = { list: [], sortBy: 'rs_score', sortLabel: '', mfLabel: '6M'
 const IND_ASC_COLS = new Set(['name', 'sector', 'avgDist52H', 'topLoser']);
 const indColDir = key => IND_ASC_COLS.has(key) ? 1 : -1;
 
-function indBreakdownCols(mfLabel, isRoc, rocPeriodLabel, ipoLabel) {
+// EW Chart Above SMA view: the SMAs offered (20 is the default, at least one is always ticked) and the extra columns
+const IND_EW_LENGTHS = [20, 50];
+function indEwLens() {
+  const on = id => { const e = document.getElementById(id); return !!(e && e.checked); };
+  let lens = IND_EW_LENGTHS.filter(len => on('ewSma' + len));
+  if (!lens.length) {
+    const e = document.getElementById('ewSma20');
+    if (e) e.checked = true;
+    lens = [20];
+  }
+  return lens;
+}
+
+function indBreakdownCols(mfLabel, isRoc, rocPeriodLabel, ipoLabel, ewLens) {
   const cols = [
     { key: 'name', label: 'Industry' },
     { key: 'sector', label: 'Sector' },
@@ -435,6 +461,10 @@ function indBreakdownCols(mfLabel, isRoc, rocPeriodLabel, ipoLabel) {
       { key: 'ipoSymbols', label: 'Listed', get: i => i.ipoSymbols.join(', ') }
     );
   }
+  if (ewLens && ewLens.length) {
+    // right after Breadth
+    cols.splice(7, 0, ...ewLens.map(len => ({ key: 'ewDist' + len, label: `EW vs ${len} SMA` })));
+  }
   if (isRoc) {
     cols.push(
       { key: 'moneyFlowChgPast', label: `MF Chg% (${rocPeriodLabel} ago)` },
@@ -449,7 +479,8 @@ function indBreakdownCols(mfLabel, isRoc, rocPeriodLabel, ipoLabel) {
 }
 
 function indDefaultSort() {
-  const col = (METRIC_CONFIG[_indBreakdown.sortBy] || METRIC_CONFIG.rs_score).key;
+  const ew = _indBreakdown.sortBy === 'ew_sma' && _indBreakdown.ewLens && _indBreakdown.ewLens.length ? _indBreakdown.ewLens : null;
+  const col = ew ? 'ewDist' + ew[ew.length - 1] : (METRIC_CONFIG[_indBreakdown.sortBy] || METRIC_CONFIG.rs_score).key;
   return { col, dir: indColDir(col) };
 }
 
@@ -470,12 +501,25 @@ function sortIndustryBreakdown(key) {
   renderIndustryBreakdownTable();
 }
 
+// "Copy industries": the names the table lists (so Min Stocks / Min Market Cap are applied) as one comma-separated line - for the Stock Scanner's Industry picker
+function copyBreakdownIndustries() {
+  return copyNamesToClipboard(_indBreakdownNames, document.getElementById('indBreakdownCopy'));
+}
+
 function resetIndustryBreakdownSort() {
   indSortCol = null;
   renderIndustryBreakdownTable();
 }
 
 // The two extra cells of the IPO view: how many, and which (newest first).
+// The EW view's cells: how far the industry's equal-weight index is above (green) / below (red) each ticked SMA
+function ewCells(ind, ewLens) {
+  return (ewLens || []).map(len => {
+    const v = ind['ewDist' + len];
+    return isNaN(v) ? '<td>-</td>' : `<td style="color:${v > 0 ? 'var(--green)' : 'var(--red)'};font-weight:600">${v > 0 ? '+' : ''}${v.toFixed(1)}%</td>`;
+  }).join('');
+}
+
 function ipoCells(ind, ipoLabel) {
   if (!ipoLabel) return '';
   const syms = ind.ipoSymbols.map(x => x.replace(/&/g, '&amp;')).join(', ');
@@ -484,9 +528,11 @@ function ipoCells(ind, ipoLabel) {
       <td style="color:var(--text2);font-size:11px;white-space:normal;min-width:160px;">${syms || '-'}</td>`;
 }
 
+let _indBreakdownNames = [];   // the industries the Breakdown table lists now, in the order shown (what "Copy industries" copies)
+
 function renderIndustryBreakdownTable() {
-  const { list, sortLabel, mfLabel, isRoc, rocPeriodLabel, ipoLabel } = _indBreakdown;
-  const cols = indBreakdownCols(mfLabel, isRoc, rocPeriodLabel, ipoLabel);
+  const { list, sortLabel, mfLabel, isRoc, rocPeriodLabel, ipoLabel, ewLens } = _indBreakdown;
+  const cols = indBreakdownCols(mfLabel, isRoc, rocPeriodLabel, ipoLabel, ewLens);
   const eff = indEffectiveSort();
 
   let sorted = list; // already in filter order
@@ -502,6 +548,8 @@ function renderIndustryBreakdownTable() {
       return indSortDir * (va - vb);
     });
   }
+
+  _indBreakdownNames = sorted.map(i => i.name);
 
   document.getElementById('industryHead').innerHTML = '<th>#</th>' + cols.map(c =>
     `<th onclick="sortIndustryBreakdown('${c.key}')">${c.label}<span class="sort-arrow">${eff.col === c.key ? (eff.dir > 0 ? '▲' : '▼') : ''}</span></th>`
@@ -524,7 +572,7 @@ function renderIndustryBreakdownTable() {
       <td style="color:var(--text2)">${ind.moneyFlowChgPast >= 0 ? '+' : ''}${ind.moneyFlowChgPast.toFixed(1)}%</td>
       <td style="color:${ind.moneyFlowRoc >= 0 ? 'var(--green)' : 'var(--red)'};font-weight:600">${ind.moneyFlowRoc >= 0 ? '+' : ''}${ind.moneyFlowRoc.toFixed(1)}pp</td>` : '';
     return `
-    <tr style="cursor:pointer" onclick="openIndustryCharts('${ind.name.replace(/'/g, "\\'")}')">
+    <tr style="cursor:pointer" onclick="openIndustryCharts('${ind.name.replace(/'/g, "\\'")}', _indBreakdownNames)">
       <td>${idx + 1}</td>
       <td style="font-weight:600">${ind.name}</td>
       <td style="color:var(--text2)">${ind.sector}</td>
@@ -546,7 +594,7 @@ function renderIndustryBreakdownTable() {
           </div>
           <span style="font-size:11px;min-width:35px;">${ind.breadth.toFixed(0)}%</span>
         </div>
-      </td>
+      </td>${ewCells(ind, ewLens)}
       <td>${ind.avgDist52H.toFixed(1)}%</td>
       <td>${fmtTurnoverCr(ind.totalTurnover)}</td>
       <td>${fmtCr(ind.moneyFlow)}</td>
@@ -558,42 +606,45 @@ function renderIndustryBreakdownTable() {
   }).join('');
 }
 
-// ── Metric config for chart rendering ──
+// ── Metric config: the table column each Sort By metric orders by (key), and what it means (title / tip) ──
 const METRIC_CONFIG = {
-  rs_score:    { key: 'rsScore',          unit: '',    dec: 0, maxVal: 100,
+  rs_score:    { key: 'rsScore',
                  title: 'Industry Relative Strength',
                  tip: 'Composite score (0-100) combining breadth (40%), avg monthly change rank (30%), and proximity to 52-week high (30%). Higher = stronger industry.' },
-  avg_change:  { key: 'avgMonthlyChange', unit: '%',   dec: 2, maxVal: null,
+  avg_change:  { key: 'avgMonthlyChange',
                  title: 'Industry by Avg Monthly Change %',
                  tip: 'Average 1-month price change across all stocks in the industry. Positive = industry trending up over the past month.' },
-  breadth:     { key: 'breadth',          unit: '%',   dec: 1, maxVal: 100,
+  breadth:     { key: 'breadth',
                  title: 'Industry by Breadth (% Above 20 SMA)',
                  tip: 'Percentage of stocks trading above their 20-day Simple Moving Average. Higher breadth = broader participation in the rally.' },
-  mcap:        { key: 'totalMcap',        unit: ' Cr', dec: 0, maxVal: null,
+  mcap:        { key: 'totalMcap',
                  title: 'Industry by Market Capitalisation',
                  tip: 'Total market capitalisation of all stocks in the industry, in Crores. Indicates the weight/size of the industry.' },
-  turnover:    { key: 'totalTurnover',    unit: ' Cr', dec: 0, maxVal: null,
+  turnover:    { key: 'totalTurnover',
                  title: 'Industry by Total Turnover',
                  tip: 'Total traded turnover (value) of the industry in Crores. Higher turnover = more liquidity and market interest.' },
-  avg_dist52h: { key: 'avgDist52H',       unit: '%',   dec: 1, maxVal: null,
+  avg_dist52h: { key: 'avgDist52H',
                  title: 'Industry by Avg Distance from 52-Week High',
                  tip: 'Average % distance of stocks from their 52-week high. Closer to 0% = near highs; large negative = beaten down.' },
-  stocks:      { key: 'stockCount',       unit: '',    dec: 0, maxVal: null,
+  stocks:      { key: 'stockCount',
                  title: 'Industry by Number of Stocks',
                  tip: 'Number of listed stocks in the industry that pass the current filters.' },
-  money_flow:  { key: 'moneyFlowChg',     unit: '%',   dec: 1, maxVal: null,
+  money_flow:  { key: 'moneyFlowChg',
                  title: 'Industry by Money Flow Change',
                  tip: 'Percentage change in cumulative turnover vs the prior equivalent period. Positive = more money flowing in than before; negative = declining interest.' },
-  money_flow_roc: { key: 'moneyFlowRoc',  unit: 'pp',  dec: 1, maxVal: null,
+  money_flow_roc: { key: 'moneyFlowRoc',
                  title: 'Industry by Money Flow Rate of Change',
                  tip: 'Change in the MF Chg% reading itself, comparing now to the same reading one ROC timeframe ago (in percentage points; the timeframe can be the window itself or any shorter one). Positive = the flow reading is improving even if still negative; negative = it is fading even if still positive.' },
-  ipo:         { key: 'ipoCount',         unit: '',    dec: 0, maxVal: null,
+  ipo:         { key: 'ipoCount',
                  title: 'IPOs Listed by Industry',
-                 tip: 'Number of stocks whose NSE listing date falls in the selected period, per industry.' }
+                 tip: 'Number of stocks whose NSE listing date falls in the selected period, per industry.' },
+  ew_sma:      { key: 'ewDist20',
+                 title: 'Industries with the EW Chart Above SMA',
+                 tip: 'Industries whose equal-weight index (every stock\'s daily % move averaged across the industry, the Industry Chart in the chart popup) closes above the ticked SMA; with both ticked it must be above both. Ordered by how far it is above the longer SMA.' }
 };
 
-// ── Horizontal Bar Chart (adapts to selected metric) ──
-function renderMetricChart(data, sortBy, mfPeriod, mfData, rocLag, ipoInfo) {
+// ── The line above the Industry Breakdown table: what the Sort By metric is (title + tip) ──
+function indMetricText(sortBy, mfPeriod, mfData, rocLag, ipoInfo, ewLens) {
   const cfg = { ...METRIC_CONFIG[sortBy] || METRIC_CONFIG.rs_score };
 
   // Append period to money_flow title
@@ -608,7 +659,7 @@ function renderMetricChart(data, sortBy, mfPeriod, mfData, rocLag, ipoInfo) {
     cfg.title = 'IPOs Listed by Industry — ' + (IPO_PERIOD_LABELS[ipoInfo.period] || IPO_PERIOD_LABELS['3m']) +
       (ipoInfo.to ? ' (' + isoToDmy(ipoInfo.from) + ' to ' + isoToDmy(ipoInfo.to) + ')' : '');
     cfg.tip = 'Stocks with an NSE listing date in the period, per industry: IPOs plus any demerger or SME-migration listings; ' +
-      'companies since delisted are not counted. Only industries with at least one listing are charted (the table below lists all).' +
+      'companies since delisted are not counted.' +
       (ipoInfo.bulkDays.length
         ? ' Left out as bulk admissions of existing companies, not IPOs: ' +
           ipoInfo.bulkDays.map(b => isoToDmy(b.date) + ' (' + (b.count - b.kept.length) + ' of ' + b.count + ' stocks)').join(', ') + '.' +
@@ -618,234 +669,18 @@ function renderMetricChart(data, sortBy, mfPeriod, mfData, rocLag, ipoInfo) {
             : '')
         : '');
   }
-
-  // Update chart heading and tooltip
-  const heading = document.getElementById('industryChartTitle');
-  if (heading) {
-    heading.textContent = cfg.title;
-    heading.title = cfg.tip;
+  if (sortBy === 'ew_sma' && ewLens && ewLens.length) {
+    cfg.title = 'Industries with the EW Chart Above ' + ewLens.join(' and ') + ' SMA';
   }
-  const tipEl = document.getElementById('industryChartTip');
-  if (tipEl) tipEl.textContent = cfg.tip;
-
-  const canvas = document.getElementById('rsChart');
-  const ctx = canvas.getContext('2d');
-  if (!data.length) { // e.g. no listing in the period: say so instead of an empty canvas
-    _chartBars = [];
-    canvas.width = Math.max(canvas.parentElement.clientWidth, 500);
-    canvas.height = 60;
-    ctx.fillStyle = '#1e293b';
-    ctx.fillRect(0, 0, canvas.width, 60);
-    ctx.fillStyle = '#94a3b8';
-    ctx.font = '12px -apple-system, sans-serif';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('No stocks listed in this period for the industries shown.', 16, 30);
-    return;
-  }
-  const barH = 22;
-  const gap = 4;
-  const margin = { top: 10, right: 110, bottom: 20, left: 220 };
-  const totalH = margin.top + margin.bottom + data.length * (barH + gap);
-  const W = Math.max(canvas.parentElement.clientWidth, window.innerWidth - 80, 500);
-
-  canvas.width = W;
-  canvas.height = totalH;
-
-  ctx.fillStyle = '#1e293b';
-  ctx.fillRect(0, 0, W, totalH);
-
-  const plotW = W - margin.left - margin.right;
-
-  // Determine max value for scaling
-  let maxAbs = cfg.maxVal;
-  if (maxAbs === null) {
-    maxAbs = Math.max(...data.map(d => Math.abs(d[cfg.key])));
-    if (maxAbs === 0) maxAbs = 1;
-  }
-  // A count: round the axis up to 1-4, or a multiple of 4, so the four gridlines are whole numbers (2, 4, 6, 8)
-  if (sortBy === 'ipo') maxAbs = maxAbs <= 4 ? Math.ceil(maxAbs) : Math.ceil(maxAbs / 4) * 4;
-
-  // Reset bar regions for hover/click
-  _chartBars = [];
-
-  data.forEach((ind, i) => {
-    const y = margin.top + i * (barH + gap);
-    const val = ind[cfg.key];
-    const ratio = Math.abs(val) / maxAbs;
-    const barW = Math.max(ratio * plotW, 1);
-
-    // Store bar region for interactivity
-    _chartBars.push({ x: 0, y, w: W, h: barH, ind });
-
-    // Color logic
-    let color;
-    if (sortBy === 'rs_score') {
-      color = val >= 70 ? '#05df72' : val >= 40 ? '#ffb900' : '#f87171';
-    } else if (sortBy === 'avg_change' || sortBy === 'money_flow' || sortBy === 'money_flow_roc') {
-      color = val >= 0 ? '#05df72' : '#f87171';
-    } else if (sortBy === 'breadth') {
-      color = val >= 50 ? '#05df72' : val >= 30 ? '#ffb900' : '#f87171';
-    } else if (sortBy === 'avg_dist52h') {
-      color = val >= -10 ? '#05df72' : val >= -25 ? '#ffb900' : '#f87171';
-    } else {
-      color = '#ffb900';
-    }
-
-    // Background track
-    ctx.fillStyle = color + '1a';
-    ctx.fillRect(margin.left, y, plotW, barH);
-
-    // Filled bar
-    ctx.fillStyle = color;
-    ctx.fillRect(margin.left, y, barW, barH);
-
-    // Industry label
-    ctx.fillStyle = '#f1f5f9';
-    ctx.font = '11px -apple-system, sans-serif';
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'middle';
-    const label = ind.name.length > 28 ? ind.name.slice(0, 26) + '..' : ind.name;
-    ctx.fillText(label, margin.left - 8, y + barH / 2);
-
-    // Value label
-    let dispVal;
-    if (sortBy === 'money_flow') {
-      const sign = val >= 0 ? '+' : '';
-      dispVal = sign + val.toFixed(1) + '%  (' + fmtCr(ind.moneyFlow) + ' vs ' + fmtCr(ind.moneyFlowPrev) + ')';
-    } else if (sortBy === 'money_flow_roc') {
-      const sign = val >= 0 ? '+' : '';
-      const pastSign = ind.moneyFlowChgPast >= 0 ? '+' : '';
-      const nowSign = ind.moneyFlowChg >= 0 ? '+' : '';
-      dispVal = sign + val.toFixed(1) + 'pp  (' + pastSign + ind.moneyFlowChgPast.toFixed(1) + '% → ' + nowSign + ind.moneyFlowChg.toFixed(1) + '%)';
-    } else if (sortBy === 'mcap' || sortBy === 'turnover') {
-      dispVal = fmtCr(val);
-    } else {
-      dispVal = val.toFixed(cfg.dec) + cfg.unit;
-    }
-    ctx.fillStyle = color;
-    ctx.font = 'bold 11px -apple-system, sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillText(dispVal, margin.left + barW + 6, y + barH / 2);
-  });
-
-  // Vertical gridlines
-  ctx.strokeStyle = '#33415566';
-  ctx.lineWidth = 1;
-  const gridSteps = sortBy === 'ipo' ? Math.min(4, maxAbs) : 4;
-  for (let step = 0; step <= gridSteps; step++) {
-    const frac = step / gridSteps;
-    const x = margin.left + frac * plotW;
-    ctx.beginPath();
-    ctx.moveTo(x, margin.top - 5);
-    ctx.lineTo(x, totalH - margin.bottom);
-    ctx.stroke();
-
-    let gridLabel;
-    if (sortBy === 'mcap' || sortBy === 'turnover') {
-      gridLabel = fmtCr(frac * maxAbs);
-    } else {
-      gridLabel = (frac * maxAbs).toFixed(cfg.maxVal !== null ? 0 : cfg.dec);
-      if (cfg.unit === '%' || cfg.unit === 'pp') gridLabel += cfg.unit;
-    }
-    ctx.fillStyle = '#94a3b8';
-    ctx.font = '9px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(gridLabel, x, totalH - 5);
-  }
+  return { title: cfg.title, tip: cfg.tip };
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// CANVAS TOOLTIP — shows stock count + market cap on hover
-// ═══════════════════════════════════════════════════════════════════════════════
-(function() {
-  let _tooltipEl = null;
-
-  function getTooltip() {
-    if (!_tooltipEl) {
-      _tooltipEl = document.createElement('div');
-      _tooltipEl.id = 'indChartTooltip';
-      _tooltipEl.style.cssText =
-        'position:fixed;pointer-events:none;z-index:9999;display:none;' +
-        'background:#1e293b;border:1px solid #334155;border-radius:6px;padding:8px 12px;' +
-        'font-size:12px;color:#f1f5f9;box-shadow:0 4px 12px rgba(0,0,0,.5);max-width:280px;line-height:1.5;';
-      document.body.appendChild(_tooltipEl);
-    }
-    return _tooltipEl;
-  }
-
-  // The IPO view adds what was listed: "IPOs (3M): 4" and the first few symbols, newest first.
-  function ipoTooltipHtml(ind) {
-    if (!_indBreakdown.ipoLabel) return '';
-    const shown = ind.ipoSymbols.slice(0, 8).map(x => x.replace(/&/g, '&amp;')).join(', ');
-    const more = ind.ipoSymbols.length > 8 ? ' +' + (ind.ipoSymbols.length - 8) + ' more' : '';
-    return '<div>IPOs (' + _indBreakdown.ipoLabel + '): <b>' + ind.ipoCount + '</b></div>' +
-      (shown ? '<div style="font-size:11px;color:#94a3b8;">' + shown + more + '</div>' : '');
-  }
-
-  function findBar(e) {
-    const canvas = document.getElementById('rsChart');
-    if (!canvas) return null;
-    const rect = canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    const cx = mx * scaleX;
-    const cy = my * scaleY;
-    for (const bar of _chartBars) {
-      if (cx >= bar.x && cx <= bar.x + bar.w && cy >= bar.y && cy <= bar.y + bar.h) {
-        return bar;
-      }
-    }
-    return null;
-  }
-
-  document.addEventListener('mousemove', function(e) {
-    const canvas = document.getElementById('rsChart');
-    if (!canvas || !canvas.contains(e.target) && e.target !== canvas) {
-      getTooltip().style.display = 'none';
-      return;
-    }
-    const bar = findBar(e);
-    if (!bar) {
-      getTooltip().style.display = 'none';
-      canvas.style.cursor = 'default';
-      return;
-    }
-    canvas.style.cursor = 'pointer';
-    const ind = bar.ind;
-    const tip = getTooltip();
-    tip.innerHTML =
-      '<div style="font-weight:600;margin-bottom:4px;color:#fff;">' + ind.name + '</div>' +
-      '<div style="color:#94a3b8;font-size:11px;margin-bottom:4px;">' + ind.sector + '</div>' +
-      '<div>Stocks: <b>' + ind.stockCount + '</b></div>' +
-      '<div>Mkt Cap: <b>' + fmtCr(ind.totalMcap) + '</b></div>' +
-      '<div>Breadth: <b>' + ind.breadth.toFixed(0) + '%</b> &nbsp; RS: <b>' + ind.rsScore.toFixed(0) + '</b></div>' +
-      ipoTooltipHtml(ind) +
-      '<div style="font-size:11px;color:#94a3b8;margin-top:4px;">Click to view stocks</div>';
-    tip.style.display = 'block';
-    // Position near cursor
-    const tx = e.clientX + 14;
-    const ty = e.clientY - 10;
-    tip.style.left = Math.min(tx, window.innerWidth - 300) + 'px';
-    tip.style.top = Math.min(ty, window.innerHeight - 140) + 'px';
-  });
-
-  document.addEventListener('mouseout', function(e) {
-    if (e.target && e.target.id === 'rsChart') {
-      getTooltip().style.display = 'none';
-    }
-  });
-
-  // ── Click on chart bar opens the industry charts modal ──
-  document.addEventListener('click', function(e) {
-    const canvas = document.getElementById('rsChart');
-    if (!canvas || e.target !== canvas) return;
-    const bar = findBar(e);
-    if (bar) openIndustryCharts(bar.ind.name);
-  });
-})();
+function renderMetricNote(sortBy, mfPeriod, mfData, rocLag, ipoInfo, ewLens) {
+  const el = document.getElementById('indMetricNote');
+  if (!el) return;
+  const t = indMetricText(sortBy, mfPeriod, mfData, rocLag, ipoInfo, ewLens);
+  el.textContent = t.title + ' — ' + t.tip;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MONEY FLOW — ALL PERIODS TABLE (1W/1M/3M/6M/1Y side by side, per industry)

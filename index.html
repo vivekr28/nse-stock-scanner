@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NSE EOD Dashboard</title>
-<link rel="stylesheet" href="css/styles.css?v=18">
+<link rel="stylesheet" href="css/styles.css?v=29">
 </head>
 <body>
 
@@ -345,25 +345,67 @@
         <div id="scrPaneIndustry" class="scr-filter-pane" style="display:none;">
           <div class="scr-filters-list">
 
-            <!-- F11: Sector filter -->
+            <!-- F11: Sector filter - tick any number of sectors from a list (js/group-select.js; the selection is kept in the hidden input) -->
             <div class="scr-filter-row">
               <input type="checkbox" id="scrF11On">
-              <span class="scr-label">Sector:</span>
+              <span class="scr-label" title="Passes stocks whose sector is one of the sectors ticked in the list. Nothing ticked = no restriction. Ticking a sector switches the filter on.">Sector:</span>
               <div class="scr-inputs">
-                <select id="scrF11Sector" style="min-width:180px;">
-                  <option value="">All Sectors</option>
-                </select>
+                <input type="hidden" id="scrF11Sector" value="">
+                <div class="gs-pick" id="gsPickF11"></div>
               </div>
             </div>
 
-            <!-- F9: Industry RS filter -->
+            <!-- F36: Industry filter - tick any number of industries from a list (js/group-select.js) -->
             <div class="scr-filter-row">
-              <input type="checkbox" id="scrF9On">
-              <span class="scr-label">Industry RS Score &ge;:</span>
+              <input type="checkbox" id="scrF36On">
+              <span class="scr-label" title="Passes stocks whose industry is one of the industries ticked in the list. Nothing ticked = no restriction. Ticking an industry switches the filter on.">Industry:</span>
               <div class="scr-inputs">
-                <input type="number" id="scrF9Val" value="60" min="0" max="100" step="5">
-                <span class="scr-unit">Min Stocks:</span> <input type="number" id="scrF9MinStk" value="3" min="1" step="1" style="width:50px;">
-                <span class="scr-unit">Min MCap(Cr):</span> <input type="number" id="scrF9MinMcap" value="0" min="0" step="100" style="width:80px;">
+                <input type="hidden" id="scrF36Industry" value="">
+                <div class="gs-pick" id="gsPickF36"></div>
+              </div>
+            </div>
+
+            <!-- F37: is the equal-weight index of the stock's own sector above its 10 / 20 / 50 SMA - every ticked one (js/group-trend.js) -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF37On">
+              <span class="scr-label" title="Passes stocks whose SECTOR's equal-weight index (the one on the Market Overview tab) closes above every ticked SMA of its own. Ticking an SMA switches the filter on.">Sector index above:</span>
+              <div class="scr-inputs">
+                <label class="scr-sma-tick"><input type="checkbox" id="scrF37Sma10"> 10 SMA</label>
+                <label class="scr-sma-tick"><input type="checkbox" id="scrF37Sma20"> 20 SMA</label>
+                <label class="scr-sma-tick"><input type="checkbox" id="scrF37Sma50"> 50 SMA</label>
+              </div>
+            </div>
+
+            <!-- F38: is the equal-weight index of the stock's own industry above its 10 / 20 / 50 SMA - every ticked one (js/group-trend.js) -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF38On">
+              <span class="scr-label" title="Passes stocks whose INDUSTRY's equal-weight index (the one on the Market Overview tab) closes above every ticked SMA of its own. Ticking an SMA switches the filter on.">Industry index above:</span>
+              <div class="scr-inputs">
+                <label class="scr-sma-tick"><input type="checkbox" id="scrF38Sma10"> 10 SMA</label>
+                <label class="scr-sma-tick"><input type="checkbox" id="scrF38Sma20"> 20 SMA</label>
+                <label class="scr-sma-tick"><input type="checkbox" id="scrF38Sma50"> 50 SMA</label>
+              </div>
+            </div>
+
+            <!-- F35: breadth of the stock's own sector (js/group-breadth.js) -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF35On">
+              <span class="scr-label" title="Passes stocks whose SECTOR has more than this % of its stocks above their 20 SMA - the same Breadth figure as the Sector Analysis tab (stocks above their 20 SMA divided by all the stocks of the sector).">Sector breadth (% of stocks above 20 SMA):</span>
+              <div class="scr-inputs">
+                <span class="scr-unit">&gt;</span>
+                <input type="number" id="scrF35Val" value="50" min="0" max="100" step="5" style="width:70px;">
+                <span class="scr-unit">%</span>
+              </div>
+            </div>
+
+            <!-- F34: breadth of the stock's own industry (js/group-breadth.js) -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF34On">
+              <span class="scr-label" title="Passes stocks whose INDUSTRY has more than this % of its stocks above their 20 SMA - the same Breadth figure as the Industry Analysis tab (stocks above their 20 SMA divided by all the stocks of the industry). A one-stock industry is 0% or 100%: pair it with Min Stocks in Industry.">Industry breadth (% of stocks above 20 SMA):</span>
+              <div class="scr-inputs">
+                <span class="scr-unit">&gt;</span>
+                <input type="number" id="scrF34Val" value="50" min="0" max="100" step="5" style="width:70px;">
+                <span class="scr-unit">%</span>
               </div>
             </div>
 
@@ -382,6 +424,17 @@
               <span class="scr-label">Min Industry MCap(Cr) &ge;:</span>
               <div class="scr-inputs">
                 <input type="number" id="scrF14Val" value="0" min="0" step="100" style="width:100px;">
+              </div>
+            </div>
+
+            <!-- F9: Industry RS filter -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF9On">
+              <span class="scr-label">Industry RS Score &ge;:</span>
+              <div class="scr-inputs">
+                <input type="number" id="scrF9Val" value="60" min="0" max="100" step="5">
+                <span class="scr-unit">Min Stocks:</span> <input type="number" id="scrF9MinStk" value="3" min="1" step="1" style="width:50px;">
+                <span class="scr-unit">Min MCap(Cr):</span> <input type="number" id="scrF9MinMcap" value="0" min="0" step="100" style="width:80px;">
               </div>
             </div>
 
@@ -424,28 +477,6 @@
                 <span class="scr-unit">&gt;</span>
                 <input type="number" id="scrF17Val" value="0" step="5" style="width:60px;">
                 <span class="scr-unit">pp</span>
-              </div>
-            </div>
-
-            <!-- F34: breadth of the stock's own industry (js/group-breadth.js) -->
-            <div class="scr-filter-row">
-              <input type="checkbox" id="scrF34On">
-              <span class="scr-label" title="Passes stocks whose INDUSTRY has more than this % of its stocks above their 20 SMA - the same Breadth figure as the Industry Analysis tab (stocks above their 20 SMA divided by all the stocks of the industry). A one-stock industry is 0% or 100%: pair it with Min Stocks in Industry.">Industry breadth (% of stocks above 20 SMA):</span>
-              <div class="scr-inputs">
-                <span class="scr-unit">&gt;</span>
-                <input type="number" id="scrF34Val" value="50" min="0" max="100" step="5" style="width:70px;">
-                <span class="scr-unit">%</span>
-              </div>
-            </div>
-
-            <!-- F35: breadth of the stock's own sector (js/group-breadth.js) -->
-            <div class="scr-filter-row">
-              <input type="checkbox" id="scrF35On">
-              <span class="scr-label" title="Passes stocks whose SECTOR has more than this % of its stocks above their 20 SMA - the same Breadth figure as the Sector Analysis tab (stocks above their 20 SMA divided by all the stocks of the sector).">Sector breadth (% of stocks above 20 SMA):</span>
-              <div class="scr-inputs">
-                <span class="scr-unit">&gt;</span>
-                <input type="number" id="scrF35Val" value="50" min="0" max="100" step="5" style="width:70px;">
-                <span class="scr-unit">%</span>
               </div>
             </div>
 
@@ -854,6 +885,11 @@
           <button class="btn btn-secondary ic-layout-btn" data-layout="4x4" onclick="icSetLayout('4x4')" title="4 rows x 4 columns (16 charts)">4×4</button>
           <button class="btn btn-secondary ic-layout-btn" data-layout="1x1" onclick="icSetLayout('1x1')" title="Single chart">1×1</button>
         </div>
+        <div class="ic-pagination" id="icIndNavWrap" style="display:none;" title="Industries in the order of the Industry Analysis table. Up / Down arrow on the Industry Chart and Money Flow tabs (Shift + Up / Down on any tab); wraps round at the ends.">
+          <button class="btn btn-secondary ic-nav-btn" onclick="icStepIndustry(-1)" aria-label="Previous industry">&lsaquo;</button>
+          <span id="icIndNavInfo"></span>
+          <button class="btn btn-secondary ic-nav-btn" onclick="icStepIndustry(1)" aria-label="Next industry">&rsaquo;</button>
+        </div>
         <div class="ic-pagination" id="icPaginationWrap">
           <button class="btn btn-secondary ic-nav-btn" id="icPrevBtn" onclick="icPrevPage()" title="Previous page (Up arrow)" aria-label="Previous page">&lt;</button>
           <span id="icPageInfo"></span>
@@ -1048,7 +1084,15 @@
         <option value="money_flow">Money Flow</option>
         <option value="money_flow_roc">Money Flow Rate of Change</option>
         <option value="ipo">IPOs Listed</option>
+        <option value="ew_sma">EW Chart Above SMA</option>
       </select>
+    </div>
+    <div class="filter-group" id="ewSmaGroup" style="display:none;">
+      <label title="Lists the industries whose equal-weight index (the Industry Chart / Market Overview index) closes above the ticked SMA. Tick both to need both.">EW Chart Above</label>
+      <div class="filter-ticks">
+        <label><input type="checkbox" id="ewSma20" checked onchange="renderIndustryAnalysis()"> 20 SMA</label>
+        <label><input type="checkbox" id="ewSma50" onchange="renderIndustryAnalysis()"> 50 SMA</label>
+      </div>
     </div>
     <div class="filter-group" id="ipoPeriodGroup" style="display:none;">
       <label title="Stocks whose NSE listing date falls in this window, counted per industry.">IPO Period</label>
@@ -1121,17 +1165,7 @@
     </div>
   </div>
 
-  <!-- RS Chart (hidden — replaced by the Money Flow all-periods table below — when
-       the "All-periods table" checkbox is ticked) -->
-  <div id="rsChartSection" style="margin-top:16px;">
-    <h3 id="industryChartTitle" style="font-size:14px; margin-bottom:4px; cursor:help;" title="">Industry Relative Strength</h3>
-      <p id="industryChartTip" style="font-size:11px; color:var(--text2); margin:0 0 10px 0;"></p>
-    <div id="rsChartWrap" style="overflow-x:auto;">
-      <canvas id="rsChart" height="400"></canvas>
-    </div>
-  </div>
-
-  <!-- Money Flow — All Periods (shown in place of the RS Chart above) -->
+  <!-- Money Flow — All Periods (shown when the "All-periods table" box is ticked) -->
   <div id="mfAllPeriodsSection" style="display:none;margin-top:16px;">
     <h3 style="font-size:14px; margin-bottom:10px;">Money Flow — All Periods (Cr)</h3>
     <div class="table-wrap">
@@ -1148,7 +1182,9 @@
       <h3 style="font-size:14px;">Industry Breakdown</h3>
       <span id="indBreakdownNote" style="font-size:11px;color:var(--text2);"></span>
       <button id="indBreakdownReset" class="btn btn-secondary" style="display:none;padding:3px 10px;font-size:11px;" onclick="resetIndustryBreakdownSort()">Reset to filter order</button>
+      <button id="indBreakdownCopy" class="btn btn-secondary" style="padding:3px 10px;font-size:11px;" onclick="copyBreakdownIndustries()" title="Copy the names of the industries listed below (one comma-separated line, like the scanner's watchlist copy). In the Stock Scanner, paste them into the Sector & Industry tab's Industry picker to select them.">Copy industries</button>
     </div>
+    <p id="indMetricNote" style="font-size:11px;color:var(--text2);margin:0 0 10px 0;"></p>
     <div class="table-wrap">
       <table id="industryTable">
         <thead><tr id="industryHead"></tr></thead>
@@ -1378,29 +1414,31 @@
 
 <!-- JS Modules (dependency order matters for const/let declarations) -->
 <script src="js/store.js?v=4"></script>
-<script src="js/utils.js?v=2"></script>
+<script src="js/utils.js?v=4"></script>
 <script src="js/cache.js?v=2"></script>
 <script src="js/data-processor.js?v=2"></script>
 <script src="js/scanner.js?v=2"></script>
-<script src="js/screener.js?v=22"></script>
+<script src="js/screener.js?v=24"></script>
 <script src="js/quarterly-results.js?v=11"></script>
 <script src="js/relative-strength.js?v=3"></script>
 <script src="js/group-breadth.js?v=1"></script>
+<script src="js/group-trend.js?v=1"></script>
+<script src="js/group-select.js?v=4"></script>
 <script src="js/quarterly-chart-table.js?v=2"></script>
-<script src="js/breadth.js?v=16"></script>
+<script src="js/breadth.js?v=19"></script>
 <script src="js/breadth-universe.js?v=2"></script>
 <script src="js/sector.js?v=2"></script>
-<script src="js/industry.js?v=13"></script>
+<script src="js/industry.js?v=17"></script>
 <script src="js/lib/lightweight-charts.standalone.production.js"></script>
 <script src="js/ew-index.js?v=6"></script>
 <script src="js/chart-tools.js?v=6"></script>
-<script src="js/market-overview.js?v=7"></script>
-<script src="js/industry-charts.js?v=24"></script>
+<script src="js/market-overview.js?v=8"></script>
+<script src="js/industry-charts.js?v=25"></script>
 <script src="js/data-quality.js?v=12"></script>
 <script src="js/quarterly-results-fetch.js?v=1"></script>
-<script src="js/presets.js?v=19"></script>
+<script src="js/presets.js?v=21"></script>
 <script src="js/asof-scan.js?v=3"></script>
-<script src="js/ui.js?v=12"></script>
+<script src="js/ui.js?v=13"></script>
 <script src="js/nse-download.js?v=5"></script>
 
 </body>

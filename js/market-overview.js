@@ -22,6 +22,12 @@ const MO_BROAD = [
   'Nifty MidSmallcap 400', 'India VIX',
 ];
 
+// Industries are offered in the same dropdown as an equal-weight index of their constituents (the "Industry Chart"
+// in the chart popup, icComputeIndustryIndex). Their option values carry this prefix so they can't clash with an NSE index name.
+const MO_IND_PREFIX = 'ew-ind:';
+const MO_MIN_IND_STOCKS = 2;
+let _moIndCache = {};      // industry -> { sig, bars, count }
+
 let _moData = null;        // { indexName: [{date, open, high, low, close}] } once loaded
 let _moNames = {};         // lower-case name -> display name as written in the file
 let _moLoadState = 'idle'; // idle | loading | ready | missing
@@ -65,6 +71,36 @@ async function moLoad() {
   }
 }
 
+// industry -> number of stocks in it (latest-day universe), skipping the catch-all bucket and one-stock industries
+function moIndustryCounts() {
+  const counts = {};
+  const latest = (typeof Store !== 'undefined' && Store.latestBySymbol) || {};
+  for (const key in latest) {
+    const ind = latest[key].industry;
+    if (!ind || ind === 'Undefined-Diversified') continue;
+    counts[ind] = (counts[ind] || 0) + 1;
+  }
+  Object.keys(counts).forEach(n => { if (counts[n] < MO_MIN_IND_STOCKS) delete counts[n]; });
+  return counts;
+}
+
+// Daily candles of the industry's equal-weight index, cached until the loaded data changes.
+function moIndustryBars(industry) {
+  const dates = Store.dates || [];
+  const sig = dates.length + '|' + (dates[dates.length - 1] || '');
+  const hit = _moIndCache[industry];
+  if (hit && hit.sig === sig) return hit;
+  const stocks = [];
+  for (const key in Store.latestBySymbol) {
+    const s = Store.latestBySymbol[key];
+    if ((s.industry || 'Undefined-Diversified') === industry) stocks.push(s);
+  }
+  const data = stocks.length ? icComputeIndustryIndex(stocks) : null;
+  const out = { sig, count: stocks.length, bars: data ? data.candleData : [], lastDate: dates[dates.length - 1] || '-' };
+  _moIndCache[industry] = out;
+  return out;
+}
+
 function moPopulateDropdown() {
   const sel = document.getElementById('moIndexSelect');
   if (!sel || sel.options.length) return;
@@ -82,6 +118,13 @@ function moPopulateDropdown() {
   };
   addGroup('Broad Market', MO_BROAD);
   addGroup('Sectors', Object.keys(_moData).filter(n => !used.has(n)).sort((a, b) => a.localeCompare(b)));
+  const inds = Object.keys(moIndustryCounts()).sort((a, b) => a.localeCompare(b));
+  if (inds.length) {
+    const og = document.createElement('optgroup');
+    og.label = 'Industries (Equal-Weight)';
+    inds.forEach(n => og.appendChild(new Option(n, MO_IND_PREFIX + n)));
+    sel.appendChild(og);
+  }
   const def = _moNames[MO_DEFAULT_INDEX.toLowerCase()];
   if (def) sel.value = def;
 }
@@ -163,19 +206,21 @@ async function renderMarketOverview() {
   const name = document.getElementById('moIndexSelect').value;
   const indKey = document.getElementById('moIndicatorSelect').value;
   const cfg = MO_INDICATORS[indKey];
-  const rows = _moData[name] || [];
+  const isIndustry = name.startsWith(MO_IND_PREFIX);
+  const industry = isIndustry ? name.slice(MO_IND_PREFIX.length) : null;
+  const ind = isIndustry ? moIndustryBars(industry) : null;
+  const rows = isIndustry ? [] : (_moData[name] || []);
   // Drawings are anchored to this index's prices, so they don't carry over to another index.
   if (moTools && _moToolsIndex !== name) moTools.clear(0);
   if (moTools && _moToolsIndicator !== indKey) moTools.clear(1); // the indicator's values change with the selection
   _moToolsIndex = name; _moToolsIndicator = indKey;
 
   _moBars = []; _moBarByKey = {};
-  rows.forEach(r => {
+  const addBar = (bar) => { _moBars.push(bar); _moBarByKey[moTimeKey(bar.time)] = bar; };
+  if (isIndustry) ind.bars.forEach(addBar);
+  else rows.forEach(r => {
     const time = ewToBusinessDay(r.date);
-    if (!time) return;
-    const bar = { time, open: r.open, high: r.high, low: r.low, close: r.close };
-    _moBars.push(bar);
-    _moBarByKey[moTimeKey(time)] = bar;
+    if (time) addBar({ time, open: r.open, high: r.high, low: r.low, close: r.close });
   });
   moCandleSeries.setData(_moBars);
 
@@ -203,10 +248,11 @@ async function renderMarketOverview() {
   moIndicatorSeries.applyOptions({ color: cfg.color });
   moIndicatorSeries.setData(_moIndicator);
 
-  document.getElementById('moChartTitle').textContent = `${name} — with % of stocks making ${cfg.label}`;
+  const shown = isIndustry ? industry : name;
+  document.getElementById('moChartTitle').textContent = `${shown}${isIndustry ? ' (Equal-Weight)' : ''} — with % of stocks making ${cfg.label}`;
   const last = rows[rows.length - 1];
   document.getElementById('moSubtitle').textContent =
-    `${rows.length} trading days to ${last ? last.date : '-'} · indicator covers all NSE stocks` +
+    `${isIndustry ? `equal-weight index of ${ind.count} stocks, ${_moBars.length}` : rows.length} trading days to ${isIndustry ? ind.lastDate : (last ? last.date : '-')} · indicator covers all NSE stocks` +
     (_moIndicator.length ? '' : ' · stock history still loading, indicator will appear once it finishes');
   moUpdateLegend(null);
   requestAnimationFrame(() => ewFitWithRightPad(moChart));

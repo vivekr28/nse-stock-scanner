@@ -67,14 +67,8 @@ function populateFilters() {
   });
   populateIndustryFilter();
 
-  // Populate screener F11 sector dropdown
-  const f11Sel = document.getElementById('scrF11Sector');
-  if (f11Sel) {
-    f11Sel.innerHTML = '<option value="">All Sectors</option>';
-    sortedSectors.forEach(s => {
-      f11Sel.innerHTML += `<option value="${s}">${s}</option>`;
-    });
-  }
+  // Screener's Sector (F11) and Industry (F36) pickers: rebuild their lists for the new data (js/group-select.js)
+  if (typeof gsSync === 'function') gsSync();
 }
 
 function populateIndustryFilter() {

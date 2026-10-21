@@ -56,3 +56,35 @@ test('blank lines and a header-only file are handled', () => {
   const out = moParseCsv([HEADER, '', row('Nifty 50', '01-Oct-2026', '1', '2', '0.5', '1.5'), ''].join('\n'));
   assert.equal(out['Nifty 50'].length, 1);
 });
+
+// ── Industries as equal-weight indices in the same dropdown ──
+const sbInd = loadScripts(['js/ew-index.js', 'js/market-overview.js', 'js/industry-charts.js']);
+const stock = (isin, industry) => ({ isin, industry });
+const day = (date, o, h, l, c) => ({ date, open: o, high: h, low: l, close: c, turnover: 10 });
+
+test('industry list skips the catch-all bucket and one-stock industries', () => {
+  sbInd.Store.latestBySymbol = {
+    A: stock('A', 'Steel'), B: stock('B', 'Steel'), C: stock('C', 'Solo'),
+    D: stock('D', 'Undefined-Diversified'), E: stock('E', 'Undefined-Diversified'), F: stock('F', undefined),
+  };
+  assert.deepEqual(JSON.parse(JSON.stringify(sbInd.moIndustryCounts())), { Steel: 2 });
+});
+
+test('industry bars are the equal-weight index of its stocks and are cached per data load', () => {
+  const S = sbInd.Store;
+  S.latestBySymbol = { A: stock('A', 'Steel'), B: stock('B', 'Steel'), C: stock('C', 'Other') };
+  S.dates = ['01-Oct-2026', '02-Oct-2026'];
+  S.dailyBySymbol = {
+    A: [day('01-Oct-2026', 100, 100, 100, 100), day('02-Oct-2026', 110, 110, 110, 110)], // +10%
+    B: [day('01-Oct-2026', 100, 100, 100, 100), day('02-Oct-2026', 90, 90, 90, 90)],     // -10%
+    C: [day('01-Oct-2026', 50, 50, 50, 50), day('02-Oct-2026', 500, 500, 500, 500)],      // not in Steel
+  };
+  const r = sbInd.moIndustryBars('Steel');
+  assert.equal(r.count, 2);
+  assert.equal(r.bars.length, 1);
+  assert.ok(Math.abs(r.bars[0].close - 100) < 1e-9); // +10% and -10% average to flat
+  assert.equal(r.lastDate, '02-Oct-2026');
+  assert.equal(sbInd.moIndustryBars('Steel'), r);    // same data -> cached object
+  S.dates = ['01-Oct-2026'];
+  assert.notEqual(sbInd.moIndustryBars('Steel'), r); // data reloaded -> recomputed
+});
