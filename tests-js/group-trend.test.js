@@ -160,7 +160,8 @@ test('the column: the index\'s % above / below the longest ticked SMA, only whil
 
 test('hooks: gtFilterState / gtActiveCount read the controls (a filter counts only with an SMA ticked); Reset All clears them', () => {
   const dom = setup({ f37: { on: true, lens: [20, 50] }, f38: { on: true, lens: [] } });
-  assert.deepEqual(JSON.parse(JSON.stringify(sb.gtFilterState())), { sec: { on: true, lens: [20, 50] }, ind: { on: false, lens: [] }, any: true });
+  const state = JSON.parse(JSON.stringify(sb.gtFilterState()));
+  assert.deepEqual([state.sec, state.ind, state.any, state.chg.on], [{ on: true, lens: [20, 50] }, { on: false, lens: [] }, true, false]);
   assert.equal(sb.gtActiveCount(), 1);
   sb.gtReset();
   assert.equal(dom.el('scrF37On').checked, false);
@@ -168,6 +169,142 @@ test('hooks: gtFilterState / gtActiveCount read the controls (a filter counts on
   assert.equal(sb.gtActiveCount(), 0);
   assert.equal(sb.gtFilterState().any, false);
 });
+
+// ── F39: Industry EW % Change ────────────────────────────────────────────────────
+
+// An industry's index is its stock's own closes rescaled, so a % change of the index = the % change of the stock's own prices.
+// (DATES[i] is a real day each; the index starts on the 2nd date, the 1st has no prior close.) UP rises 1 a day from 100.
+const iso = i => { const m = MON.indexOf(DATES[i].slice(3, 6)) + 1; return `2026-${String(m).padStart(2, '0')}-${DATES[i].slice(0, 2)}`; };
+
+function setupChg(o = {}) {
+  const dom = setup();
+  dom.el('scrF39On').checked = o.on !== false;
+  dom.el('scrF39FromDate').value = o.from === undefined ? iso(10) : o.from;
+  dom.el('scrF39ToDate').value = o.to === undefined ? iso(40) : o.to;
+  dom.el('scrF39FromField').value = o.ff || 'close';
+  dom.el('scrF39ToField').value = o.tf || 'close';
+  dom.el('scrF39Val').value = o.val === undefined ? '0' : String(o.val);
+  return dom;
+}
+function runChg(o) { setupChg(o); sb.runScreener(); return { passed: Array.from(vm.runInContext('screenerPassed', sb), s => s.symbol).sort(), failed: Object.fromEntries(Array.from(vm.runInContext('screenerFailed', sb), s => [s.symbol, Array.from(s._failReasons).join('|')])), rows: Object.fromEntries(Array.from(vm.runInContext('screenerPassed', sb), s => [s.symbol, s])) }; }
+
+test('F39 pure: % change between two bars on chosen fields; a non-trading date uses the nearest earlier bar', () => {
+  const day = d => new Date(2026, 0, d).getTime();
+  const bars = [10, 11, 12, 13].map((d, i) => ({ ts: day(d), open: 100 + i, high: 110 + i, low: 90 + i, close: 100 + 10 * i }));
+  assert.equal(sb.gtDateChange(bars, day(10), 'close', day(13), 'close').pct, 30);                 // 100 -> 130
+  assert.equal(sb.gtDateChange(bars, day(10), 'low', day(13), 'high').pct, (113 - 90) / 90 * 100);  // chosen fields
+  assert.equal(sb.gtDateChange(bars, day(10), 'close', Infinity, 'close').pct, 30);                 // blank To date = the latest bar
+  assert.equal(sb.gtDateChange(bars, day(10), 'close', day(12) + 1, 'close').pct, 20);              // not a bar: the earlier one
+  assert.equal(sb.gtDateChange(bars, day(1), 'close', day(11), 'close').pct, 10);                    // From before the index starts: its first bar
+});
+
+test('F39 pure: the reasons for no number', () => {
+  const day = d => new Date(2026, 0, d).getTime();
+  const bars = [{ ts: day(10), open: 1, high: 1, low: 1, close: 1 }, { ts: day(11), open: 2, high: 2, low: 2, close: 2 }];
+  assert.match(sb.gtDateChange(bars, NaN, 'close', day(11), 'close').reason, /no From date/);
+  assert.match(sb.gtDateChange(bars, day(11), 'close', day(10), 'close').reason, /after To date/);
+  assert.match(sb.gtDateChange([], day(10), 'close', day(11), 'close').reason, /no index data/);
+  assert.match(sb.gtDateChange(bars, day(3), 'close', day(5), 'close').reason, /no index data in the selected date range/);   // both dates before the index starts
+  assert.match(sb.gtDateChange([{ ts: day(10), open: 0, high: 0, low: 0, close: 0 }], day(10), 'close', day(10), 'close').reason, /missing price/);
+});
+
+test('F39 end to end: industries whose EW index rose at least N% between the dates pass, others fail with the number in the reason', () => {
+  // From bar 10 to bar 40 (the index is the stock rescaled, so its % change is the stock's own): UP 110 -> 140, DIP 120 -> 180, DOWN 190 -> 160, RALLY 280 -> 220
+  const up = (140 - 110) / 110 * 100, dip = (180 - 120) / 120 * 100;
+  let r = runChg({ val: 0 });
+  assert.deepEqual(r.passed, ['DIP', 'UP']);
+  assert.ok(Math.abs(r.rows.UP._gtChg - up) < 1e-9 && Math.abs(r.rows.DIP._gtChg - dip) < 1e-9);
+  assert.match(r.failed.DOWN, /^F39: Industry 'DOWN' EW C→C change -15\.79% < 0%$/);
+  assert.match(r.failed.RALLY, /^F39: Industry 'RALLY' EW C→C change -21\.43% < 0%$/);
+  assert.deepEqual(runChg({ val: 30 }).passed, ['DIP']);                 // UP's 27.27% is under 30
+  assert.deepEqual(runChg({ val: dip - 0.001 }).passed, ['DIP']);   // a hair under DIP's change passes (not the exact number: the index maths is floating point)
+  assert.deepEqual(runChg({ val: 60 }).passed, []);
+});
+
+test('F39 end to end: the chosen fields and a blank To date (= the latest bar)', () => {
+  // bars have o = h = l = c, so the field choice does not move the number here; a blank To date runs to bar 59: UP 110 -> 159
+  const r = runChg({ to: '' });
+  assert.ok(Math.abs(r.rows.UP._gtChg - (159 - 110) / 110 * 100) < 1e-9);
+  assert.deepEqual(runChg({ ff: 'open', tf: 'high' }).passed, ['DIP', 'UP']);
+});
+
+test('F39 end to end: no From date, or From after To, fails every stock with the reason; a group with no index says so', () => {
+  let r = runChg({ from: '' });
+  assert.deepEqual(r.passed, []);
+  assert.match(r.failed.UP, /^F39: Industry 'UP' EW no From date selected$/);
+  r = runChg({ from: iso(40), to: iso(10) });
+  assert.match(r.failed.UP, /EW From date is after To date$/);
+  setupChg();
+  sb.Store.latestBySymbol.NEW = stock('NEW', 'Fresh', 'S9');
+  sb.Store.dailyBySymbol.NEW = [];
+  vm.runInContext('_gtCache = {}', sb);
+  sb.runScreener();
+  const f = Array.from(vm.runInContext('screenerFailed', sb)).find(s => s.symbol === 'NEW');
+  assert.match(Array.from(f._failReasons).join('|'), /F39: Industry 'Fresh' EW has no equal-weight index/);
+});
+
+test('F39 is off: nothing is restricted or recorded; it combines with F38 as AND', () => {
+  const off = runChg({ on: false });
+  assert.deepEqual(off.passed, ALL);
+  assert.equal(off.rows.UP._gtChg, undefined);
+  const dom = setupChg({ val: 0 });
+  dom.el('scrF38On').checked = true; dom.el('scrF38Sma50').checked = true;     // above the 50 SMA: DIP and UP, then F39 >= 0: both
+  sb.runScreener();
+  assert.deepEqual(Array.from(vm.runInContext('screenerPassed', sb), s => s.symbol).sort(), ['DIP', 'UP']);
+  dom.el('scrF39Val').value = '30';
+  sb.runScreener();
+  assert.deepEqual(Array.from(vm.runInContext('screenerPassed', sb), s => s.symbol).sort(), ['DIP']);
+});
+
+test('F39 column, count and reset', () => {
+  const dom = setupChg({ ff: 'low', tf: 'high', val: 5 });
+  assert.deepEqual(Array.from(sb.gtColumns(), c => c.label), ['Ind EW L→H %']);
+  const col = sb.gtColumns()[0];
+  assert.equal(col.fmt(3.456), '+3.46%'); assert.equal(col.fmt(-1), '-1.00%'); assert.equal(col.fmt(NaN), '-');
+  assert.equal(col.cls(5), 'positive'); assert.equal(col.cls(4.9), 'negative');
+  assert.equal(sb.gtActiveCount(), 1);
+  assert.equal(sb.gtFilterState().any, true);
+  sb.gtReset();
+  assert.equal(dom.el('scrF39On').checked, false);
+  assert.equal(dom.el('scrF39FromField').value, 'close');
+  assert.equal(dom.el('scrF39Val').value, '0');
+  assert.equal(sb.gtActiveCount(), 0);
+});
+
+test('F39 dates default to a month of trading days back -> the latest bar, limited to the loaded range', () => {
+  const dom = setup();
+  sb.gtInitDates();
+  assert.equal(dom.el('scrF39ToDate').value, iso(59));
+  assert.equal(dom.el('scrF39FromDate').value, iso(59 - 21));
+  assert.equal(dom.el('scrF39FromDate').min, iso(0));
+  assert.equal(dom.el('scrF39FromDate').max, iso(59));
+});
+
+test('F39 presets: six fields captured and restored, defaults off / close / close / 0', () => {
+  const dom = setupChg({ ff: 'low', tf: 'open', val: 7, from: iso(12), to: iso(30) });
+  const state = JSON.parse(JSON.stringify(sb.capturePresetState()));
+  assert.deepEqual([state.scrF39On, state.scrF39FromDate, state.scrF39FromField, state.scrF39ToDate, state.scrF39ToField, state.scrF39Val],
+    [true, iso(12), 'low', iso(30), 'open', '7']);
+  const defaults = JSON.parse(JSON.stringify(vm.runInContext('DEFAULT_FILTER_STATE', sb)));
+  assert.deepEqual([defaults.scrF39On, defaults.scrF39FromField, defaults.scrF39ToField, defaults.scrF39Val], [false, 'close', 'close', '0']);
+  sb.applyPresetState(defaults);
+  assert.equal(dom.el('scrF39On').checked, false);
+  sb.applyPresetState(state);
+  assert.equal(dom.el('scrF39ToField').value, 'open');
+  assert.equal(dom.el('scrF39ToDate').value, iso(30));
+});
+
+test('F39 in index.html: the last row of the tab, with both dates and field selects; screener.js and ui.js hold none of its logic', () => {
+  const pane = html.slice(html.indexOf('id="scrPaneIndustry"'), html.indexOf('id="scrPaneRelStrength"'));
+  const ids = [...pane.matchAll(/id="(scrF\d+On)"/g)].map(m => m[1]);
+  assert.equal(ids[ids.length - 1], 'scrF39On');
+  for (const id of ['scrF39FromDate', 'scrF39FromField', 'scrF39ToDate', 'scrF39ToField', 'scrF39Val']) assert.ok(pane.includes(`id="${id}"`), id);
+  assert.match(pane, /Industry EW % Change:/);
+  const src = read('js/screener.js');
+  for (const needle of ['scrF39', '_gtChg', 'gtDateChange']) assert.ok(!src.includes(needle), needle);
+  assert.ok(read('js/ui.js').includes("typeof gtInitDates === 'function'"));
+});
+
 
 test('ticking an SMA switches the filter on, unticking the last one switches it off, switching it on with none ticked ticks the 20', () => {
   // js/group-trend.js alone, in a page whose elements record the listeners it registers
