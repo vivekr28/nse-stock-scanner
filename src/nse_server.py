@@ -87,6 +87,19 @@ _tv_state = {
     'results': [],      # [{symbol, exDate, status, factor, note}] for the last run
 }
 
+# And for "Correct from TradingView" on the Price Adjustments Applied tab: turns the saved verification findings into
+# corrections and reprocesses. Never touches TradingView (it only reads the saved result), but it rewrites prices, so
+# it is refused while any TradingView run or a reprocess is going.
+_tv_apply_state = {
+    'status': 'idle',   # 'idle' | 'running' | 'done' | 'error'
+    'step': '',
+    'startedAt': None,
+    'finishedAt': None,
+    'error': None,
+    'stocks': 0,        # stocks corrected by the last run
+    'corrections': 0,   # dated corrections written by the last run
+}
+
 # Same for "Verify against TradingView" (compares our adjusted prices with TradingView's).
 # Shares _tv_lock with the correction run: both drive the one TradingView chart, so only
 # one of them may run at a time.
@@ -1460,6 +1473,23 @@ def save_presets(base_dir, presets):
 
 
 # ─── TradingView correction run (the Data Quality "Adjust prices" button) ────
+def _reprocess_and_publish(base_dir, st):
+    """Reprocess the raw data with the corrections now on disk, save it and rebuild the served caches, reporting
+    progress through the run-state dict `st` (shared by the TradingView correction runs)."""
+    st['step'] = 'Applying corrections...'
+    with _cache_lock:
+        new_data = process_data(base_dir, progress_cb=lambda s: st.__setitem__('step', s))
+        if not new_data:
+            raise RuntimeError('Corrections were saved but reprocessing failed - reprocess manually.')
+        st['step'] = 'Saving processed_data.json...'
+        save_processed_data(base_dir, new_data)
+        NSEHandler._gzipped_data = None
+        NSEHandler._gzipped_lite = None
+        NSEHandler._gzipped_daily = None
+        st['step'] = 'Preparing dashboard data...'
+        NSEHandler._build_cache(base_dir)
+
+
 def run_tv_adjust(base_dir, port):
     """Background worker behind POST /api/tv-adjust/start. For every event currently in the
     Data Quality "Not Price-Adjusted" list: read TradingView's daily bars, derive the
@@ -1541,18 +1571,7 @@ def run_tv_adjust(base_dir, port):
                 os.utime(os.path.join(base_dir, DATA_SUBDIR, PROCESSED_FILE))
 
         if newly_adjusted:
-            st['step'] = 'Applying corrections...'
-            with _cache_lock:
-                new_data = process_data(base_dir, progress_cb=lambda s: st.__setitem__('step', s))
-                if not new_data:
-                    raise RuntimeError('Corrections were saved but reprocessing failed - reprocess manually.')
-                st['step'] = 'Saving processed_data.json...'
-                save_processed_data(base_dir, new_data)
-                NSEHandler._gzipped_data = None
-                NSEHandler._gzipped_lite = None
-                NSEHandler._gzipped_daily = None
-                st['step'] = 'Preparing dashboard data...'
-                NSEHandler._build_cache(base_dir)
+            _reprocess_and_publish(base_dir, st)
 
         st['adjusted'] = newly_adjusted
         if stopped_early:
@@ -1594,6 +1613,116 @@ def adjustments_match(stored, current):
         return False
     a, b = sorted((str(d), float(f)) for d, f in stored), sorted((str(d), float(f)) for d, f in current)
     return all(x[0] == y[0] and abs(x[1] - y[1]) <= 1e-6 * max(1.0, abs(y[1])) for x, y in zip(a, b))
+
+
+# ─── Correcting prices from the verification findings ────────────────────────
+# "Verify against TradingView" explains each major difference as up to 3 level changes in TradingView / ours
+# (tv_adjust._explain_level_changes): at a date, our factor (None = no event of ours) vs TradingView's. Prices before
+# that date are multiplied by tvFactor / ourFactor to land on TradingView's level - an EXTRA factor on top of what is
+# applied now, stored in TradingViewAdjustments.csv like any other correction (so deleting the row undoes it). Only
+# stocks whose saved result still describes their CURRENT adjustments are used, so a stock is never corrected twice
+# from one finding.
+TV_FIX_MIN, TV_FIX_MAX = 0.02, 50        # same plausibility band as tv_adjust.derive_correction
+TV_FIX_TOLERANCE = 0.003
+
+
+def plan_verification_corrections(adjusted_actions, verification):
+    """What "Correct from TradingView" would do: {'stocks': [{isin, symbol, corrections: [{exDate, factor, kind,
+    ourFactor, tvFactor}]}], 'skipped': [{isin, symbol, reason}]} for every stock graded 'major' in the saved
+    verification `verification` (None -> nothing). `adjusted_actions` = processed data's adjustedCorpActions (the
+    stock's current adjustments, to tell a stale result from a current one)."""
+    plan = {'stocks': [], 'skipped': []}
+    current = defaultdict(list)
+    for a in adjusted_actions or []:
+        current[a['isin']].append([a['exDate'], a['factor']])
+    for isin, r in ((verification or {}).get('stocks') or {}).items():
+        if r.get('status') != 'major' or isin not in current:
+            continue
+        symbol = r.get('symbol') or isin
+        if not adjustments_match(r.get('events'), current[isin]):
+            plan['skipped'].append({'isin': isin, 'symbol': symbol, 'reason': 'its adjustments changed since it was verified - verify again'})
+            continue
+        details = r.get('causeDetails') or []
+        if not details:
+            plan['skipped'].append({'isin': isin, 'symbol': symbol, 'reason': 'no single-date cause was found (isolated bars or gradual drift)'})
+            continue
+        fixes, bad = [], None
+        for c in details:
+            ours = c.get('ourFactor') or 1.0
+            tv = c.get('tvFactor')
+            if not tv or tv <= 0 or not parse_date_str(c.get('date')):
+                bad = 'a finding has no usable date or factor'
+                break
+            extra = tv / ours
+            if not TV_FIX_MIN <= extra <= TV_FIX_MAX:
+                bad = f"implausible factor x{extra:.4g} at {c['date']}"
+                break
+            if abs(extra - 1) <= TV_FIX_TOLERANCE:
+                continue
+            fixes.append({'exDate': c['date'], 'factor': round(extra, 6), 'kind': c.get('kind'),
+                          'ourFactor': c.get('ourFactor'), 'tvFactor': tv})
+        if bad:
+            plan['skipped'].append({'isin': isin, 'symbol': symbol, 'reason': bad})
+        elif fixes:
+            plan['stocks'].append({'isin': isin, 'symbol': symbol, 'corrections': fixes})
+    plan['stocks'].sort(key=lambda x: x['symbol'])
+    return plan
+
+
+def apply_verification_plan(base_dir, plan, stamp):
+    """Write the plan into TradingViewAdjustments.csv. A correction on a date that already has an applied row there
+    multiplies that row's factor (the product is what prices are scaled by); any other row at that date (a
+    'tv-unadjusted' / 'inconclusive' note) is replaced. Returns the number of dated corrections written."""
+    rows = {correction_key(r['symbol'], r['exDate']): r for r in load_tv_corrections(base_dir)}
+    n = 0
+    for st in plan['stocks']:
+        for c in st['corrections']:
+            key = correction_key(st['symbol'], c['exDate'])
+            old = rows.get(key)
+            note = (f"TradingView verification: x{c['factor']:.5g} on top of the dashboard's x{c['ourFactor'] or 1:.5g} "
+                    f"(TradingView x{c['tvFactor']:.5g})")
+            if old and old['status'] == 'adjusted' and old['factor']:
+                rows[key] = {**old, 'factor': old['factor'] * c['factor'], 'checkedAt': stamp,
+                             'note': ((old['note'] + ' | ') if old['note'] else '') + note}
+            else:
+                rows[key] = {'isin': st['isin'], 'symbol': st['symbol'], 'exDate': c['exDate'], 'factor': c['factor'],
+                             'status': 'adjusted', 'checkedAt': stamp, 'note': note}
+            n += 1
+    if n:
+        save_tv_corrections(base_dir, list(rows.values()))
+    return n
+
+
+def run_tv_apply(base_dir):
+    """Background worker behind POST /api/tv-apply/start: plan from the saved verification, write the corrections,
+    reprocess. Does not need TradingView (the findings are already saved)."""
+    st = _tv_apply_state
+    try:
+        st['step'] = 'Reading the verification result...'
+        with _cache_lock:
+            data = load_processed_data(base_dir)
+        if not data:
+            raise RuntimeError('No processed data available yet - reprocess first.')
+        plan = plan_verification_corrections(data.get('adjustedCorpActions'), load_verification(base_dir))
+        data = None
+        if not plan['stocks']:
+            st['step'] = 'Nothing to correct - no major difference has a usable TradingView finding.'
+            st['status'] = 'done'
+            return
+        st['corrections'] = apply_verification_plan(base_dir, plan, datetime.now().strftime('%Y-%m-%d %H:%M'))
+        st['stocks'] = len(plan['stocks'])
+        _reprocess_and_publish(base_dir, st)
+        st['step'] = (f"Corrected {st['stocks']} stock{'s' if st['stocks'] != 1 else ''} "
+                      f"({st['corrections']} dated correction{'s' if st['corrections'] != 1 else ''}) - verify again to confirm.")
+        st['status'] = 'done'
+    except (RuntimeError, OSError, ValueError, KeyError) as e:
+        st['status'] = 'error'
+        st['error'] = str(e)
+    except Exception as e:  # never leave the UI stuck on "running"
+        st['status'] = 'error'
+        st['error'] = f'Unexpected error: {e}'
+    finally:
+        st['finishedAt'] = time.time()
 
 
 def _verify_stock(chart, symbol, ours, events):
@@ -2250,6 +2379,10 @@ class NSEHandler(http.server.SimpleHTTPRequestHandler):
             self._serve_tv_verify_status()
         elif path == '/api/tv-full/status':
             self._serve_tv_full_status()
+        elif path == '/api/tv-apply/status':
+            self._send_json(_tv_apply_state)
+        elif path == '/api/tv-apply/preview':
+            self._serve_tv_apply_preview()
         elif path == '/api/sector-mapping/status':
             self._serve_sector_status()
         elif path == '/api/quarterly-results/status':
@@ -2275,6 +2408,8 @@ class NSEHandler(http.server.SimpleHTTPRequestHandler):
             self._handle_tv_verify_start()
         elif parsed.path == '/api/tv-full/start':
             self._handle_tv_full_start()
+        elif parsed.path == '/api/tv-apply/start':
+            self._handle_tv_apply_start()
         elif parsed.path == '/api/tv-full/stop':
             self._handle_tv_full_stop()
         elif parsed.path == '/api/sector-mapping/start':
@@ -2745,6 +2880,35 @@ class NSEHandler(http.server.SimpleHTTPRequestHandler):
         verify_all = 'all' in parse_qs(urlparse(self.path).query)
         threading.Thread(target=run_tv_verify, args=(self.server.base_dir, self.server.tv_port, verify_all),
                          daemon=True).start()
+        self._send_json({'ok': True, 'started': True})
+
+    def _serve_tv_apply_preview(self):
+        """GET /api/tv-apply/preview - what "Correct from TradingView" would change (plan_verification_corrections),
+        for the confirmation dialog. Read-only."""
+        with _cache_lock:
+            data = load_processed_data(self.server.base_dir)
+        self._send_json(plan_verification_corrections((data or {}).get('adjustedCorpActions'), load_verification(self.server.base_dir)))
+
+    def _handle_tv_apply_start(self):
+        """POST /api/tv-apply/start - correct every 'major' stock of the saved verification from its TradingView
+        findings, in a background thread (rewrites prices). Same same-origin header rule as the other TradingView
+        endpoints; refused while a TradingView run or a reprocess is going."""
+        if self.headers.get('X-Requested-With') != 'nse-dashboard':
+            self._send_json({'ok': False, 'error': 'Forbidden'}, 403)
+            return
+        with _tv_lock:
+            if _tv_apply_state['status'] == 'running':
+                self._send_json({'ok': True, 'alreadyRunning': True})
+                return
+            if any(x['status'] == 'running' for x in (_tv_state, _tv_verify_state, _tv_full_state)):
+                self._send_json({'ok': False, 'error': 'A TradingView run is in progress - try again when it finishes.'}, 409)
+                return
+            if _reprocess_state['status'] == 'running':
+                self._send_json({'ok': False, 'error': 'A data refresh/reprocess is running - try again when it finishes.'}, 409)
+                return
+            _tv_apply_state.update(status='running', step='Starting...', startedAt=time.time(), finishedAt=None,
+                                   error=None, stocks=0, corrections=0)
+        threading.Thread(target=run_tv_apply, args=(self.server.base_dir,), daemon=True).start()
         self._send_json({'ok': True, 'started': True})
 
     def _serve_tv_verify_status(self):

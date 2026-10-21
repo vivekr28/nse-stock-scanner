@@ -288,7 +288,7 @@ async function dqPollTvAdjust() {
 // closes with TradingView's over their whole shared history and grade each stock
 // (match / minor / major / inconclusive). Read-only - no price changes, so no reload.
 // The last result is saved server-side, so the flags survive reloads and restarts.
-let _dqVerify = { last: null, polling: false, showVerified: false };
+let _dqVerify = { last: null, polling: false, showVerified: false, fixing: false };
 
 // Problems first, then stocks still waiting for a check, then (if shown) the ones that verified.
 const DQ_VERIFY_RANK = { major: 0, minor: 1, inconclusive: 2, pending: 3, match: 4 };
@@ -358,6 +358,12 @@ function dqRenderAdjusted() {
   }
   const verifiedEl = document.getElementById('dqTvVerifiedCount');
   if (verifiedEl) verifiedEl.textContent = counts.match;
+  const fixRow = document.getElementById('dqTvFixRow');
+  if (fixRow) {
+    fixRow.style.display = counts.major ? 'flex' : 'none';
+    const fixBtn = document.getElementById('dqTvFixBtn');
+    if (fixBtn && !_dqVerify.fixing) fixBtn.textContent = `Correct ${counts.major} major difference${counts.major === 1 ? '' : 's'} from TradingView`;
+  }
 
   const t = document.getElementById('dqAdjustedTable');
   t.querySelector('thead tr').innerHTML =
@@ -474,6 +480,71 @@ async function dqPollTvVerify() {
   } finally {
     _dqVerify.polling = false;
     if (btn) btn.disabled = false;
+  }
+}
+
+// ── Correct the MAJOR differences from TradingView ──
+// The server turns each major stock's saved finding ("TradingView adjusts by xF at date D, we apply xG") into an extra
+// factor F/G on prices before D (reference-data/TradingViewAdjustments.csv) and reprocesses. No TradingView needed:
+// the findings are already saved. Asks first, listing what will change; verify again afterwards to confirm.
+const DQ_FIX_KIND = {
+  'tv-extra-adjustment': 'TradingView adjusts, we have no event',
+  'adjustments-differ': 'our adjustment differs',
+  'tv-no-adjustment': "TradingView doesn't adjust - undoes ours",
+};
+
+// The confirmation text for a server plan {stocks: [{symbol, corrections: [{exDate, factor, kind}]}], skipped: [{symbol, reason}]}
+function dqTvFixSummary(plan) {
+  const lines = (plan.stocks || []).map(s =>
+    `${s.symbol}: ` + s.corrections.map(c => `×${Number(c.factor).toPrecision(5).replace(/\.?0+$/, '')} before ${c.exDate} (${DQ_FIX_KIND[c.kind] || c.kind})`).join('; '));
+  let text = `Correct ${lines.length} stock${lines.length === 1 ? '' : 's'} from TradingView?\n\n` + lines.join('\n');
+  const skipped = plan.skipped || [];
+  if (skipped.length) text += `\n\nNot corrected (${skipped.length}): ` + skipped.map(s => `${s.symbol} — ${s.reason}`).join('; ');
+  return text + '\n\nPrices are rewritten and the data reprocessed (about a minute). Verify again afterwards to confirm.';
+}
+
+function dqSetFixStatus(text, kind) {
+  const el = document.getElementById('dqTvFixStatus');
+  if (!el) return;
+  el.textContent = text;
+  el.style.color = kind === 'error' ? 'var(--red)' : kind === 'ok' ? 'var(--green)' : 'var(--text2)';
+}
+
+async function dqRunTvFix() {
+  const btn = document.getElementById('dqTvFixBtn');
+  btn.disabled = true;
+  _dqVerify.fixing = true;
+  dqSetFixStatus('Working out the corrections…');
+  try {
+    const presp = await fetch('/api/tv-apply/preview', { cache: 'no-store' });
+    if (!presp.ok) throw new Error(`Server returned HTTP ${presp.status}`);
+    const plan = await presp.json();
+    if (!(plan.stocks || []).length) {
+      const sk = (plan.skipped || []).map(s => `${s.symbol} — ${s.reason}`).join('; ');
+      dqSetFixStatus('Nothing can be corrected from the saved verification.' + (sk ? ' ' + sk : ''), 'error');
+      return;
+    }
+    if (!confirm(dqTvFixSummary(plan))) { dqSetFixStatus(''); return; }
+    const resp = await fetch('/api/tv-apply/start', { method: 'POST', headers: { 'X-Requested-With': 'nse-dashboard' } });
+    const j = await resp.json().catch(() => ({}));
+    if (!resp.ok || j.ok === false) throw new Error(j.error || `Server returned HTTP ${resp.status}`);
+    for (;;) {
+      const s = await (await fetch('/api/tv-apply/status', { cache: 'no-store' })).json();
+      if (s.status === 'running') { dqSetFixStatus(s.step); await new Promise(r => setTimeout(r, 600)); continue; }
+      if (s.status === 'error') { dqSetFixStatus(s.error || 'Correction failed.', 'error'); return; }
+      dqSetFixStatus(s.step + ' Reloading the dashboard data…', 'ok');
+      try {
+        sessionStorage.setItem('nseReopenTab', 'dataquality');
+        sessionStorage.setItem('nseReopenDqTab', 'dqAdjusted');
+      } catch (e) { /* storage blocked - the reload just lands on the default tab */ }
+      setTimeout(() => location.reload(), 1500);
+      return;   // the button stays disabled until the page reloads
+    }
+  } catch (e) {
+    dqSetFixStatus(e.message, 'error');
+  } finally {
+    _dqVerify.fixing = false;
+    if (!/Reloading/.test((document.getElementById('dqTvFixStatus') || {}).textContent || '')) btn.disabled = false;
   }
 }
 
