@@ -1324,6 +1324,10 @@
       <button id="dqTvVerifyBtn" class="btn btn-primary" onclick="dqRunTvVerify()">Verify against TradingView</button>
       <span id="dqTvVerifyStatus" style="font-size:12px;color:var(--text2);"></span>
     </div>
+    <div id="dqTvFixRow" style="display:none;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 10px;">
+      <button id="dqTvFixBtn" class="btn btn-secondary" onclick="dqRunTvFix()" title="For every stock graded MAJOR below, apply the level changes TradingView shows (read from the last verification, no TradingView needed) as extra corrections in reference-data/TradingViewAdjustments.csv, then reprocess. Verify again afterwards to confirm. Delete a row from that file to undo it.">Correct major differences from TradingView</button>
+      <span id="dqTvFixStatus" style="font-size:12px;color:var(--text2);"></span>
+    </div>
     <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin:0 0 6px;font-size:12px;color:var(--text2);">
       <label style="display:flex;align-items:center;gap:6px;font-weight:400;cursor:pointer;">
         <input type="checkbox" id="dqTvShowVerified" onchange="dqToggleShowVerified(this.checked)"> Show verified stocks (<span id="dqTvVerifiedCount">0</span>)
@@ -1434,7 +1438,7 @@
 <script src="js/chart-tools.js?v=6"></script>
 <script src="js/market-overview.js?v=8"></script>
 <script src="js/industry-charts.js?v=25"></script>
-<script src="js/data-quality.js?v=12"></script>
+<script src="js/data-quality.js?v=13"></script>
 <script src="js/quarterly-results-fetch.js?v=1"></script>
 <script src="js/presets.js?v=21"></script>
 <script src="js/asof-scan.js?v=3"></script>
