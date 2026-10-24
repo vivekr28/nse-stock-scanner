@@ -34,7 +34,7 @@ def test_growth_is_latest_quarter_against_the_same_quarter_a_year_earlier(tmp_pa
                row('AAA', '31-Dec-2023', 100, 10),
                row('AAA', '31-Mar-2024', 999, 999),   # other quarters in between must not be used
                row('AAA', '31-Dec-2024', 130, 15))
-    assert {k: v for k, v in g['aaa'].items() if k != 'h'} == {
+    assert {k: v for k, v in g['aaa'].items() if k not in ('h', 'yy')} == {
         'q': '2024-12-31', 'b': 'C', 'cmp': 'ok', 's': 130.0, 'sp': 100.0, 'e': 15.0, 'ep': 10.0,
         'sg': 30.0, 'eg': 50.0, 'st': False, 'et': False}
 

@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// QUARTERLY RESULTS — the Stock Scanner's "Quarterly Results" filter tab (F20 - F23): data, filter logic, scanner hooks
+// QUARTERLY RESULTS — the Stock Scanner's "Quarterly Results" filter tab (F20 - F23, F28 - F29, F32 - F33, F40): data, filter logic, scanner hooks
 //
 // Three files, one feature:  this one (loading the numbers, the filters, the hooks the scanner calls);
 //   js/quarterly-chart-table.js (the table over the single-stock chart);  src/quarterly_results.py (the server side).
@@ -70,16 +70,13 @@ function qrFmtCr(v) { return Number(v).toLocaleString('en-IN', { maximumFraction
 // Growth is only defined when the result can be compared like for like with a POSITIVE year-ago figure, so a stock that
 // was loss-making a year ago fails the growth filters with a reason saying so, rather than a made-up %. That case is what
 // the two turnaround filters are for: they are kept separate and never use a percentage.
-function qrFailReasons(symbol, f20, f21, f22, f23, f26, f27) {
+function qrFailReasons(symbol, f20, f21, f22, f23) {
   const reasons = [];
   const checks = [];
   if (f20 && f20.on) checks.push({ code: 'F20', name: 'Earnings', kind: 'growth', g: 'eg', cur: 'e', min: f20.min });
   if (f21 && f21.on) checks.push({ code: 'F21', name: 'Sales', kind: 'growth', g: 'sg', cur: 's', min: f21.min });
   if (f22 && f22.on) checks.push({ code: 'F22', name: 'Earnings', kind: 'turnaround', flag: 'et', cur: 'e', prev: 'ep' });
   if (f23 && f23.on) checks.push({ code: 'F23', name: 'Sales', kind: 'turnaround', flag: 'st', cur: 's', prev: 'sp' });
-  // F26 / F27: the same growth tests as F20 / F21, but only for stocks that have declared the NEWEST quarter on file
-  if (f26 && f26.on) checks.push({ code: 'F26', name: 'Earnings', kind: 'growth', g: 'eg', cur: 'e', min: f26.min, latest: true });
-  if (f27 && f27.on) checks.push({ code: 'F27', name: 'Sales', kind: 'growth', g: 'sg', cur: 's', min: f27.min, latest: true });
   if (!checks.length) return reasons;
 
   const rec = qrLookup(symbol);
@@ -88,7 +85,6 @@ function qrFailReasons(symbol, f20, f21, f22, f23, f26, f27) {
     if (!Store.quarterly) { reasons.push(`${c.code}: No quarterly results file (run Download-NSE-Bhavcopy.ps1 -FetchResults)`); continue; }
     if (!rec) { reasons.push(`${c.code}: No quarterly results for this stock`); continue; }
     const q = qrQuarterLabel(rec.q);
-    if (c.latest && rec.q !== Store.quarterly.latestQuarter) { reasons.push(`${c.code}: No ${qrQuarterLabel(Store.quarterly.latestQuarter)} result yet (its latest is ${q})`); continue; }
     if (rec.cmp === 'no-prev') { reasons.push(`${c.code}: No ${q} result from the year before to compare with`); continue; }
     if (rec.cmp === 'basis') { reasons.push(`${c.code}: ${q} and last year's quarter are on different bases (standalone vs consolidated)`); continue; }
     if (rec.cmp === 'blank') { reasons.push(`${c.code}: ${q} result numbers unavailable`); continue; }
@@ -122,17 +118,32 @@ function qrFailReasons(symbol, f20, f21, f22, f23, f26, f27) {
   return reasons;
 }
 
-// F28 "QoQ Earnings" and F29 "QoQ Sales": growth of the stock's latest declared quarter against the quarter BEFORE it (a sequential step,
-// not the year-ago comparison F20 / F21 make), strictly above X %. F30 / F31 are the same two tests restricted to stocks that have declared
-// the NEWEST quarter any company has declared (like F26 / F27 are to F20 / F21): a stock whose latest result is an older quarter is left
-// out. Each is { on, min }. Returns the reasons a stock fails the ones that are on ([] = passes).
-// A stock whose previous quarter is missing, or had zero / negative profit (or no sales), has no sequential % and fails with that reason.
-function qrQoqReasons(symbol, f28, f29, f30, f31) {
-  const checks = [];
-  if (f28 && f28.on) checks.push({ code: 'F28', name: 'Earnings', key: 'qe', min: f28.min, missing: 'the previous quarter is missing, zero or a loss' });
-  if (f29 && f29.on) checks.push({ code: 'F29', name: 'Sales', key: 'qs', min: f29.min, missing: 'the previous quarter is missing or had no sales' });
-  if (f30 && f30.on) checks.push({ code: 'F30', name: 'Earnings', key: 'qe', min: f30.min, missing: 'the previous quarter is missing, zero or a loss', latest: true });
-  if (f31 && f31.on) checks.push({ code: 'F31', name: 'Sales', key: 'qs', min: f31.min, missing: 'the previous quarter is missing or had no sales', latest: true });
+// The quarter before a quarter-end, as an ISO date in that quarter ('2026-06-30' -> '2026-03-01'; only the year-month is used)
+function qrPrevQuarter(iso) {
+  const m = /^(\d{4})-(\d{2})/.exec(iso || '');
+  if (!m) return '';
+  let y = Number(m[1]), mo = Number(m[2]) - 3;
+  if (mo < 1) { mo += 12; y -= 1; }
+  return `${y}-${String(mo).padStart(2, '0')}-01`;
+}
+
+// '+384.0%' / '-33.0%'
+function qrFmtPct(v) { return (v >= 0 ? '+' : '') + v.toFixed(1) + '%'; }
+
+// The two YoY percentages a stock's latest quarter and the quarter before it have, [now, a quarter ago] (each may be null), for the
+// earnings (EPS) or the sales; null when the record carries none
+function qrYoyPair(rec, earnings) {
+  const y = rec && Array.isArray(rec.yy) ? rec.yy : null;
+  return y ? (earnings ? [y[0], y[1]] : [y[2], y[3]]) : null;
+}
+
+// The "against the previous quarter" filters compare YoY % with YoY %, never raw figures: each quarter's % is its own change on the same
+// quarter a year earlier (the numbers the chart table shows). F28 "EPS YoY% change" / F29 "Sales YoY% change": the latest quarter's YoY %
+// minus the previous quarter's, in percentage points, strictly above X (Jun-2026 +384% against Mar-2026 +3% = +381 pts). F32 / F33 are the
+// turnarounds: the YoY % was NEGATIVE in the previous quarter and is POSITIVE now (Dec-2025 -33%, Mar-2026 +3%). Each stock is judged on its own
+// latest declared quarter (F40 restricts them to the newest). A quarter with no YoY % (no result, or a loss / zero year-ago base) cannot be
+// compared and fails with that reason. checks: [{ code, earnings, min? }]; returns the reasons ([] = passes).
+function qrYoyReasons(symbol, checks) {
   const reasons = [];
   if (!checks.length) return reasons;
   const rec = qrLookup(symbol);
@@ -140,56 +151,61 @@ function qrQoqReasons(symbol, f28, f29, f30, f31) {
     if (Store.quarterlyState === 'loading') { reasons.push(`${c.code}: Quarterly results still loading`); continue; }
     if (!Store.quarterly) { reasons.push(`${c.code}: No quarterly results file (run Download-NSE-Bhavcopy.ps1 -FetchResults)`); continue; }
     if (!rec) { reasons.push(`${c.code}: No quarterly results for this stock`); continue; }
-    const q = qrQuarterLabel(rec.q), v = rec[c.key];
-    if (c.latest && rec.q !== Store.quarterly.latestQuarter) { reasons.push(`${c.code}: No ${qrQuarterLabel(Store.quarterly.latestQuarter)} result yet (its latest is ${q})`); continue; }
-    if (v === undefined || v === null) reasons.push(`${c.code}: No ${q} ${c.name.toLowerCase()} growth vs the previous quarter (${c.missing})`);
-    else if (!(v > c.min)) reasons.push(`${c.code}: ${c.name} ${q} ${v >= 0 ? '+' : ''}${v.toFixed(1)}% vs the previous quarter, not > ${c.min}%`);
+    const q = qrQuarterLabel(rec.q), pq = qrQuarterLabel(qrPrevQuarter(rec.q)), name = c.earnings ? 'EPS' : 'Sales';
+    const pair = qrYoyPair(rec, c.earnings);
+    if (!pair) { reasons.push(`${c.code}: No ${pq} result on file to compare ${q} with`); continue; }
+    const [now, prev] = pair;
+    const missing = (v, label) => v === null || v === undefined
+      ? `${c.code}: No ${name} YoY % for ${label} (no result for it or the same quarter a year earlier, or that year-ago figure was a loss / zero)` : '';
+    const why = missing(now, q) || missing(prev, pq);
+    if (why) { reasons.push(why); continue; }
+    if (c.turnaround) {
+      if (prev < 0 && now > 0) continue;   // passes
+      reasons.push(prev >= 0
+        ? `${c.code}: Not ${c.earnings ? 'an' : 'a'} ${name} turnaround - YoY was already ${qrFmtPct(prev)} in ${pq}`
+        : `${c.code}: Not ${c.earnings ? 'an' : 'a'} ${name} turnaround - YoY is still ${qrFmtPct(now)} in ${q} (${qrFmtPct(prev)} in ${pq})`);
+    } else {
+      const d = Math.round((now - prev) * 100) / 100;
+      if (!(d > c.min)) reasons.push(`${c.code}: ${name} YoY went from ${qrFmtPct(prev)} (${pq}) to ${qrFmtPct(now)} (${q}): ${d >= 0 ? '+' : ''}${d.toFixed(1)} pts, not > ${c.min} pts`);
+    }
   }
   return reasons;
 }
 
-// F32 "QoQ Earnings turnaround" (a LOSS in the previous quarter, a profit now) and F33 "QoQ Sales turnaround" (NO sales in the previous quarter,
-// some now): the sequential twins of F22 / F23, kept apart from F28 / F29 because a growth % needs a positive base. No % is used. They judge
-// the stock's own latest declared quarter against the quarter before it; the server's qet / qst flags decide, qp carries the amounts for the
-// reasons. A stock with no previous quarter on file, or none on a basis both quarters hold, fails with that reason.
-function qrQoqTurnaroundReasons(symbol, f32, f33) {
+// F28 / F29: { on, min }
+function qrYoyChangeReasons(symbol, f28, f29) {
   const checks = [];
-  if (f32 && f32.on) checks.push({ code: 'F32', earnings: true });
-  if (f33 && f33.on) checks.push({ code: 'F33', earnings: false });
-  const reasons = [];
-  if (!checks.length) return reasons;
+  if (f28 && f28.on) checks.push({ code: 'F28', earnings: true, min: f28.min });
+  if (f29 && f29.on) checks.push({ code: 'F29', earnings: false, min: f29.min });
+  return qrYoyReasons(symbol, checks);
+}
+
+// F32 / F33: { on }
+function qrYoyTurnaroundReasons(symbol, f32, f33) {
+  const checks = [];
+  if (f32 && f32.on) checks.push({ code: 'F32', earnings: true, turnaround: true });
+  if (f33 && f33.on) checks.push({ code: 'F33', earnings: false, turnaround: true });
+  return qrYoyReasons(symbol, checks);
+}
+
+// F40 "Stocks with <newest quarter> results": only a stock that has declared the NEWEST quarter any company has declared
+// (Store.quarterly.latestQuarter) can pass. Off, each filter judges a stock on whatever its own latest quarter is.
+function qrLatestReasons(symbol, f40) {
+  if (!f40 || !f40.on) return [];
+  if (Store.quarterlyState === 'loading') return ['F40: Quarterly results still loading'];
+  if (!Store.quarterly) return ['F40: No quarterly results file (run Download-NSE-Bhavcopy.ps1 -FetchResults)'];
   const rec = qrLookup(symbol);
-  for (const c of checks) {
-    if (Store.quarterlyState === 'loading') { reasons.push(`${c.code}: Quarterly results still loading`); continue; }
-    if (!Store.quarterly) { reasons.push(`${c.code}: No quarterly results file (run Download-NSE-Bhavcopy.ps1 -FetchResults)`); continue; }
-    if (!rec) { reasons.push(`${c.code}: No quarterly results for this stock`); continue; }
-    const q = qrQuarterLabel(rec.q), p = rec.qp;
-    if (!Array.isArray(p)) {
-      reasons.push(`${c.code}: ` + (p === null ? `${q} and the previous quarter are on different bases (standalone vs consolidated)` : `No quarter before ${q} on file to compare with`));
-      continue;
-    }
-    if (c.earnings) {
-      if (rec.qet) continue;                                               // passes
-      const prev = p[0], cur = p[2];
-      if (prev > 0) reasons.push(`F32: Not an earnings turnaround - ${q} profit was already positive in the previous quarter (${qrFmtCr(prev)} cr)`);
-      else if (prev === 0) reasons.push('F32: Not an earnings turnaround - profit in the previous quarter was zero, not a loss');
-      else reasons.push(`F32: Not an earnings turnaround - still loss-making (${qrFmtCr(cur)} cr vs ${qrFmtCr(prev)} cr the quarter before)`);
-    } else {
-      if (rec.qst) continue;
-      const prev = p[1];
-      if (prev > 0) reasons.push(`F33: Not a sales turnaround - ${q} sales were already positive in the previous quarter (${qrFmtCr(prev)} cr)`);
-      else reasons.push('F33: Not a sales turnaround - no sales this quarter either');
-    }
-  }
-  return reasons;
+  const newest = qrQuarterLabel(Store.quarterly.latestQuarter);
+  if (!rec) return [`F40: No quarterly results for this stock`];
+  return rec.q === Store.quarterly.latestQuarter ? [] : [`F40: No ${newest} result yet (its latest is ${qrQuarterLabel(rec.q)})`];
 }
 
 // ── Hooks for the Stock Scanner (js/screener.js calls these, each guarded by typeof - the same way it calls the As of Date
-// module's) - so the scanner itself knows nothing about the four filters' controls, fields or columns. ──────────────────
+// module's) - so the scanner itself knows nothing about the filters' controls, fields or columns. ──────────────────
 
-const QR_FILTER_IDS = ['scrF20On', 'scrF21On', 'scrF22On', 'scrF23On', 'scrF26On', 'scrF27On', 'scrF28On', 'scrF29On', 'scrF30On', 'scrF31On', 'scrF32On', 'scrF33On'];
+const QR_FILTER_IDS = ['scrF20On', 'scrF21On', 'scrF22On', 'scrF23On', 'scrF28On', 'scrF29On', 'scrF32On', 'scrF33On', 'scrF40On'];
 
-// The four filters as the scanner should apply them now: { f20:{on,min}, f21:{on,min}, f22:{on}, f23:{on}, any }
+// The filters as the scanner should apply them now: { f20:{on,min}, f21:{on,min}, f22:{on}, f23:{on}, f28 / f29:{on,min}, f32 / f33 / f40:{on}, any }
 function qrFilterState() {
   const on = id => { const el = document.getElementById(id); return !!(el && el.checked); };
   const num = id => { const el = document.getElementById(id); return el ? parseFloat(el.value) || 0 : 0; };
@@ -198,16 +214,13 @@ function qrFilterState() {
     f21: { on: on('scrF21On'), min: num('scrF21Val') },
     f22: { on: on('scrF22On') },
     f23: { on: on('scrF23On') },
-    f26: { on: on('scrF26On'), min: num('scrF26Val') },
-    f27: { on: on('scrF27On'), min: num('scrF27Val') },
     f28: { on: on('scrF28On'), min: num('scrF28Val') },
     f29: { on: on('scrF29On'), min: num('scrF29Val') },
-    f30: { on: on('scrF30On'), min: num('scrF30Val') },
-    f31: { on: on('scrF31On'), min: num('scrF31Val') },
     f32: { on: on('scrF32On') },
     f33: { on: on('scrF33On') },
+    f40: { on: on('scrF40On') },
   };
-  s.any = s.f20.on || s.f21.on || s.f22.on || s.f23.on || s.f26.on || s.f27.on || s.f28.on || s.f29.on || s.f30.on || s.f31.on || s.f32.on || s.f33.on;
+  s.any = s.f20.on || s.f21.on || s.f22.on || s.f23.on || s.f28.on || s.f29.on || s.f32.on || s.f33.on || s.f40.on;
   return s;
 }
 
@@ -224,17 +237,20 @@ function qrApplyToStock(stock, state) {
   stock._qrProfitPrev = rec ? num(rec.ep) : NaN;
   stock._qrSalesNow = rec ? num(rec.s) : NaN;
   stock._qrSalesPrev = rec ? num(rec.sp) : NaN;
-  stock._qrQoqE = rec ? num(rec.qe) : NaN;                         // profit vs the previous quarter, %
-  stock._qrQoqS = rec ? num(rec.qs) : NaN;                         // sales vs the previous quarter, %
-  const qp = rec && Array.isArray(rec.qp) ? rec.qp : null;         // [previous profit, previous sales, profit now, sales now], Rs crore
-  stock._qrQPrevE = qp ? qp[0] : NaN; stock._qrQPrevS = qp ? qp[1] : NaN;
-  stock._qrQNowE = qp ? qp[2] : NaN; stock._qrQNowS = qp ? qp[3] : NaN;
-  return qrFailReasons(stock.symbol, state.f20, state.f21, state.f22, state.f23, state.f26, state.f27)
-    .concat(qrQoqReasons(stock.symbol, state.f28, state.f29, state.f30, state.f31))
-    .concat(qrQoqTurnaroundReasons(stock.symbol, state.f32, state.f33));
+  const yoy = (earnings) => {                                       // the YoY % now and a quarter ago, and the change between them (percentage points)
+    const p = qrYoyPair(rec, earnings), has = v => v !== null && v !== undefined;
+    return p ? { now: num(p[0]), prev: num(p[1]), change: has(p[0]) && has(p[1]) ? Math.round((p[0] - p[1]) * 100) / 100 : NaN } : { now: NaN, prev: NaN, change: NaN };
+  };
+  const ye = yoy(true), ys = yoy(false);
+  stock._qrYyNowE = ye.now; stock._qrYyPrevE = ye.prev; stock._qrAccE = ye.change;
+  stock._qrYyNowS = ys.now; stock._qrYyPrevS = ys.prev; stock._qrAccS = ys.change;
+  return qrLatestReasons(stock.symbol, state.f40)
+    .concat(qrFailReasons(stock.symbol, state.f20, state.f21, state.f22, state.f23))
+    .concat(qrYoyChangeReasons(stock.symbol, state.f28, state.f29))
+    .concat(qrYoyTurnaroundReasons(stock.symbol, state.f32, state.f33));
 }
 
-// How many of the four filters are switched on (the scanner adds it to its active-filter count and badge)
+// How many of the Quarterly Results filters are switched on (the scanner adds it to its active-filter count and badge)
 function qrActiveCount() {
   return QR_FILTER_IDS.filter(id => { const el = document.getElementById(id); return !!(el && el.checked); }).length;
 }
@@ -248,49 +264,52 @@ function qrUpdateBadge() {
   badge.style.display = n > 0 ? 'inline-block' : 'none';
 }
 
-// Extra table columns for the filters that are on ([] when none): the quarter used, the two growth %s, and for the turnaround
-// filters the two amounts (Rs crore, year ago -> now; those columns sort by this quarter's figure)
+// Extra table columns for the filters that are on ([] when none): the quarter used, the YoY growth %s, for the previous-quarter filters the
+// YoY % a quarter ago -> now (and the change in points), and for the year-ago turnaround filters the two amounts (Rs crore, year ago -> now;
+// those columns sort by this quarter's figure)
 function qrColumns() {
   const s = qrFilterState();
   if (!s.any) return [];
   const cols = [{ key: '_qrQtr', label: 'Result Qtr', fmt: (v, row) => qrQuarterLabel(v) + (row && row._qrBasis ? ` (${row._qrBasis})` : '') }];   // (S) / (C): compared on the other basis
   const growthCol = (key, label) => ({ key, label, fmt: v => isNaN(v) ? '-' : (v >= 0 ? '+' : '') + v.toFixed(1) + '%', cls: v => isNaN(v) ? '' : (v >= 0 ? 'positive' : 'negative') });
-  if (s.f20.on || s.f26.on) cols.push(growthCol('_qrEarn', 'Earnings YoY%'));     // one column however many of the earnings filters are on
-  if (s.f21.on || s.f27.on) cols.push(growthCol('_qrSales', 'Sales YoY%'));
+  if (s.f20.on) cols.push(growthCol('_qrEarn', 'Earnings YoY%'));
+  if (s.f21.on) cols.push(growthCol('_qrSales', 'Sales YoY%'));
   const fromTo = (nowKey, prevKey, label) => ({ key: nowKey, label, fmt: (v, row) => {
     const prev = row[prevKey];
     return isNaN(v) || isNaN(prev) ? '-' : `${qrFmtCr(prev)} → ${qrFmtCr(v)}`;
   }, cls: v => isNaN(v) ? '' : (v >= 0 ? 'positive' : 'negative') });
-  if (s.f28.on || s.f30.on) cols.push(growthCol('_qrQoqE', 'QoQ Earnings%'));     // one column however many of the two earnings / sales filters are on
-  if (s.f29.on || s.f31.on) cols.push(growthCol('_qrQoqS', 'QoQ Sales%'));
+  const yoyPair = (nowKey, prevKey, label) => ({ key: nowKey, label, fmt: (v, row) => {   // sorts by the latest quarter's YoY %
+    const prev = row[prevKey];
+    return isNaN(v) || isNaN(prev) ? '-' : `${qrFmtPct(prev)} → ${qrFmtPct(v)}`;
+  }, cls: v => isNaN(v) ? '' : (v >= 0 ? 'positive' : 'negative') });
+  const pts = (key, label) => ({ key, label, fmt: v => isNaN(v) ? '-' : (v >= 0 ? '+' : '') + v.toFixed(1) + ' pts', cls: v => isNaN(v) ? '' : (v >= 0 ? 'positive' : 'negative') });
+  if (s.f28.on || s.f32.on) cols.push(yoyPair('_qrYyNowE', '_qrYyPrevE', 'EPS YoY% (prev qtr → now)'));   // one column however many of the filters on that figure are on
+  if (s.f28.on) cols.push(pts('_qrAccE', 'EPS YoY% change'));
+  if (s.f29.on || s.f33.on) cols.push(yoyPair('_qrYyNowS', '_qrYyPrevS', 'Sales YoY% (prev qtr → now)'));
+  if (s.f29.on) cols.push(pts('_qrAccS', 'Sales YoY% change'));
   if (s.f22.on) cols.push(fromTo('_qrProfitNow', '_qrProfitPrev', 'Profit Cr (yr ago → now)'));
   if (s.f23.on) cols.push(fromTo('_qrSalesNow', '_qrSalesPrev', 'Sales Cr (yr ago → now)'));
-  if (s.f32.on) cols.push(fromTo('_qrQNowE', '_qrQPrevE', 'Profit Cr (prev qtr → now)'));
-  if (s.f33.on) cols.push(fromTo('_qrQNowS', '_qrQPrevS', 'Sales Cr (prev qtr → now)'));
   return cols;
 }
 
-// Reset All: the four filters back to their defaults
+// Reset All: the Quarterly Results filters back to their defaults
 function qrReset() {
   const set = (id, prop, v) => { const el = document.getElementById(id); if (el) el[prop] = v; };
   set('scrF20On', 'checked', false); set('scrF20Val', 'value', '20');
   set('scrF21On', 'checked', false); set('scrF21Val', 'value', '10');
   set('scrF22On', 'checked', false);
   set('scrF23On', 'checked', false);
-  set('scrF26On', 'checked', false); set('scrF26Val', 'value', '20');
-  set('scrF27On', 'checked', false); set('scrF27Val', 'value', '10');
   set('scrF28On', 'checked', false); set('scrF28Val', 'value', '0');
   set('scrF29On', 'checked', false); set('scrF29Val', 'value', '0');
-  set('scrF30On', 'checked', false); set('scrF30Val', 'value', '0');
-  set('scrF31On', 'checked', false); set('scrF31Val', 'value', '0');
   set('scrF32On', 'checked', false);
   set('scrF33On', 'checked', false);
+  set('scrF40On', 'checked', false);
 }
 
-// The quarter name in the F26 / F27 labels: the newest quarter any stock has declared (blank until the data is loaded)
+// The quarter name in the F40 label: the newest quarter any stock has declared (blank until the data is loaded)
 function qrUpdateLatestLabels() {
   const text = Store.quarterly && Store.quarterly.latestQuarter ? `(${qrQuarterLabel(Store.quarterly.latestQuarter)})` : '';
-  for (const id of ['scrF26Q', 'scrF27Q', 'scrF30Q', 'scrF31Q']) { const el = document.getElementById(id); if (el) el.textContent = text; }
+  for (const id of ['scrF40Q']) { const el = document.getElementById(id); if (el) el.textContent = text; }
 }
 
 // The tab's one-line status: what is loaded and how fresh it is

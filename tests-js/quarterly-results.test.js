@@ -133,16 +133,15 @@ test('qrQuarterLabel', () => {
 
 // ── the hooks js/screener.js calls (guarded by typeof, like the As of Date module's) ───────────────────────────────────
 
-test('qrFilterState reads the four filters; a blank or invalid threshold counts as 0', () => {
+test('qrFilterState reads the filters; a blank or invalid threshold counts as 0', () => {
   const dom = installFakeDom(sb, { scrF20Val: '25', scrF21Val: 'abc' });
   assert.equal(sb.qrFilterState().any, false);
   dom.el('scrF20On').checked = true; dom.el('scrF22On').checked = true;
   const s = JSON.parse(JSON.stringify(sb.qrFilterState()));
   assert.deepEqual(s, { f20: { on: true, min: 25 }, f21: { on: false, min: 0 }, f22: { on: true }, f23: { on: false },
-    f26: { on: false, min: 0 }, f27: { on: false, min: 0 },                 // f26 / f27 = the latest-quarter filters (tests-js/quarterly-latest.test.js)
-    f28: { on: false, min: 0 }, f29: { on: false, min: 0 },                 // f28-f31 = QoQ Earnings / QoQ Sales and their latest-quarter versions (tests-js/quarterly-qoq.test.js)
-    f30: { on: false, min: 0 }, f31: { on: false, min: 0 },
-    f32: { on: false }, f33: { on: false }, any: true });                   // f32 / f33 = QoQ Earnings / Sales turnaround
+    f28: { on: false, min: 0 }, f29: { on: false, min: 0 },                 // f28 / f29 = EPS / Sales YoY% change, f32 / f33 = their turnarounds (tests-js/quarterly-qoq.test.js)
+    f32: { on: false }, f33: { on: false },
+    f40: { on: false }, any: true });                                       // f40 = only stocks with the newest quarter (tests-js/quarterly-latest.test.js)
 });
 
 test('qrApplyToStock records what the table columns need on the stock and returns the reasons it fails', () => {

@@ -1,7 +1,7 @@
-"""`qe` and `qs` in src/quarterly_results.py: a stock's latest-quarter net profit and sales against the PREVIOUS quarter (a sequential step,
-not the year-ago comparison), behind the Stock Scanner's "QoQ Earnings" / "QoQ Sales" filters (and their latest-quarter versions).
-Measured on a basis both quarters hold (the ALT_* columns cover a switch between standalone and consolidated), None when the previous
-quarter's profit / sales is not positive, and absent when the previous quarter is not on file at all."""
+"""`yy` in src/quarterly_results.py: a stock's EPS and sales YoY % for its latest quarter AND the quarter before it, behind the Stock Scanner's
+"against the previous quarter" filters (F28 / F29 the change in YoY %, F32 / F33 YoY turned from negative to positive). The figures are the same
+ones the chart table shows in `h`: each quarter against the same quarter a year earlier. A quarter with no result, or no YoY % (a loss or zero
+year-ago base), is None."""
 import json
 
 import quarterly_results as qr
@@ -10,12 +10,8 @@ HEADER = ('ISIN,SYMBOL,TO_DATE,BASIS,AUDITED,FILED,REVENUE_CR,PBT_CR,NET_PROFIT_
           'ALT_BASIS,ALT_REVENUE_CR,ALT_PBT_CR,ALT_NET_PROFIT_CR,ALT_EPS_BASIC,ALT_EPS_DILUTED,ALT_SEQ\n')
 
 
-def arow(sym, to_date, basis, sales, profit, alt=None):
-    base = f'"","{sym}","{to_date}","{basis}","Unaudited","01-Feb-2025","{sales}","0","{profit}","1","1","1",'
-    if alt is None:
-        return base + ',,,,,,\n'
-    ab, asales, aprofit = alt
-    return base + f'"{ab}","{asales}","0","{aprofit}","1","1","2"\n'
+def arow(sym, to_date, sales, eps, basis='Consolidated'):
+    return f'"","{sym}","{to_date}","{basis}","Unaudited","01-Feb-2025","{sales}","0","10","{eps}","{eps}","1",,,,,,,\n'
 
 
 def growth(tmp_path, *rows):
@@ -24,104 +20,69 @@ def growth(tmp_path, *rows):
     return qr.build_quarterly_growth(str(f))
 
 
-def test_profit_and_sales_against_the_previous_quarter_are_percentages_on_the_record(tmp_path):
-    g = growth(tmp_path, arow('AAA', '31-Mar-2026', 'Consolidated', 100, 10), arow('AAA', '30-Jun-2026', 'Consolidated', 120, 15))
-    assert (g['aaa']['qe'], g['aaa']['qs']) == (50.0, 20.0)      # profit 15 against 10, sales 120 against 100
-    assert g['aaa']['cmp'] == 'no-prev'                          # independent of the year-ago comparison, which has nothing to compare with here
+# Antelopus-like: Jun-25 and Mar-25 on the left of Jun-26 and Mar-26 (EPS 3.19 -> 15.45 is +384%, 10.48 -> 10.83 is +3%)
+ANTELOPUS = (arow('A', '31-Mar-2025', 61.72, 10.48), arow('A', '30-Jun-2025', 50.63, 3.19),
+             arow('A', '31-Mar-2026', 102.01, 10.83), arow('A', '30-Jun-2026', 131.04, 15.45))
 
 
-def test_a_fall_is_a_negative_percentage_rounded_to_two_places(tmp_path):
-    g = growth(tmp_path, arow('AAA', '31-Mar-2026', 'Consolidated', 90, 30), arow('AAA', '30-Jun-2026', 'Consolidated', 60, 20))
-    assert (g['aaa']['qe'], g['aaa']['qs']) == (-33.33, -33.33)
+def test_the_latest_and_the_previous_quarters_yoy_percentages_are_on_the_record(tmp_path):
+    g = growth(tmp_path, *ANTELOPUS)
+    # [EPS YoY now, EPS YoY a quarter ago, sales YoY now, sales YoY a quarter ago]
+    assert g['a']['yy'] == [384.33, 3.34, 158.82, 65.28]
 
 
-def test_no_percentage_from_a_zero_or_loss_making_previous_quarter_or_from_zero_sales(tmp_path):
-    for prev in (0, -5):
-        g = growth(tmp_path, arow('AAA', '31-Mar-2026', 'Consolidated', 100, prev), arow('AAA', '30-Jun-2026', 'Consolidated', 100, 20))
-        assert g['aaa']['qe'] is None and g['aaa']['qs'] == 0.0   # no % from a loss, but sales (100 against 100) are measured
-    g = growth(tmp_path, arow('AAA', '31-Mar-2026', 'Consolidated', 0, 10), arow('AAA', '30-Jun-2026', 'Consolidated', 50, 15))
-    assert g['aaa']['qe'] == 50.0 and g['aaa']['qs'] is None      # no sales to grow from
+def test_they_are_the_figures_the_chart_table_shows(tmp_path):
+    g = growth(tmp_path, *ANTELOPUS)['a']
+    h = g['h']                                                  # oldest first, the latest quarter last
+    assert g['yy'] == [h[-1][4], h[-2][4], h[-1][2], h[-2][2]]  # EPS growth is item 4, sales growth item 2
 
 
-def test_absent_when_the_previous_quarter_is_not_on_file(tmp_path):
-    g = growth(tmp_path, arow('AAA', '31-Dec-2025', 'Consolidated', 100, 10), arow('AAA', '30-Jun-2026', 'Consolidated', 100, 15))   # Mar-2026 missing
-    assert 'qe' not in g['aaa'] and 'qs' not in g['aaa']
-    g = growth(tmp_path, arow('AAA', '30-Jun-2026', 'Consolidated', 100, 15))
-    assert 'qe' not in g['aaa'] and 'qs' not in g['aaa']
+def test_a_fall_is_a_negative_percentage(tmp_path):
+    g = growth(tmp_path, arow('A', '31-Dec-2024', 100, 10), arow('A', '31-Mar-2025', 100, 20),
+               arow('A', '31-Dec-2025', 80, 6), arow('A', '31-Mar-2026', 90, 25))
+    assert g['a']['yy'] == [25.0, -40.0, -10.0, -20.0]
+
+
+def test_a_loss_or_zero_year_ago_base_has_no_percentage_for_that_quarter_only(tmp_path):
+    g = growth(tmp_path, arow('A', '31-Mar-2025', 100, -2), arow('A', '30-Jun-2025', 100, 3),
+               arow('A', '31-Mar-2026', 120, 5), arow('A', '30-Jun-2026', 130, 6))
+    assert g['a']['yy'][0] == 100.0 and g['a']['yy'][1] is None   # Mar-26 EPS has a loss a year earlier: no %; Jun-26 does (3 -> 6)
+    assert g['a']['yy'][2] == 30.0 and g['a']['yy'][3] == 20.0    # sales are fine in both
+
+
+def test_a_missing_previous_quarter_is_none_but_the_latest_is_still_measured(tmp_path):
+    g = growth(tmp_path, arow('A', '30-Jun-2025', 100, 3), arow('A', '30-Jun-2026', 150, 9))      # no Mar-2026, no Mar-2025
+    assert g['a']['yy'] == [200.0, None, 50.0, None]
+
+
+def test_a_stock_with_no_year_ago_quarter_has_none_for_both(tmp_path):
+    g = growth(tmp_path, arow('A', '31-Mar-2026', 100, 3), arow('A', '30-Jun-2026', 150, 9))
+    assert g['a']['yy'] == [None, None, None, None]
 
 
 def test_each_stock_is_judged_on_its_own_latest_and_its_previous_quarter(tmp_path):
     g = growth(tmp_path,
-               arow('OLD', '31-Dec-2025', 'Consolidated', 100, 10), arow('OLD', '31-Mar-2026', 'Consolidated', 110, 12),   # latest Mar-26, previous Dec-25
-               arow('NEW', '31-Mar-2026', 'Consolidated', 100, 10), arow('NEW', '30-Jun-2026', 'Consolidated', 150, 30))
-    assert (g['old']['qe'], g['old']['qs']) == (20.0, 10.0) and (g['new']['qe'], g['new']['qs']) == (200.0, 50.0)
+               arow('OLD', '31-Dec-2024', 100, 10), arow('OLD', '30-Sep-2025', 100, 5), arow('OLD', '31-Dec-2025', 110, 15),       # latest Dec-25, previous Sep-25
+               arow('NEW', '31-Mar-2025', 100, 10), arow('NEW', '30-Jun-2025', 100, 10), arow('NEW', '31-Mar-2026', 100, 10), arow('NEW', '30-Jun-2026', 150, 30))
+    assert g['old']['q'] == '2025-12-31' and g['old']['yy'][:2] == [50.0, None]               # Sep-24 is not on file: the previous quarter has no YoY %
+    assert g['new']['q'] == '2026-06-30' and g['new']['yy'][:2] == [200.0, 0.0]
 
 
-def test_a_switch_between_standalone_and_consolidated_uses_a_basis_both_quarters_hold(tmp_path):
-    # previous quarter standalone only; the latest was filed consolidated but also carries its standalone figures
-    g = growth(tmp_path,
-               arow('XX', '31-Mar-2026', 'Standalone', 100, 10),
-               arow('XX', '30-Jun-2026', 'Consolidated', 300, 99, alt=('Standalone', 118, 12)))
-    assert (g['xx']['qe'], g['xx']['qs']) == (20.0, 18.0)         # 12 against 10 and 118 against 100 on Standalone, not 99 / 300
+def test_a_quarter_compared_on_the_other_basis_uses_that_basis_figures(tmp_path):
+    # Jun-26 filed consolidated against a standalone Jun-25: its EPS YoY % is the one the chart table shows (h)
+    g = growth(tmp_path, arow('X', '31-Mar-2025', 100, 10, 'Standalone'), arow('X', '30-Jun-2025', 100, 10, 'Standalone'),
+               arow('X', '31-Mar-2026', 110, 20, 'Standalone'), arow('X', '30-Jun-2026', 120, 30, 'Standalone'))
+    assert g['x']['yy'] == [200.0, 100.0, 20.0, 10.0]
 
 
-def test_without_a_common_basis_the_step_is_none_not_a_made_up_number(tmp_path):
-    g = growth(tmp_path, arow('XX', '31-Mar-2026', 'Standalone', 100, 10), arow('XX', '30-Jun-2026', 'Consolidated', 120, 99))
-    assert g['xx']['qe'] is None and g['xx']['qs'] is None
+def test_the_old_sequential_fields_are_gone(tmp_path):
+    g = growth(tmp_path, *ANTELOPUS)['a']
+    assert not any(k in g for k in ('qe', 'qs', 'qp', 'qet', 'qst'))
 
 
-def test_it_travels_in_the_payload_only_for_stocks_that_have_it(tmp_path):
+def test_it_travels_in_the_payload_for_every_stock(tmp_path):
     f = tmp_path / 'q.csv'
-    f.write_text('﻿' + HEADER + arow('A', '31-Mar-2026', 'Consolidated', 100, 10) + arow('A', '30-Jun-2026', 'Consolidated', 100, 15)
-                 + arow('B', '30-Jun-2026', 'Consolidated', 100, 15), encoding='utf-8')
+    f.write_text('﻿' + HEADER + ''.join(ANTELOPUS) + arow('B', '30-Jun-2026', 100, 15), encoding='utf-8')
     doc = json.loads(json.dumps(qr.payload(str(f))))
-    assert doc['bySymbol']['a']['qe'] == 50.0 and doc['bySymbol']['a']['qs'] == 0.0
-    assert 'qe' not in doc['bySymbol']['b'] and 'qs' not in doc['bySymbol']['b']
-
-
-# ── the turnaround flags: a LOSS in the previous quarter and a profit now / NO sales in the previous quarter and some now ──────
-
-def test_a_loss_then_a_profit_now_is_an_earnings_turnaround_with_the_amounts(tmp_path):
-    g = growth(tmp_path, arow('AAA', '31-Mar-2026', 'Consolidated', 100, -5), arow('AAA', '30-Jun-2026', 'Consolidated', 120, 10))
-    assert g['aaa']['qet'] is True and g['aaa']['qst'] is False
-    assert g['aaa']['qp'] == [-5.0, 100.0, 10.0, 120.0]       # [previous profit, previous sales, profit now, sales now]
-    assert g['aaa']['qe'] is None                              # a turnaround has no percentage: kept apart from the growth figure
-
-
-def test_only_a_real_loss_to_profit_counts_as_an_earnings_turnaround(tmp_path):
-    for prev, now, expected in ((0, 10, False), (5, 10, False), (-5, -2, False), (-5, 0, False), (-5, 0.01, True)):
-        g = growth(tmp_path, arow('AAA', '31-Mar-2026', 'Consolidated', 100, prev), arow('AAA', '30-Jun-2026', 'Consolidated', 100, now))
-        assert g['aaa']['qet'] is expected, (prev, now)        # a zero is not a loss, and a profit still has to be positive
-
-
-def test_no_sales_then_some_is_a_sales_turnaround(tmp_path):
-    g = growth(tmp_path, arow('AAA', '31-Mar-2026', 'Consolidated', 0, 3), arow('AAA', '30-Jun-2026', 'Consolidated', 50, 5))
-    assert g['aaa']['qst'] is True and g['aaa']['qs'] is None and g['aaa']['qet'] is False
-    for prev, now, expected in ((10, 50, False), (0, 0, False), (0, 0.5, True)):
-        g = growth(tmp_path, arow('AAA', '31-Mar-2026', 'Consolidated', prev, 3), arow('AAA', '30-Jun-2026', 'Consolidated', now, 5))
-        assert g['aaa']['qst'] is expected, (prev, now)
-
-
-def test_the_turnaround_fields_are_absent_without_a_previous_quarter(tmp_path):
-    g = growth(tmp_path, arow('AAA', '30-Jun-2026', 'Consolidated', 100, 15))
-    assert 'qp' not in g['aaa'] and 'qet' not in g['aaa'] and 'qst' not in g['aaa']
-
-
-def test_without_a_common_basis_the_flags_are_false_and_the_amounts_none(tmp_path):
-    g = growth(tmp_path, arow('XX', '31-Mar-2026', 'Standalone', 100, -5), arow('XX', '30-Jun-2026', 'Consolidated', 120, 99))
-    assert g['xx']['qp'] is None and g['xx']['qet'] is False and g['xx']['qst'] is False
-
-
-def test_the_turnaround_is_judged_on_a_basis_both_quarters_hold(tmp_path):
-    # the latest quarter's consolidated profit is 99, but on Standalone (the previous quarter's basis) it is 8: a loss of 5 then, 8 now
-    g = growth(tmp_path,
-               arow('XX', '31-Mar-2026', 'Standalone', 100, -5),
-               arow('XX', '30-Jun-2026', 'Consolidated', 300, 99, alt=('Standalone', 118, 8)))
-    assert g['xx']['qet'] is True and g['xx']['qp'] == [-5.0, 100.0, 8.0, 118.0]
-
-
-def test_the_turnaround_fields_travel_in_the_payload(tmp_path):
-    f = tmp_path / 'q.csv'
-    f.write_text('﻿' + HEADER + arow('A', '31-Mar-2026', 'Consolidated', 0, -2) + arow('A', '30-Jun-2026', 'Consolidated', 40, 6), encoding='utf-8')
-    rec = json.loads(json.dumps(qr.payload(str(f))))['bySymbol']['a']
-    assert rec['qet'] is True and rec['qst'] is True and rec['qp'] == [-2.0, 0.0, 6.0, 40.0]
+    assert doc['bySymbol']['a']['yy'] == [384.33, 3.34, 158.82, 65.28]
+    assert doc['bySymbol']['b']['yy'] == [None, None, None, None]
