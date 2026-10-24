@@ -59,14 +59,14 @@ test('the module only READS the other modules\' globals it needs; it assigns jus
 
 // ─── index.html: existing filters and popup untouched ──────────────────────────
 
-test('the existing popup keeps exactly its 39 filter switches (19 + the Relative Strength tab\'s F24-F25 + the Quarterly Results tab\'s F20-F23 and F26-F33 + the Sector & Industry tab\'s F34-F39), and the As of Date tab adds none the existing code would count', () => {
+test('the existing popup keeps exactly its 36 filter switches (19 + the Relative Strength tab\'s F24-F25 + the Quarterly Results tab\'s F20-F23, F28-F29, F32-F33 and F40 + the Sector & Industry tab\'s F34-F39), and the As of Date tab adds none the existing code would count', () => {
   const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map(m => m[1]);
   const switches = ids.filter(id => /^scrF\d+On$/.test(id)).sort();
-  assert.equal(switches.length, 39);
-  for (let n = 1; n <= 39; n++) assert.ok(switches.includes(`scrF${n}On`), `scrF${n}On is missing`);
+  assert.equal(switches.length, 36);
+  for (const n of [...Array(40).keys()].map(i => i + 1).filter(n => ![26, 27, 30, 31].includes(n))) assert.ok(switches.includes(`scrF${n}On`), `scrF${n}On is missing`);
   // the existing code counts filters with  input[id^="scrF"][id$="On"]  (screener.js singleFilterCount) - new ids must not match it
   const matchesExisting = ids.filter(id => id.startsWith('scrF') && id.endsWith('On'));
-  assert.equal(matchesExisting.length, 39);
+  assert.equal(matchesExisting.length, 36);
   for (const id of ids.filter(i => /^asof/i.test(i))) assert.ok(!(id.startsWith('scrF') && id.endsWith('On')), id);
 });
 

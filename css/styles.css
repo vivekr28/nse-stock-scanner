@@ -222,7 +222,7 @@ select option {
   align-items: start;
   gap: 10px 16px;
 }
-#scrPaneQuarterly #scrQtrStatus { grid-column: 1 / -1; }
+#scrPaneQuarterly #scrQtrStatus, #scrPaneQuarterly .scr-qtr-latest { grid-column: 1 / -1; }
 .scr-qtr-col { display: flex; flex-direction: column; gap: 10px; }
 .scr-col-head { color: var(--text2); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; padding: 0 4px; }
 #scrPaneQuarterly .scr-filter-row .scr-label { min-width: 130px; }

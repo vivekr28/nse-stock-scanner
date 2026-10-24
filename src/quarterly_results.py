@@ -131,11 +131,9 @@ def build_quarterly_growth(path):
       ab    only present when the quarter and its year-ago quarter are stored on different bases but the file also holds
             the OTHER basis (the ALT_* columns, read by Download-NSE-Bhavcopy.ps1): 'S' or 'C', the basis the comparison
             was made on (preferring consolidated). The browser marks such figures; everything below is then on that basis
-      qe/qs net-profit / sales growth % against the PREVIOUS quarter (not the year-ago one), on a basis both quarters hold; None when the
-            previous quarter's profit / sales is not positive. Only present when the previous quarter is on file
-      qp    [previous profit, previous sales, profit now, sales now] (Rs crore, 2 dp) of that same sequential comparison, or None when the two
-            quarters share no basis; qet / qst turnaround flags: qet = a LOSS in the previous quarter and a profit now, qst = NO sales in the
-            previous quarter and some now (kept apart from qe / qs, which need a positive base). Present together with qe / qs
+      yy    [EPS YoY %, EPS YoY % a quarter earlier, sales YoY %, sales YoY % a quarter earlier] of the latest quarter and the quarter before
+            it (the same figures the chart table shows in h); None for a quarter that is missing or has no YoY % (loss / zero year-ago base).
+            The "against the previous quarter" filters (F28 / F29 change in YoY %, F32 / F33 YoY turned from negative to positive) read it
       s/sp  sales (Rs crore) this quarter / a year ago;  e/ep  net profit (Rs crore) this quarter / a year ago
       sg/eg sales / net-profit growth %, None unless cmp is 'ok' AND the year-ago figure is positive
       st/et turnaround flags (kept apart from growth, which needs a positive base), only ever True when cmp is 'ok':
@@ -167,19 +165,6 @@ def build_quarterly_growth(path):
         rec = _compare_quarter(quarters, sales_by_date, latest)
         rec['q'] = latest.isoformat()
         rec['b'] = 'C' if quarters[latest].get('BASIS') == 'Consolidated' else 'S'
-        # growth against the previous quarter (a sequential step, for the scanner's QoQ Earnings / QoQ Sales filters)
-        prev_q = quarters.get(_shift_quarter(latest, -1))
-        if prev_q is not None:
-            seq = _common_basis(quarters[latest], prev_q)
-            rec['qe'] = _growth_pct(seq[1]['e'], seq[2]['e']) if seq else None
-            rec['qs'] = _growth_pct(seq[1]['s'], seq[2]['s']) if seq else None
-            if seq:
-                now, then = seq[1], seq[2]
-                rec['qp'] = [round(then['e'], 2), round(then['s'], 2), round(now['e'], 2), round(now['s'], 2)]
-                rec['qet'] = then['e'] < 0 and now['e'] > 0
-                rec['qst'] = then['s'] <= 0 and now['s'] > 0
-            else:
-                rec['qp'], rec['qet'], rec['qst'] = None, False, False
         # The last 10 calendar quarters ending at the latest one (oldest first), each against its own year-ago quarter - the
         # stock chart's table: [quarter-end, sales Rs cr, sales growth %, EPS, EPS growth %, cmp, EPS turnaround 1/0].
         # A quarter with no result on file is [quarter-end, None, None, None, None, 'none', 0]. EPS is as filed (NOT restated
@@ -221,6 +206,9 @@ def build_quarterly_growth(path):
                 entry += [c['ab'], round(c['s'], 1), round(c['sp'], 1)]
             hist.append(entry)
         rec['h'] = hist
+        # the scanner's "against the previous quarter" filters compare YoY % with YoY %: [EPS YoY % now, EPS YoY % a quarter ago,
+        # sales YoY % now, sales YoY % a quarter ago], each None where the quarter has no result or no YoY % (a loss / zero year-ago base)
+        rec['yy'] = [hist[-1][4], hist[-2][4], hist[-1][2], hist[-2][2]]
         if hx:
             rec['hx'] = hx
         out[sym] = rec
