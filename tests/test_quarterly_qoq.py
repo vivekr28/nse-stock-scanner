@@ -10,8 +10,8 @@ HEADER = ('ISIN,SYMBOL,TO_DATE,BASIS,AUDITED,FILED,REVENUE_CR,PBT_CR,NET_PROFIT_
           'ALT_BASIS,ALT_REVENUE_CR,ALT_PBT_CR,ALT_NET_PROFIT_CR,ALT_EPS_BASIC,ALT_EPS_DILUTED,ALT_SEQ\n')
 
 
-def arow(sym, to_date, sales, eps, basis='Consolidated'):
-    return f'"","{sym}","{to_date}","{basis}","Unaudited","01-Feb-2025","{sales}","0","10","{eps}","{eps}","1",,,,,,,\n'
+def arow(sym, to_date, sales, eps, basis='Consolidated', profit=10):
+    return f'"","{sym}","{to_date}","{basis}","Unaudited","01-Feb-2025","{sales}","0","{profit}","{eps}","{eps}","1",,,,,,,\n'
 
 
 def growth(tmp_path, *rows):
@@ -86,3 +86,69 @@ def test_it_travels_in_the_payload_for_every_stock(tmp_path):
     doc = json.loads(json.dumps(qr.payload(str(f))))
     assert doc['bySymbol']['a']['yy'] == [384.33, 3.34, 158.82, 65.28]
     assert doc['bySymbol']['b']['yy'] == [None, None, None, None]
+
+
+# ── qq: the stock's 7 quarters before its latest, each as its own comparison record (the scanner's quarter picker) ──────────
+
+def _nine(sym='A'):
+    """Nine quarters, Jun-24 to Jun-26, sales 100, 110, ... 180 and EPS 10, 11, ... 18 (profit 10 throughout)."""
+    dates = ('30-Jun-2024', '30-Sep-2024', '31-Dec-2024', '31-Mar-2025', '30-Jun-2025', '30-Sep-2025', '31-Dec-2025', '31-Mar-2026', '30-Jun-2026')
+    return [arow(sym, d, 100 + 10 * i, 10 + i) for i, d in enumerate(dates)]
+
+
+def test_qq_holds_the_seven_quarters_before_the_latest_keyed_by_quarter_end(tmp_path):
+    g = growth(tmp_path, *_nine())['a']
+    assert g['q'] == '2026-06-30'
+    assert sorted(g['qq']) == ['2024-09-30', '2024-12-31', '2025-03-31', '2025-06-30', '2025-09-30', '2025-12-31', '2026-03-31']   # not Jun-24 (8 back) nor Jun-26 (the record itself)
+    assert all(rec['q'] == key for key, rec in g['qq'].items())
+
+
+def test_an_earlier_quarter_is_judged_against_its_own_year_ago_quarter(tmp_path):
+    mar26 = growth(tmp_path, *_nine())['a']['qq']['2026-03-31']       # sales 170 against Mar-25's 130, EPS 17 against 13
+    assert (mar26['cmp'], mar26['s'], mar26['sp'], mar26['sg']) == ('ok', 170.0, 130.0, 30.77)
+    assert (mar26['e'], mar26['ep'], mar26['eg']) == (10.0, 10.0, 0.0)  # net profit is flat in this fixture
+    assert mar26['yy'] == [30.77, 33.33, 30.77, 33.33]                  # Mar-26 and the quarter before it, Dec-25 (160 against 120, EPS 16 against 12)
+
+
+def test_its_yy_is_that_quarters_yoy_percentages_and_the_quarter_before_its_own(tmp_path):
+    g = growth(tmp_path, *ANTELOPUS)['a']
+    assert g['yy'] == [384.33, 3.34, 158.82, 65.28]
+    assert g['qq']['2026-03-31']['yy'] == [3.34, None, 65.28, None]     # Mar-26 against Mar-25; Dec-25 is not on file, so the quarter before has no YoY %
+
+
+def test_the_record_matches_the_top_level_one_for_the_same_quarter(tmp_path):
+    # Mar-26 judged as an earlier quarter (qq) equals Mar-26 judged as the latest when Jun-26 is absent from the file
+    full = growth(tmp_path, *_nine())['a']['qq']['2026-03-31']
+    cut = growth(tmp_path, *_nine()[:-1])['a']
+    assert cut['q'] == '2026-03-31'
+    for k in ('cmp', 's', 'sp', 'e', 'ep', 'sg', 'eg'):
+        assert full[k] == cut[k], k
+    assert full['yy'] == cut['yy']
+
+
+def test_a_quarter_not_on_file_has_no_record_and_a_stock_with_no_earlier_quarters_has_no_qq(tmp_path):
+    g = growth(tmp_path, arow('A', '30-Jun-2026', 100, 5), arow('A', '31-Dec-2025', 90, 4))      # Mar-26 missing
+    assert list(g['a']['qq']) == ['2025-12-31']
+    g = growth(tmp_path, arow('B', '30-Jun-2026', 100, 5))
+    assert 'qq' not in g['b']
+
+
+def test_none_and_false_values_are_left_out_of_a_record_to_keep_the_payload_small(tmp_path):
+    g = growth(tmp_path, arow('A', '31-Mar-2026', 100, 3), arow('A', '30-Jun-2026', 150, 9))
+    rec = g['a']['qq']['2026-03-31']
+    assert rec['cmp'] == 'no-prev'                                  # no year-ago quarter: sp / ep / sg / eg are None, st / et False
+    assert not any(k in rec for k in ('sp', 'ep', 'sg', 'eg', 'st', 'et'))
+    assert rec['yy'] == [None, None, None, None]                    # but yy keeps its four slots
+
+
+def test_a_loss_year_ago_quarter_keeps_its_turnaround_flag(tmp_path):
+    g = growth(tmp_path, arow('A', '31-Mar-2025', 100, -2, profit=-5), arow('A', '31-Mar-2026', 120, 6, profit=8), arow('A', '30-Jun-2026', 130, 7))
+    rec = g['a']['qq']['2026-03-31']
+    assert rec['et'] is True and 'eg' not in rec                    # profit now after a loss: a turnaround, with no growth %
+
+
+def test_qq_travels_in_the_payload(tmp_path):
+    f = tmp_path / 'q.csv'
+    f.write_text('﻿' + HEADER + ''.join(ANTELOPUS), encoding='utf-8')
+    rec = json.loads(json.dumps(qr.payload(str(f))))['bySymbol']['a']
+    assert rec['qq']['2026-03-31']['yy'] == [3.34, None, 65.28, None] and rec['qq']['2025-06-30']['q'] == '2025-06-30'
