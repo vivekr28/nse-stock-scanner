@@ -27,7 +27,7 @@ def growth(tmp_path, *rows, header=HEADER):
 
 
 def head(g, sym='sgfin'):
-    return {k: v for k, v in g[sym].items() if k not in ('h', 'yy')}
+    return {k: v for k, v in g[sym].items() if k not in ('h', 'yy', 'qq')}
 
 
 # ── the SGFIN case: year-ago standalone only, now consolidated (+ the standalone filing as the alternate) ──────────────────

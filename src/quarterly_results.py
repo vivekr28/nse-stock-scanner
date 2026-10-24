@@ -113,6 +113,10 @@ def _looks_mis_scaled(sales_by_date, d):
                 and all(_off_by_scale(v, n) for n in neighbours))
 
 
+# How many quarters before a stock's latest one the record also carries (qq), so the scanner can judge any of the last 8 quarters
+_EARLIER_QUARTERS = 7
+
+
 def build_quarterly_growth(path):
     """Latest-quarter growth versus the same quarter a year earlier, per stock, for the Stock Scanner's "Quarterly
     Results" filters (read-only; nothing else uses it). `path` is reference-data/QuarterlyResults.csv (written by
@@ -131,6 +135,9 @@ def build_quarterly_growth(path):
       ab    only present when the quarter and its year-ago quarter are stored on different bases but the file also holds
             the OTHER basis (the ALT_* columns, read by Download-NSE-Bhavcopy.ps1): 'S' or 'C', the basis the comparison
             was made on (preferring consolidated). The browser marks such figures; everything below is then on that basis
+      qq    {quarter-end: record} for the stock's 7 quarters before its latest (only those with a result on file): the same fields as this
+            record (q, cmp, s, sp, e, ep, sg, eg, st, et, ab, yy; a None / False one is left out), each judged against its own year-ago quarter. The scanner's quarter
+            picker ("Results for quarter") makes every Quarterly Results filter use one of these (or the record itself) instead of the latest
       yy    [EPS YoY %, EPS YoY % a quarter earlier, sales YoY %, sales YoY % a quarter earlier] of the latest quarter and the quarter before
             it (the same figures the chart table shows in h); None for a quarter that is missing or has no YoY % (loss / zero year-ago base).
             The "against the previous quarter" filters (F28 / F29 change in YoY %, F32 / F33 YoY turned from negative to positive) read it
@@ -171,6 +178,7 @@ def build_quarterly_growth(path):
         # for later splits/bonuses; the browser flags those), so its growth is None unless the year-ago EPS is positive.
         hist = []
         hx = {}
+        earlier = {}
         for n in range(-9, 1):
             d = _shift_quarter(latest, n)
             row = quarters.get(d)
@@ -205,7 +213,16 @@ def build_quarterly_growth(path):
             if c.get('ab'):
                 entry += [c['ab'], round(c['s'], 1), round(c['sp'], 1)]
             hist.append(entry)
+            if -(_EARLIER_QUARTERS) <= n <= -1:
+                # this quarter as the stock's own comparison record (the same fields as the record itself), for the scanner's quarter picker
+                # (a missing key reads as None / False in the browser, so those are left out to keep the payload small)
+                q = {k: v for k, v in c.items() if v is not None and v is not False}
+                q['q'] = d.isoformat()
+                q['yy'] = [entry[4], hist[-2][4], entry[2], hist[-2][2]]
+                earlier[d.isoformat()] = q
         rec['h'] = hist
+        if earlier:
+            rec['qq'] = earlier
         # the scanner's "against the previous quarter" filters compare YoY % with YoY %: [EPS YoY % now, EPS YoY % a quarter ago,
         # sales YoY % now, sales YoY % a quarter ago], each None where the quarter has no result or no YoY % (a loss / zero year-ago base)
         rec['yy'] = [hist[-1][4], hist[-2][4], hist[-1][2], hist[-2][2]]

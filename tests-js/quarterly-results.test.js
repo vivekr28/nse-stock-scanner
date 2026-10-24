@@ -141,7 +141,7 @@ test('qrFilterState reads the filters; a blank or invalid threshold counts as 0'
   assert.deepEqual(s, { f20: { on: true, min: 25 }, f21: { on: false, min: 0 }, f22: { on: true }, f23: { on: false },
     f28: { on: false, min: 0 }, f29: { on: false, min: 0 },                 // f28 / f29 = EPS / Sales YoY% change, f32 / f33 = their turnarounds (tests-js/quarterly-qoq.test.js)
     f32: { on: false }, f33: { on: false },
-    f40: { on: false }, any: true });                                       // f40 = only stocks with the newest quarter (tests-js/quarterly-latest.test.js)
+    f40: { on: false, quarter: '' }, any: true });                          // f40 = the quarter picker (tests-js/quarterly-latest.test.js)
 });
 
 test('qrApplyToStock records what the table columns need on the stock and returns the reasons it fails', () => {

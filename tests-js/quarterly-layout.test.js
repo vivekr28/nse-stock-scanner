@@ -37,7 +37,7 @@ const ids = h => [...h.html.matchAll(/id="(scrF\d+On)"/g)].map(m => m[1]);
 test('the pane is a status line over two columns', () => {
   const { kids, listAt } = gridChildren();
   assert.deepEqual(kids.map(k => k.cls), ['scr-filter-row scr-qtr-latest', 'scr-qtr-col', 'scr-qtr-col']);   // F40's full-width row, then the two columns
-  const statusAt = html.indexOf('id="scrQtrStatus"', listAt), latestAt = html.indexOf('id="scrF40On"', listAt);
+  const statusAt = html.indexOf('id="scrQtrStatus"', listAt), latestAt = html.indexOf('id="scrF40Quarter"', listAt);
   assert.ok(statusAt > listAt && statusAt < latestAt && latestAt < html.indexOf('<div class="scr-qtr-col">', listAt), 'the status line and F40 come first, outside the columns');
 });
 
@@ -54,7 +54,7 @@ test('every control of every filter is inside its own column (nothing was lost i
   for (const id of ['scrF20Val', 'scrF21Val']) assert.ok(left.html.includes(`id="${id}"`), id);
   for (const id of ['scrF28Val', 'scrF29Val']) assert.ok(right.html.includes(`id="${id}"`), id);
   const all = [...html.slice(html.indexOf('id="scrPaneQuarterly"'), html.indexOf('id="scrPaneMulti"')).matchAll(/id="(scrF\d+On)"/g)].map(m => m[1]);
-  assert.equal(all.length, 9);
+  assert.equal(all.length, 8);
 });
 
 test('the stylesheet makes the pane a two-column grid with the status line spanning both, like the Technicals tab', () => {

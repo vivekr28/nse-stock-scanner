@@ -603,12 +603,14 @@
           <div class="scr-filters-list">
             <p id="scrQtrStatus" style="color:var(--text2);font-size:12px;margin:0;">Loading quarterly results...</p>
 
-            <!-- F40: only stocks that have declared the newest quarter on file can pass any of the filters below (the quarter name is filled in by js/quarterly-results.js) -->
+            <!-- F40: pick a quarter and every filter below judges each stock on that quarter (a stock with no result for it fails); blank = each stock's own latest quarter. The choices are filled in by js/quarterly-results.js once the data loads -->
             <div class="scr-filter-row scr-qtr-latest">
-              <input type="checkbox" id="scrF40On">
-              <span class="scr-label" title="Only stocks that have declared the NEWEST quarter any company has declared (shown in the label) can pass. Off, every filter below judges each stock on its own latest declared quarter, whichever that is.">Stocks with <span id="scrF40Q"></span> results</span>
+              <span class="scr-label" title="Pick a quarter (the newest on file or one of the 7 before it) and every filter below judges each stock on THAT quarter; a stock with no result for it is left out. Left blank, every filter uses each stock's own last reported quarter.">Results for quarter:</span>
               <div class="scr-inputs">
-                <span class="scr-unit">leave out stocks that have not declared it yet</span>
+                <select id="scrF40Quarter">
+                  <option value="">Each stock's latest quarter</option>
+                </select>
+                <span class="scr-unit">picked: only this quarter's results are used</span>
               </div>
             </div>
 
@@ -1414,7 +1416,7 @@
 <script src="js/data-processor.js?v=2"></script>
 <script src="js/scanner.js?v=2"></script>
 <script src="js/screener.js?v=24"></script>
-<script src="js/quarterly-results.js?v=12"></script>
+<script src="js/quarterly-results.js?v=13"></script>
 <script src="js/relative-strength.js?v=3"></script>
 <script src="js/group-breadth.js?v=1"></script>
 <script src="js/group-trend.js?v=2"></script>
