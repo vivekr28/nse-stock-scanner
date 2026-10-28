@@ -122,7 +122,8 @@ function computeDynNewHigh(days, windowDays, allowPartial) {
 // A real break is not forgiven: if the latest CLOSE is above that top or below that bottom the stock has left the box (`broke`).
 // A wick today that closes back inside the box is a fake-out and stays in. K is clamped so top >= bottom always holds.
 // Strict mode needs a full window of history; partial mode (the screener's "allow partial" switch) accepts any stock with at
-// least 5 bars and uses what exists. Returns { insufficient: true } or { depthPct, top, bottom, spikes, broke: 'up' | 'down' | null }.
+// least 5 bars and uses what exists. Returns { insufficient: true } or { depthPct, peak, trough, top, bottom, spikes, broke: 'up' | 'down' | null }
+// where peak / trough are the prices of the deepest decline itself (the capped high and floored low; NaN when nothing fell, depthPct 0).
 function computeDynRange(days, windowDays, spikes, allowPartial) {
   if (days.length < (allowPartial ? 5 : windowDays)) return { insufficient: true };
   const slice = days.slice(-windowDays);
@@ -131,19 +132,46 @@ function computeDynRange(days, windowDays, spikes, allowPartial) {
   const lows = slice.map(d => d.low).sort((a, b) => a - b);
   const top = highs[k], bottom = lows[k];
   if (!(bottom > 0)) return { insufficient: true };
-  let peak = Math.min(slice[0].high, top), depthPct = 0;
+  let peak = Math.min(slice[0].high, top), depthPct = 0, declinePeak = NaN, declineTrough = NaN;
   for (let i = 1; i < slice.length; i++) {
-    depthPct = Math.max(depthPct, (peak - Math.max(slice[i].low, bottom)) / peak * 100);
+    const low = Math.max(slice[i].low, bottom), d = (peak - low) / peak * 100;
+    if (d > depthPct) { depthPct = d; declinePeak = peak; declineTrough = low; }
     peak = Math.max(peak, Math.min(slice[i].high, top));
   }
   const close = slice[slice.length - 1].close;
   return {
     depthPct,
+    peak: declinePeak, trough: declineTrough,
     top, bottom,
     spikes: slice.filter(d => d.high > top || d.low < bottom).length,   // bars the tolerance actually set aside (0 = it changed nothing)
     broke: close > top ? 'up' : (close < bottom ? 'down' : null),
   };
 }
+
+// F41: where the latest close sits against the deepest decline's peak and trough - 'above' the peak, 'below' the trough, or 'within' them.
+// posPct is the close's place in the peak-to-trough range (0 = at the trough, 100 = at the peak, below 0 / above 100 when outside it);
+// edgePct is how far outside it is, as a % of the edge it passed (+ above the peak, - below the trough; 0 inside). null when nothing fell.
+// A close below the trough is not expected: any later low under it would itself be a deeper decline (the trough moves down to it), so
+// the price is at worst AT the trough. 'below' is kept only so the maths is complete.
+// 'upper' / 'middle' / 'lower' (filter choices, not zones) are the thirds of the range, measured from the trough.
+const SCR_F41_THIRD = 100 / 3;
+function scrDepthThird(posPct) { return posPct < SCR_F41_THIRD ? 'lower' : (posPct > 2 * SCR_F41_THIRD ? 'upper' : 'middle'); }
+function scrDepthPosition(close, peak, trough) {
+  if (!(peak > trough)) return null;
+  const zone = close > peak ? 'above' : (close < trough ? 'below' : 'within');
+  return {
+    zone,
+    posPct: (close - trough) / (peak - trough) * 100,
+    edgePct: zone === 'above' ? (close / peak - 1) * 100 : (zone === 'below' ? (close / trough - 1) * 100 : 0),
+  };
+}
+function scrDepthPositionMatches(pos, want) {
+  if (!want) return true;
+  if (!pos) return false;
+  if (want === 'upper' || want === 'middle' || want === 'lower') return pos.zone === 'within' && scrDepthThird(pos.posPct) === want;
+  return pos.zone === want;
+}
+const SCR_F41_POS_LABELS = { above: 'above the peak', within: 'within the peak-to-trough range', upper: 'in the upper third of the peak-to-trough range', middle: 'in the middle third of the peak-to-trough range', lower: 'in the lower third of the peak-to-trough range', below: 'below the trough' };
 
 // 'YYYY-MM-DD' (date input) -> local-midnight timestamp, comparable with parseDate() of 'DD-MMM-YYYY' bar dates
 function scrIsoToTs(iso) {
@@ -370,6 +398,7 @@ function runScreener() {
   const f41MaxRaw = parseFloat(document.getElementById('scrF41Max').value);
   const f41Max = isNaN(f41MaxRaw) ? 10 : f41MaxRaw;
   const f41Spikes = Math.max(0, parseInt(document.getElementById('scrF41Spikes').value) || 0);
+  const f41Pos = document.getElementById('scrF41Pos').value || '';
 
   const f17On = document.getElementById('scrF17On').checked;
   const f17Period = document.getElementById('scrF17Period').value;
@@ -718,16 +747,25 @@ function runScreener() {
       const r = computeDynRange(days, f41Len, f41Spikes, allowPartial);
       s._depthPct = r.insufficient ? NaN : r.depthPct;
       s._rangeSpikes = r.insufficient ? NaN : r.spikes;
+      const pos = r.insufficient ? null : scrDepthPosition(days[days.length - 1].close, r.peak, r.trough);
+      s._depthPeak = pos ? r.peak : NaN;
+      s._depthTrough = pos ? r.trough : NaN;
+      s._posPct = pos ? pos.posPct : NaN;
+      s._posZone = pos ? pos.zone : '';
+      s._posEdge = pos ? pos.edgePct : NaN;
       if (r.insufficient) {
         failReasons.push(`F41: Insufficient data for a ${f41Len}-day depth`);
       } else {
         if (r.depthPct > f41Max) failReasons.push(`F41: ${f41Len}-day depth ${fmt2(r.depthPct)}% > ${f41Max}%`);
         if (r.depthPct < f41Min) failReasons.push(`F41: ${f41Len}-day depth ${fmt2(r.depthPct)}% < ${f41Min}%`);
+        if (f41Pos && !scrDepthPositionMatches(pos, f41Pos)) failReasons.push(pos ? `F41: Price ${fmt2(days[days.length - 1].close)} is ${pos.zone === 'above' ? 'above the peak' : pos.zone === 'below' ? 'below the trough' : 'within the range'} (${fmt2(r.trough)}-${fmt2(r.peak)}), not ${SCR_F41_POS_LABELS[f41Pos]}` : `F41: No peak-to-trough decline to place the price against`);
         if (r.broke) failReasons.push(`F41: Closed ${r.broke === 'up' ? 'above' : 'below'} the ${f41Len}-day box (${fmt2(days[days.length - 1].close)} vs ${fmt2(r.broke === 'up' ? r.top : r.bottom)})`);
       }
     } else {
       s._depthPct = NaN;
       s._rangeSpikes = NaN;
+      s._depthPeak = s._depthTrough = s._posPct = s._posEdge = NaN;
+      s._posZone = '';
     }
 
     if (failReasons.length === 0) {
@@ -876,6 +914,14 @@ function renderScreenerTable() {
   }
   if (f41On) {
     cols.push({ key: '_depthPct', label: `Depth% (${f41Len}d)`, fmt: v => isNaN(v) ? '-' : fmt2(v) });
+    cols.push({ key: '_depthPeak', label: 'Peak', fmt: v => isNaN(v) ? '-' : fmt2(v) });
+    cols.push({ key: '_depthTrough', label: 'Trough', fmt: v => isNaN(v) ? '-' : fmt2(v) });
+    cols.push({ key: '_posPct', label: 'Price vs Peak-Trough', fmt: (v, row) => {
+      if (isNaN(v)) return '-';
+      if (row._posZone === 'above') return `<span class="positive">Above peak +${fmt2(row._posEdge)}%</span>`;
+      if (row._posZone === 'below') return `<span class="negative">Below trough ${fmt2(row._posEdge)}%</span>`;
+      return `Within, ${Math.round(v)}% up from trough (${scrDepthThird(v)} third)`;
+    } });
     if (f41Spikes > 0) cols.push({ key: '_rangeSpikes', label: 'Spikes Ignored', fmt: v => isNaN(v) ? '-' : String(v) });
   }
   if (f19On) {
@@ -984,6 +1030,7 @@ function resetScreener() {
   document.getElementById('scrF41Min').value = '0';
   document.getElementById('scrF41Max').value = '10';
   document.getElementById('scrF41Spikes').value = '0';
+  document.getElementById('scrF41Pos').value = '';
   document.getElementById('scrF13On').checked = false;
   document.getElementById('scrF13Val').value = '3';
   document.getElementById('scrF14On').checked = false;

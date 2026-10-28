@@ -256,11 +256,19 @@
             <div class="scr-filter-row">
               <input type="checkbox" id="scrF41On">
               <span class="scr-label">Consolidating:</span>
-              <div class="scr-inputs" title="The biggest peak-to-trough decline over the last N trading days (a high, then a lower low on a later day), as a % of that high, must be at least the min (0 = no minimum) and at most the max. Ignore spikes forgives that many of the most extreme highs and lows (a fake breakout or breakdown wick). A stock whose latest close is outside the remaining box has broken out and always fails.">
+              <div class="scr-inputs" title="The biggest peak-to-trough decline over the last N trading days (a high, then a lower low on a later day), as a % of that high, must be at least the min (0 = no minimum) and at most the max. Ignore spikes forgives that many of the most extreme highs and lows (a fake breakout or breakdown wick). Price: where the latest close sits against the peak and trough of that deepest decline (anywhere = no restriction; the thirds are measured from the trough up to the peak). A stock whose latest close is outside the remaining box has broken out and always fails.">
                 <input type="number" id="scrF41Len" value="30" min="5" step="1"> <span class="scr-unit">Days depth</span>
                 <input type="number" id="scrF41Min" value="0" min="0" step="0.5"> <span class="scr-unit">to</span>
                 <input type="number" id="scrF41Max" value="10" min="0" step="0.5"> <span class="scr-unit">% &middot; ignore</span>
-                <input type="number" id="scrF41Spikes" value="0" min="0" max="5" step="1" style="width:55px;"> <span class="scr-unit">spike(s)</span>
+                <input type="number" id="scrF41Spikes" value="0" min="0" max="5" step="1" style="width:55px;"> <span class="scr-unit">spike(s) &middot; price</span>
+                <select id="scrF41Pos" style="min-width:90px;">
+                  <option value="" selected>anywhere</option>
+                  <option value="above">above the peak</option>
+                  <option value="within">within peak-trough</option>
+                  <option value="upper">in the upper third</option>
+                  <option value="middle">in the middle third</option>
+                  <option value="lower">in the lower third</option>
+                </select>
               </div>
             </div>
 
@@ -1427,7 +1435,7 @@
 <script src="js/cache.js?v=2"></script>
 <script src="js/data-processor.js?v=2"></script>
 <script src="js/scanner.js?v=2"></script>
-<script src="js/screener.js?v=26"></script>
+<script src="js/screener.js?v=27"></script>
 <script src="js/quarterly-results.js?v=13"></script>
 <script src="js/relative-strength.js?v=3"></script>
 <script src="js/group-breadth.js?v=1"></script>
@@ -1445,7 +1453,7 @@
 <script src="js/industry-charts.js?v=25"></script>
 <script src="js/data-quality.js?v=13"></script>
 <script src="js/quarterly-results-fetch.js?v=1"></script>
-<script src="js/presets.js?v=22"></script>
+<script src="js/presets.js?v=23"></script>
 <script src="js/asof-scan.js?v=3"></script>
 <script src="js/ui.js?v=13"></script>
 <script src="js/nse-download.js?v=5"></script>
