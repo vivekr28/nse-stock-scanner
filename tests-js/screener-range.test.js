@@ -10,7 +10,7 @@ const { loadScripts } = require('./load');
 const { installFakeDom } = require('./fakedom');
 
 const sb = loadScripts(['js/utils.js', 'js/industry.js', 'js/breadth.js', 'js/screener.js', 'js/presets.js']);
-const { computeDynRange, capturePresetState, applyPresetState } = sb;
+const { computeDynRange, scrDepthPosition, capturePresetState, applyPresetState } = sb;
 
 // bars from [high, low, close] triples
 const bars = (rows) => rows.map(([high, low, close], i) => ({ date: 'D' + i, high, low, close: close === undefined ? (high + low) / 2 : close, open: low, turnover: 10 }));
@@ -70,6 +70,56 @@ test('strict mode needs a full window of history; partial mode needs 5 bars and 
 
 test('a bar with a non-positive low cannot give a depth', () => {
   assert.equal(computeDynRange(bars([...calm(29), [105, 0, 102]]), 30, 0, false).insufficient, true);
+});
+
+// ─── the peak and trough of the deepest decline, and where the price sits against them ─────────────────
+
+const rep = (n, row) => Array.from({ length: n }, () => row);
+// a peak of 100, a trough of 80 after it (a 20% decline), then ten bars closing at `close`
+const legs = (close) => bars([...rep(10, [100, 95, 98]), ...rep(10, [90, 80, 85]), ...rep(10, [close + 1, close - 1, close])]);
+
+test('the decline reports its own peak and trough prices; NaN when nothing fell', () => {
+  const r = computeDynRange(legs(90), 30, 0, false);
+  assert.equal(r.peak, 100);
+  assert.equal(r.trough, 80);
+  assert.ok(near(r.depthPct, 20));
+  const climb = computeDynRange(bars(Array.from({ length: 30 }, (_, i) => [101 + i, 100 + i, 100 + i])), 30, 0, false);
+  assert.ok(isNaN(climb.peak) && isNaN(climb.trough));
+});
+
+test('the reported peak is the one the deepest fall started from, not the highest high', () => {
+  const rows = [...rep(10, [100, 95, 98]), ...rep(10, [90, 80, 85]), ...rep(10, [130, 120, 125])];   // runs to 130 after the trough
+  const r = computeDynRange(bars(rows), 30, 0, false);
+  assert.equal(r.peak, 100);
+  assert.equal(r.trough, 80);
+});
+
+test('price above the peak: 5% above a 100 peak with an 80 trough', () => {
+  const p = scrDepthPosition(105, 100, 80);
+  assert.equal(p.zone, 'above');
+  assert.ok(near(p.edgePct, 5));
+  assert.ok(near(p.posPct, 125), 'a quarter of the range beyond the peak');
+});
+
+test('price within the range: its place counts up from the trough', () => {
+  const p = scrDepthPosition(90, 100, 80);
+  assert.equal(p.zone, 'within');
+  assert.ok(near(p.posPct, 50));
+  assert.equal(p.edgePct, 0);
+  assert.ok(near(scrDepthPosition(80, 100, 80).posPct, 0) && near(scrDepthPosition(100, 100, 80).posPct, 100));
+});
+
+test('price below the trough is still reported by the maths, and no decline gives no position', () => {
+  const p = scrDepthPosition(76, 100, 80);
+  assert.equal(p.zone, 'below');
+  assert.ok(near(p.edgePct, -5));
+  assert.equal(scrDepthPosition(90, NaN, NaN), null);
+});
+
+test('the latest close can never sit below the trough: a lower low would simply be a deeper decline', () => {
+  const r = computeDynRange(legs(70), 30, 0, false);   // the last bars fall to 69
+  assert.equal(r.trough, 69);
+  assert.ok(near(r.depthPct, 31));
 });
 
 // ─── fake breakouts / breakdowns ────────────────────────────────────────────────
@@ -164,6 +214,7 @@ function runWith(f41, stocksByKey, partial = false) {
     dom.el('scrF41Len').value = String(f41.len);
     dom.el('scrF41Max').value = String(f41.max);
     dom.el('scrF41Min').value = String(f41.min || 0);
+    dom.el('scrF41Pos').value = f41.pos || '';
     dom.el('scrF41Spikes').value = String(f41.spikes || 0);
   }
   sb.renderScreenerTable = () => {};
@@ -224,6 +275,38 @@ test('F41 via runScreener: a depth exactly on the min or the max passes', () => 
   assert.deepEqual(runWith({ len: 30, min: 5 / 105 * 100, max: 5 / 105 * 100 }, { TIGHT: FIXTURE.TIGHT }).passed, ['TIGHT']);
 });
 
+const POS_FIXTURE = { ABOVE: legs(105), UPPER: legs(95), MIDDLE: legs(90), LOWER: legs(85), FLAT: bars(calm(30)) };
+const posRun = (pos) => runWith({ len: 30, max: 30, spikes: 0, pos }, POS_FIXTURE);
+
+test('F41 price position via runScreener: each choice keeps only the stocks in that place', () => {
+  assert.deepEqual(posRun('').passed, ['ABOVE', 'FLAT', 'LOWER', 'MIDDLE', 'UPPER']);
+  assert.deepEqual(posRun('above').passed, ['ABOVE']);
+  assert.deepEqual(posRun('within').passed, ['FLAT', 'LOWER', 'MIDDLE', 'UPPER']);
+  assert.deepEqual(posRun('upper').passed, ['UPPER']);
+  assert.deepEqual(posRun('middle').passed, ['FLAT', 'MIDDLE']);   // FLAT: a 105 / 100 box closing at 102 is 40% up
+  assert.deepEqual(posRun('lower').passed, ['LOWER']);
+});
+
+test('F41 price position via runScreener: the values are stored and the fail reasons say where the price is', () => {
+  const r = posRun('above');
+  const by = Object.fromEntries(r.all.map(s => [s.symbol, s]));
+  assert.equal(by.ABOVE._depthPeak, 100);
+  assert.equal(by.ABOVE._depthTrough, 80);
+  assert.equal(by.ABOVE._posZone, 'above');
+  assert.ok(near(by.ABOVE._posEdge, 5));
+  assert.equal(by.MIDDLE._posZone, 'within');
+  assert.ok(near(by.MIDDLE._posPct, 50));
+  assert.match(by.MIDDLE._failReasons.join(' | '), /F41: Price 90\.00 is within the range \(80\.00-100\.00\), not above the peak/);
+});
+
+test('F41 price position via runScreener: a stock that never fell cannot be placed, so it fails any position choice', () => {
+  const climb = { CLIMB: bars(Array.from({ length: 30 }, (_, i) => [101 + i, 100 + i, 100 + i])) };
+  assert.deepEqual(runWith({ len: 30, max: 30, pos: '' }, climb).passed, ['CLIMB']);
+  const r = runWith({ len: 30, max: 30, pos: 'within' }, climb);
+  assert.deepEqual(r.passed, []);
+  assert.match(r.failed[0]._failReasons.join(' '), /F41: No peak-to-trough decline to place the price against/);
+});
+
 test('F41 via runScreener: the Depth% and Spikes Ignored values are stored on each stock', () => {
   const r = runWith({ len: 30, max: 10, spikes: 1 }, FIXTURE);
   const by = Object.fromEntries(r.all.map(s => [s.symbol, s]));
@@ -249,17 +332,17 @@ test('F41 off: the filter does nothing', () => {
 
 // ─── presets ────────────────────────────────────────────────────────────────────
 
-test('presets: F41 on/off, days, min %, max % and spikes are captured and restored; "— Select preset —" resets them', () => {
+test('presets: F41 on/off, days, min %, max %, spikes and price position are captured and restored; "— Select preset —" resets them', () => {
   const dom = installFakeDom(sb, {});
   const el = dom.el;
-  el('scrF41On').checked = true; el('scrF41Len').value = '45'; el('scrF41Min').value = '3'; el('scrF41Max').value = '8'; el('scrF41Spikes').value = '2';
+  el('scrF41On').checked = true; el('scrF41Len').value = '45'; el('scrF41Min').value = '3'; el('scrF41Max').value = '8'; el('scrF41Spikes').value = '2'; el('scrF41Pos').value = 'above';
   const state = capturePresetState();
-  assert.deepEqual([state.scrF41On, state.scrF41Len, state.scrF41Min, state.scrF41Max, state.scrF41Spikes], [true, '45', '3', '8', '2']);
-  el('scrF41On').checked = false; el('scrF41Len').value = '30'; el('scrF41Min').value = '0'; el('scrF41Max').value = '10'; el('scrF41Spikes').value = '0';
+  assert.deepEqual([state.scrF41On, state.scrF41Len, state.scrF41Min, state.scrF41Max, state.scrF41Spikes, state.scrF41Pos], [true, '45', '3', '8', '2', 'above']);
+  el('scrF41On').checked = false; el('scrF41Len').value = '30'; el('scrF41Min').value = '0'; el('scrF41Max').value = '10'; el('scrF41Spikes').value = '0'; el('scrF41Pos').value = '';
   applyPresetState(state);
-  assert.deepEqual([el('scrF41On').checked, el('scrF41Len').value, el('scrF41Min').value, el('scrF41Max').value, el('scrF41Spikes').value], [true, '45', '3', '8', '2']);
+  assert.deepEqual([el('scrF41On').checked, el('scrF41Len').value, el('scrF41Min').value, el('scrF41Max').value, el('scrF41Spikes').value, el('scrF41Pos').value], [true, '45', '3', '8', '2', 'above']);
   applyPresetState(vm.runInContext('DEFAULT_FILTER_STATE', sb));
-  assert.deepEqual([el('scrF41On').checked, el('scrF41Len').value, el('scrF41Min').value, el('scrF41Max').value, el('scrF41Spikes').value], [false, '30', '0', '10', '0']);
+  assert.deepEqual([el('scrF41On').checked, el('scrF41Len').value, el('scrF41Min').value, el('scrF41Max').value, el('scrF41Spikes').value, el('scrF41Pos').value], [false, '30', '0', '10', '0', '']);
 });
 
 test('presets saved before F41 existed load fine and leave the F41 controls alone', () => {
