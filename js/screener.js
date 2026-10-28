@@ -365,6 +365,8 @@ function runScreener() {
 
   const f41On = document.getElementById('scrF41On').checked;
   const f41Len = parseInt(document.getElementById('scrF41Len').value) || 30;
+  const f41MinRaw = parseFloat(document.getElementById('scrF41Min').value);
+  const f41Min = isNaN(f41MinRaw) ? 0 : f41MinRaw;
   const f41MaxRaw = parseFloat(document.getElementById('scrF41Max').value);
   const f41Max = isNaN(f41MaxRaw) ? 10 : f41MaxRaw;
   const f41Spikes = Math.max(0, parseInt(document.getElementById('scrF41Spikes').value) || 0);
@@ -711,7 +713,7 @@ function runScreener() {
       s._priorHigh = NaN;
     }
 
-    // F41: Consolidating - the last N days' biggest peak-to-trough decline is within the max %, and the latest close has not left the box
+    // F41: Consolidating - the last N days' biggest peak-to-trough decline is within the min and max %, and the latest close has not left the box
     if (f41On) {
       const r = computeDynRange(days, f41Len, f41Spikes, allowPartial);
       s._depthPct = r.insufficient ? NaN : r.depthPct;
@@ -720,6 +722,7 @@ function runScreener() {
         failReasons.push(`F41: Insufficient data for a ${f41Len}-day depth`);
       } else {
         if (r.depthPct > f41Max) failReasons.push(`F41: ${f41Len}-day depth ${fmt2(r.depthPct)}% > ${f41Max}%`);
+        if (r.depthPct < f41Min) failReasons.push(`F41: ${f41Len}-day depth ${fmt2(r.depthPct)}% < ${f41Min}%`);
         if (r.broke) failReasons.push(`F41: Closed ${r.broke === 'up' ? 'above' : 'below'} the ${f41Len}-day box (${fmt2(days[days.length - 1].close)} vs ${fmt2(r.broke === 'up' ? r.top : r.bottom)})`);
       }
     } else {
@@ -978,6 +981,7 @@ function resetScreener() {
   document.getElementById('scrF18_52w').checked = false;
   document.getElementById('scrF41On').checked = false;
   document.getElementById('scrF41Len').value = '30';
+  document.getElementById('scrF41Min').value = '0';
   document.getElementById('scrF41Max').value = '10';
   document.getElementById('scrF41Spikes').value = '0';
   document.getElementById('scrF13On').checked = false;

@@ -1,6 +1,6 @@
 'use strict';
 // The Stock Scanner (screener) "Consolidating" filter, F41: the biggest peak-to-trough decline (a high, then a lower low on a LATER bar)
-// over the last N days must be within a max % of the peak, with a spike tolerance (ignore the K most extreme highs / lows, to forgive a fake breakout or breakdown wick) and a guard that a
+// over the last N days must be between a min and a max % of the peak, with a spike tolerance (ignore the K most extreme highs / lows, to forgive a fake breakout or breakdown wick) and a guard that a
 // latest close outside the remaining box always fails. Covers the calculation (computeDynRange), the filter end to end through
 // runScreener(), the Depth% / Spikes Ignored columns, and that it is saved in / restored from presets.
 const { test } = require('node:test');
@@ -152,7 +152,7 @@ test('K is clamped so the box never inverts, even on a short window', () => {
 
 // ─── the filter through runScreener() ───────────────────────────────────────────
 
-// `f41` = { len, max, spikes } to switch the filter on; `partial` = "allow partial history"
+// `f41` = { len, max, min, spikes } to switch the filter on; `partial` = "allow partial history"
 function runWith(f41, stocksByKey, partial = false) {
   const dom = installFakeDom(sb, {
     scrSearch: '', scrF17Period: '3m', scrF17Lag: '3m', scrF15Period: '1m',
@@ -163,6 +163,7 @@ function runWith(f41, stocksByKey, partial = false) {
     dom.el('scrF41On').checked = true;
     dom.el('scrF41Len').value = String(f41.len);
     dom.el('scrF41Max').value = String(f41.max);
+    dom.el('scrF41Min').value = String(f41.min || 0);
     dom.el('scrF41Spikes').value = String(f41.spikes || 0);
   }
   sb.renderScreenerTable = () => {};
@@ -211,6 +212,18 @@ test('F41 via runScreener, K = 1: fake-out wicks (earlier or today) pass, a real
   assert.match(reasons.WIDE, /F41: 30-day depth/);
 });
 
+test('F41 via runScreener: a min depth drops stocks that are too flat, with the fail reason; 0 means no minimum', () => {
+  const r = runWith({ len: 30, min: 10, max: 30, spikes: 0 }, FIXTURE);
+  assert.deepEqual(r.passed, ['WICKED', 'WIDE']);   // 16.7% and 23.1% deep; the 4.8% boxes are too flat
+  const reasons = Object.fromEntries(r.failed.map(s => [s.symbol, s._failReasons.join(' | ')]));
+  assert.match(reasons.TIGHT, /F41: 30-day depth 4.76% < 10%/);
+  assert.equal(runWith({ len: 30, min: 0, max: 30, spikes: 0 }, FIXTURE).passed.length, 5);
+});
+
+test('F41 via runScreener: a depth exactly on the min or the max passes', () => {
+  assert.deepEqual(runWith({ len: 30, min: 5 / 105 * 100, max: 5 / 105 * 100 }, { TIGHT: FIXTURE.TIGHT }).passed, ['TIGHT']);
+});
+
 test('F41 via runScreener: the Depth% and Spikes Ignored values are stored on each stock', () => {
   const r = runWith({ len: 30, max: 10, spikes: 1 }, FIXTURE);
   const by = Object.fromEntries(r.all.map(s => [s.symbol, s]));
@@ -236,17 +249,17 @@ test('F41 off: the filter does nothing', () => {
 
 // ─── presets ────────────────────────────────────────────────────────────────────
 
-test('presets: F41 on/off, days, max % and spikes are captured and restored; "— Select preset —" resets them', () => {
+test('presets: F41 on/off, days, min %, max % and spikes are captured and restored; "— Select preset —" resets them', () => {
   const dom = installFakeDom(sb, {});
   const el = dom.el;
-  el('scrF41On').checked = true; el('scrF41Len').value = '45'; el('scrF41Max').value = '8'; el('scrF41Spikes').value = '2';
+  el('scrF41On').checked = true; el('scrF41Len').value = '45'; el('scrF41Min').value = '3'; el('scrF41Max').value = '8'; el('scrF41Spikes').value = '2';
   const state = capturePresetState();
-  assert.deepEqual([state.scrF41On, state.scrF41Len, state.scrF41Max, state.scrF41Spikes], [true, '45', '8', '2']);
-  el('scrF41On').checked = false; el('scrF41Len').value = '30'; el('scrF41Max').value = '10'; el('scrF41Spikes').value = '0';
+  assert.deepEqual([state.scrF41On, state.scrF41Len, state.scrF41Min, state.scrF41Max, state.scrF41Spikes], [true, '45', '3', '8', '2']);
+  el('scrF41On').checked = false; el('scrF41Len').value = '30'; el('scrF41Min').value = '0'; el('scrF41Max').value = '10'; el('scrF41Spikes').value = '0';
   applyPresetState(state);
-  assert.deepEqual([el('scrF41On').checked, el('scrF41Len').value, el('scrF41Max').value, el('scrF41Spikes').value], [true, '45', '8', '2']);
+  assert.deepEqual([el('scrF41On').checked, el('scrF41Len').value, el('scrF41Min').value, el('scrF41Max').value, el('scrF41Spikes').value], [true, '45', '3', '8', '2']);
   applyPresetState(vm.runInContext('DEFAULT_FILTER_STATE', sb));
-  assert.deepEqual([el('scrF41On').checked, el('scrF41Len').value, el('scrF41Max').value, el('scrF41Spikes').value], [false, '30', '10', '0']);
+  assert.deepEqual([el('scrF41On').checked, el('scrF41Len').value, el('scrF41Min').value, el('scrF41Max').value, el('scrF41Spikes').value], [false, '30', '0', '10', '0']);
 });
 
 test('presets saved before F41 existed load fine and leave the F41 controls alone', () => {
