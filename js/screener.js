@@ -114,6 +114,37 @@ function computeDynNewHigh(days, windowDays, allowPartial) {
   return { ok: latest.high > priorHigh, high: latest.high, priorHigh };
 }
 
+// F41 "Consolidation depth": the biggest peak-to-trough decline inside the last `windowDays` bars (the latest included), as a % of
+// the peak - the deepest fall from a HIGH to a LOW made on a LATER bar (a low that came before the high does not count, so a steady
+// climb has no depth). `spikes` (K) forgives fake breakouts / breakdowns: the K most extreme highs and the K most extreme lows are
+// ignored, so the box top is the (K+1)th highest high and the bottom the (K+1)th lowest low (K = 0 is strict); every bar's high is
+// capped at that top and every low floored at that bottom before the decline is measured (K = 0 caps nothing).
+// A real break is not forgiven: if the latest CLOSE is above that top or below that bottom the stock has left the box (`broke`).
+// A wick today that closes back inside the box is a fake-out and stays in. K is clamped so top >= bottom always holds.
+// Strict mode needs a full window of history; partial mode (the screener's "allow partial" switch) accepts any stock with at
+// least 5 bars and uses what exists. Returns { insufficient: true } or { depthPct, top, bottom, spikes, broke: 'up' | 'down' | null }.
+function computeDynRange(days, windowDays, spikes, allowPartial) {
+  if (days.length < (allowPartial ? 5 : windowDays)) return { insufficient: true };
+  const slice = days.slice(-windowDays);
+  const k = Math.min(Math.max(0, spikes | 0), Math.floor((slice.length - 1) / 2));
+  const highs = slice.map(d => d.high).sort((a, b) => b - a);
+  const lows = slice.map(d => d.low).sort((a, b) => a - b);
+  const top = highs[k], bottom = lows[k];
+  if (!(bottom > 0)) return { insufficient: true };
+  let peak = Math.min(slice[0].high, top), depthPct = 0;
+  for (let i = 1; i < slice.length; i++) {
+    depthPct = Math.max(depthPct, (peak - Math.max(slice[i].low, bottom)) / peak * 100);
+    peak = Math.max(peak, Math.min(slice[i].high, top));
+  }
+  const close = slice[slice.length - 1].close;
+  return {
+    depthPct,
+    top, bottom,
+    spikes: slice.filter(d => d.high > top || d.low < bottom).length,   // bars the tolerance actually set aside (0 = it changed nothing)
+    broke: close > top ? 'up' : (close < bottom ? 'down' : null),
+  };
+}
+
 // 'YYYY-MM-DD' (date input) -> local-midnight timestamp, comparable with parseDate() of 'DD-MMM-YYYY' bar dates
 function scrIsoToTs(iso) {
   if (!iso) return NaN;
@@ -331,6 +362,12 @@ function runScreener() {
   // Every ticked window must be a new high (like "Price Above": all ticked averages). Nothing ticked = no restriction.
   const f18Periods = SCR_NEW_HIGH_PERIODS.filter(p => document.getElementById('scrF18_' + p).checked);
   const f18Longest = f18Periods.length ? f18Periods.reduce((a, b) => (SCR_NEW_HIGH_DAYS[b] > SCR_NEW_HIGH_DAYS[a] ? b : a)) : null;
+
+  const f41On = document.getElementById('scrF41On').checked;
+  const f41Len = parseInt(document.getElementById('scrF41Len').value) || 30;
+  const f41MaxRaw = parseFloat(document.getElementById('scrF41Max').value);
+  const f41Max = isNaN(f41MaxRaw) ? 10 : f41MaxRaw;
+  const f41Spikes = Math.max(0, parseInt(document.getElementById('scrF41Spikes').value) || 0);
 
   const f17On = document.getElementById('scrF17On').checked;
   const f17Period = document.getElementById('scrF17Period').value;
@@ -674,6 +711,22 @@ function runScreener() {
       s._priorHigh = NaN;
     }
 
+    // F41: Consolidating - the last N days' biggest peak-to-trough decline is within the max %, and the latest close has not left the box
+    if (f41On) {
+      const r = computeDynRange(days, f41Len, f41Spikes, allowPartial);
+      s._depthPct = r.insufficient ? NaN : r.depthPct;
+      s._rangeSpikes = r.insufficient ? NaN : r.spikes;
+      if (r.insufficient) {
+        failReasons.push(`F41: Insufficient data for a ${f41Len}-day depth`);
+      } else {
+        if (r.depthPct > f41Max) failReasons.push(`F41: ${f41Len}-day depth ${fmt2(r.depthPct)}% > ${f41Max}%`);
+        if (r.broke) failReasons.push(`F41: Closed ${r.broke === 'up' ? 'above' : 'below'} the ${f41Len}-day box (${fmt2(days[days.length - 1].close)} vs ${fmt2(r.broke === 'up' ? r.top : r.bottom)})`);
+      }
+    } else {
+      s._depthPct = NaN;
+      s._rangeSpikes = NaN;
+    }
+
     if (failReasons.length === 0) {
       passed.push(s);
     } else {
@@ -693,7 +746,7 @@ function runScreener() {
   scrSortCol = null;
 
   // Count active filters
-  const activeCount = [f1On, f2On, f3On, f4On, f5On, f6On, f7On, f8On, f9On, f10On, f12On, f13On, f14On, f15On, f16On, f17On, f18On].filter(Boolean).length + (typeof qrActiveCount === 'function' ? qrActiveCount() : 0) + (typeof gbActiveCount === 'function' ? gbActiveCount() : 0) + (typeof gtActiveCount === 'function' ? gtActiveCount() : 0) + (typeof gsActiveCount === 'function' ? gsActiveCount() : 0);
+  const activeCount = [f1On, f2On, f3On, f4On, f5On, f6On, f7On, f8On, f9On, f10On, f12On, f13On, f14On, f15On, f16On, f17On, f18On, f41On].filter(Boolean).length + (typeof qrActiveCount === 'function' ? qrActiveCount() : 0) + (typeof gbActiveCount === 'function' ? gbActiveCount() : 0) + (typeof gtActiveCount === 'function' ? gtActiveCount() : 0) + (typeof gsActiveCount === 'function' ? gsActiveCount() : 0);
 
   // Stats
   const advancing = passed.filter(s => s.changePct > 0).length;
@@ -730,6 +783,9 @@ function renderScreenerTable() {
   const f16On = document.getElementById('scrF16On').checked;
   const f17On = document.getElementById('scrF17On').checked;
   const f18On = document.getElementById('scrF18On').checked;
+  const f41On = document.getElementById('scrF41On').checked;
+  const f41Len = parseInt(document.getElementById('scrF41Len').value) || 30;
+  const f41Spikes = Math.max(0, parseInt(document.getElementById('scrF41Spikes').value) || 0);
   const f19On = document.getElementById('scrF19On').checked && !!document.getElementById('scrF19Date').value;
 
   const cols = [
@@ -814,6 +870,10 @@ function renderScreenerTable() {
       const longest = ticked.reduce((a, b) => (SCR_NEW_HIGH_DAYS[b] > SCR_NEW_HIGH_DAYS[a] ? b : a));
       cols.push({ key: '_priorHigh', label: `Prior ${SCR_NEW_HIGH_LABELS[longest]} High`, fmt: v => isNaN(v) ? '-' : fmt2(v) });
     }
+  }
+  if (f41On) {
+    cols.push({ key: '_depthPct', label: `Depth% (${f41Len}d)`, fmt: v => isNaN(v) ? '-' : fmt2(v) });
+    if (f41Spikes > 0) cols.push({ key: '_rangeSpikes', label: 'Spikes Ignored', fmt: v => isNaN(v) ? '-' : String(v) });
   }
   if (f19On) {
     cols.push({ key: 'listingDate', label: 'Listed On', fmt: v => v || '-' });
@@ -916,6 +976,10 @@ function resetScreener() {
   document.getElementById('scrF18_1m').checked = false;
   document.getElementById('scrF18_3m').checked = true;
   document.getElementById('scrF18_52w').checked = false;
+  document.getElementById('scrF41On').checked = false;
+  document.getElementById('scrF41Len').value = '30';
+  document.getElementById('scrF41Max').value = '10';
+  document.getElementById('scrF41Spikes').value = '0';
   document.getElementById('scrF13On').checked = false;
   document.getElementById('scrF13Val').value = '3';
   document.getElementById('scrF14On').checked = false;
@@ -1183,7 +1247,7 @@ function updateApplyBtn() {
 }
 
 function updateFilterBadge() {
-  const techIds = ['scrF1On','scrF2On','scrF3On','scrF4On','scrF5On','scrF6On','scrF7On','scrF8On','scrF10On','scrF18On','scrF19On'];   // F15 (Performance) and F16 (% Change) live on the Relative Strength tab now
+  const techIds = ['scrF1On','scrF2On','scrF3On','scrF4On','scrF5On','scrF6On','scrF7On','scrF8On','scrF41On','scrF10On','scrF18On','scrF19On'];   // F15 (Performance) and F16 (% Change) live on the Relative Strength tab now
   const indIds  = ['scrF9On','scrF12On','scrF13On','scrF14On','scrF17On'];
   const countChecked = ids => ids.filter(id => { const el = document.getElementById(id); return el && el.checked; }).length;
 

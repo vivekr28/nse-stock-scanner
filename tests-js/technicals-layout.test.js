@@ -52,10 +52,10 @@ test('the F4 card is one row: every control (incl. the "at least N times in the 
   assert.ok(/time\(s\) in last/.test(row) && /trading days/.test(row));
 });
 
-test('the two columns hold the other Technicals filters, five each (F15 and F16 now live on Relative Strength)', () => {
+test('the two columns hold the other Technicals filters, six and five (F15 and F16 now live on Relative Strength)', () => {
   const [left, right] = gridChildren();
   const ids = h => [...h.html.matchAll(/id="(scrF\d+On)"/g)].map(m => m[1]);
-  assert.deepEqual(ids(left), ['scrF10On', 'scrF2On', 'scrF5On', 'scrF18On', 'scrF8On']);
+  assert.deepEqual(ids(left), ['scrF10On', 'scrF2On', 'scrF5On', 'scrF18On', 'scrF41On', 'scrF8On']);
   assert.deepEqual(ids(right), ['scrF1On', 'scrF3On', 'scrF6On', 'scrF7On', 'scrF19On']);
 });
 
