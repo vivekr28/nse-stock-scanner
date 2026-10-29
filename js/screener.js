@@ -119,10 +119,10 @@ function computeDynNewHigh(days, windowDays, allowPartial) {
 // climb has no depth). `spikes` (K) forgives fake breakouts / breakdowns: the K most extreme highs and the K most extreme lows are
 // ignored, so the box top is the (K+1)th highest high and the bottom the (K+1)th lowest low (K = 0 is strict); every bar's high is
 // capped at that top and every low floored at that bottom before the decline is measured (K = 0 caps nothing).
-// A real break is not forgiven: if the latest CLOSE is above that top or below that bottom the stock has left the box (`broke`).
-// A wick today that closes back inside the box is a fake-out and stays in. K is clamped so top >= bottom always holds.
+// Whether the latest close has left the box is not judged here: it is the price-position choice's job (a close above the capped peak is
+// 'above' it, see scrDepthPosition), so "anywhere" lets a breakout through. K is clamped so top >= bottom always holds.
 // Strict mode needs a full window of history; partial mode (the screener's "allow partial" switch) accepts any stock with at
-// least 5 bars and uses what exists. Returns { insufficient: true } or { depthPct, peak, trough, top, bottom, spikes, broke: 'up' | 'down' | null }
+// least 5 bars and uses what exists. Returns { insufficient: true } or { depthPct, peak, trough, top, bottom, spikes }
 // where peak / trough are the prices of the deepest decline itself (the capped high and floored low; NaN when nothing fell, depthPct 0).
 function computeDynRange(days, windowDays, spikes, allowPartial) {
   if (days.length < (allowPartial ? 5 : windowDays)) return { insufficient: true };
@@ -138,13 +138,11 @@ function computeDynRange(days, windowDays, spikes, allowPartial) {
     if (d > depthPct) { depthPct = d; declinePeak = peak; declineTrough = low; }
     peak = Math.max(peak, Math.min(slice[i].high, top));
   }
-  const close = slice[slice.length - 1].close;
   return {
     depthPct,
     peak: declinePeak, trough: declineTrough,
     top, bottom,
     spikes: slice.filter(d => d.high > top || d.low < bottom).length,   // bars the tolerance actually set aside (0 = it changed nothing)
-    broke: close > top ? 'up' : (close < bottom ? 'down' : null),
   };
 }
 
@@ -742,7 +740,7 @@ function runScreener() {
       s._priorHigh = NaN;
     }
 
-    // F41: Consolidating - the last N days' biggest peak-to-trough decline is within the min and max %, and the latest close has not left the box
+    // F41: Consolidating - the last N days' biggest peak-to-trough decline is within the min and max %, and the latest close sits where the price choice says
     if (f41On) {
       const r = computeDynRange(days, f41Len, f41Spikes, allowPartial);
       s._depthPct = r.insufficient ? NaN : r.depthPct;
@@ -759,7 +757,6 @@ function runScreener() {
         if (r.depthPct > f41Max) failReasons.push(`F41: ${f41Len}-day depth ${fmt2(r.depthPct)}% > ${f41Max}%`);
         if (r.depthPct < f41Min) failReasons.push(`F41: ${f41Len}-day depth ${fmt2(r.depthPct)}% < ${f41Min}%`);
         if (f41Pos && !scrDepthPositionMatches(pos, f41Pos)) failReasons.push(pos ? `F41: Price ${fmt2(days[days.length - 1].close)} is ${pos.zone === 'above' ? 'above the peak' : pos.zone === 'below' ? 'below the trough' : 'within the range'} (${fmt2(r.trough)}-${fmt2(r.peak)}), not ${SCR_F41_POS_LABELS[f41Pos]}` : `F41: No peak-to-trough decline to place the price against`);
-        if (r.broke) failReasons.push(`F41: Closed ${r.broke === 'up' ? 'above' : 'below'} the ${f41Len}-day box (${fmt2(days[days.length - 1].close)} vs ${fmt2(r.broke === 'up' ? r.top : r.bottom)})`);
       }
     } else {
       s._depthPct = NaN;

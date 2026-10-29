@@ -256,7 +256,7 @@
             <div class="scr-filter-row">
               <input type="checkbox" id="scrF41On">
               <span class="scr-label">Consolidating:</span>
-              <div class="scr-inputs" title="The biggest peak-to-trough decline over the last N trading days (a high, then a lower low on a later day), as a % of that high, must be at least the min (0 = no minimum) and at most the max. Ignore spikes forgives that many of the most extreme highs and lows (a fake breakout or breakdown wick). Price: where the latest close sits against the peak and trough of that deepest decline (anywhere = no restriction; the thirds are measured from the trough up to the peak). A stock whose latest close is outside the remaining box has broken out and always fails.">
+              <div class="scr-inputs" title="The biggest peak-to-trough decline over the last N trading days (a high, then a lower low on a later day), as a % of that high, must be at least the min (0 = no minimum) and at most the max. Ignore spikes forgives that many of the most extreme highs and lows (a fake breakout or breakdown wick). Price: where the latest close sits against the peak and trough of that deepest decline (anywhere = no restriction; the thirds are measured from the trough up to the peak). Choose "within" (or a third) to drop a stock that has closed above the peak, i.e. has broken out.">
                 <input type="number" id="scrF41Len" value="30" min="5" step="1"> <span class="scr-unit">Days depth</span>
                 <input type="number" id="scrF41Min" value="0" min="0" step="0.5"> <span class="scr-unit">to</span>
                 <input type="number" id="scrF41Max" value="10" min="0" step="0.5"> <span class="scr-unit">% &middot; ignore</span>
@@ -684,7 +684,7 @@
               <!-- F28: EPS YoY % change - the latest quarter's YoY % minus the previous quarter's YoY %, in percentage points -->
               <div class="scr-filter-row">
                 <input type="checkbox" id="scrF28On">
-                <span class="scr-label" title="EPS growth on the same quarter a year earlier (the %Chg in the chart table) of the stock's latest declared quarter, minus the same % of the quarter BEFORE it, in percentage points. Example: Jun-26 EPS +384% and Mar-26 EPS +3% = +381 pts. Needs a YoY % in both quarters (a loss a year earlier has none). 0 = EPS growth is faster than in the previous quarter.">EPS YoY% change:</span>
+                <span class="scr-label" title="EPS growth on the same quarter a year earlier (the %Chg in the chart table) of the stock's latest declared quarter, minus the same % of the quarter BEFORE it, in percentage points. Example: Jun-26 EPS +384% and Mar-26 EPS +3% = +381 pts. Needs a YoY % in both quarters (a year-ago loss uses (new - old) / |old|, so a loss turning to a profit is positive; a zero year-ago EPS has none). 0 = EPS growth is faster than in the previous quarter.">EPS YoY% change:</span>
                 <div class="scr-inputs">
                   <span class="scr-unit">&gt;</span>
                   <input type="number" id="scrF28Val" value="0" step="5" style="width:70px;">

@@ -1,7 +1,7 @@
 'use strict';
 // The Stock Scanner (screener) "Consolidating" filter, F41: the biggest peak-to-trough decline (a high, then a lower low on a LATER bar)
-// over the last N days must be between a min and a max % of the peak, with a spike tolerance (ignore the K most extreme highs / lows, to forgive a fake breakout or breakdown wick) and a guard that a
-// latest close outside the remaining box always fails. Covers the calculation (computeDynRange), the filter end to end through
+// over the last N days must be between a min and a max % of the peak, with a spike tolerance (ignore the K most extreme highs / lows, to forgive a fake breakout or breakdown wick).
+// Where the latest close sits (e.g. above the peak after a breakout) is the price-position choice's call alone. Covers the calculation (computeDynRange), the filter end to end through
 // runScreener(), the Depth% / Spikes Ignored columns, and that it is saved in / restored from presets.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -25,7 +25,6 @@ test('depth is the fall from a high to a lower low on a later bar, as a % of tha
   assert.equal(r.top, 105);
   assert.equal(r.bottom, 100);
   assert.ok(near(r.depthPct, D5));
-  assert.equal(r.broke, null);
   assert.equal(r.spikes, 0);
 });
 
@@ -134,7 +133,6 @@ test('a one-day fake breakout wick inflates a strict depth, and K = 1 forgives i
   assert.ok(near(tolerant.depthPct, D5));
   assert.equal(tolerant.top, 105);
   assert.equal(tolerant.spikes, 1, 'one bar was set aside');
-  assert.equal(tolerant.broke, null);
 });
 
 test('a one-day fake breakdown wick is forgiven the same way', () => {
@@ -156,42 +154,26 @@ test('two spikes need K = 2', () => {
   assert.ok(near(computeDynRange(days, 30, 2, false).depthPct, D5));
 });
 
-test('a wick TODAY that closes back inside the box is a fake-out: it passes with K = 1', () => {
+test('a wick TODAY that closes back inside the box is a fake-out: the depth is the calm box with K = 1', () => {
   const rows = calm(29);
   rows.push([120, 100, 103]);   // today: spiked to 120, closed 103
   const r = computeDynRange(bars(rows), 30, 1, false);
-  assert.equal(r.broke, null);
   assert.ok(near(r.depthPct, D5));
 });
 
-test('a real breakout TODAY (closes above the box) is flagged broke "up" - K does not hide it', () => {
+test('a real breakout TODAY (closes above the box) leaves the box top and the depth alone', () => {
   const rows = calm(29);
   rows.push([120, 104, 118]);
   const r = computeDynRange(bars(rows), 30, 1, false);
-  assert.equal(r.broke, 'up');
   assert.equal(r.top, 105);
-});
-
-test('a real breakdown TODAY (closes below the box) is flagged broke "down"', () => {
-  const rows = calm(29);
-  rows.push([101, 85, 88]);
-  const r = computeDynRange(bars(rows), 30, 1, false);
-  assert.equal(r.broke, 'down');
-  assert.equal(r.bottom, 100);
-});
-
-test('a breakout that has run for more days than K still fails on the latest-close guard', () => {
-  const rows = calm(27);
-  rows.push([120, 110, 118], [125, 118, 124], [130, 124, 129]);   // three days out of the box
-  const r = computeDynRange(bars(rows), 30, 1, false);
-  assert.equal(r.broke, 'up');
   assert.ok(near(r.depthPct, D5), 'the climb itself is no decline');
 });
 
-test('with K = 0 the latest close can never be outside the box (it is inside its own high-low)', () => {
+test('a real breakdown TODAY (closes below the box) leaves the box bottom alone', () => {
   const rows = calm(29);
-  rows.push([120, 104, 118]);
-  assert.equal(computeDynRange(bars(rows), 30, 0, false).broke, null);
+  rows.push([101, 85, 88]);
+  const r = computeDynRange(bars(rows), 30, 1, false);
+  assert.equal(r.bottom, 100);
 });
 
 test('K is clamped so the box never inverts, even on a short window', () => {
@@ -255,12 +237,19 @@ test('F41 via runScreener, strict: only boxes within the max pass, a wick counts
   assert.match(reasons.WICKED, /F41: 30-day depth 16\.67% > 10%/);
 });
 
-test('F41 via runScreener, K = 1: fake-out wicks (earlier or today) pass, a real breakout today still fails', () => {
+test('F41 via runScreener, K = 1, price anywhere: fake-out wicks and a real breakout today all pass', () => {
   const r = runWith({ len: 30, max: 10, spikes: 1 }, FIXTURE);
-  assert.deepEqual(r.passed, ['TIGHT', 'TODAY_WICK', 'WICKED']);
+  assert.deepEqual(r.passed, ['TIGHT', 'TODAY_UP', 'TODAY_WICK', 'WICKED']);
   const reasons = Object.fromEntries(r.failed.map(s => [s.symbol, s._failReasons.join(' | ')]));
-  assert.match(reasons.TODAY_UP, /F41: Closed above the 30-day box \(118\.00 vs 105\.00\)/);
   assert.match(reasons.WIDE, /F41: 30-day depth/);
+});
+
+test('F41 via runScreener, K = 1: choosing "within" is what drops a real breakout today', () => {
+  const r = runWith({ len: 30, max: 10, spikes: 1, pos: 'within' }, FIXTURE);
+  assert.ok(!r.passed.includes('TODAY_UP'));
+  assert.ok(r.passed.includes('TODAY_WICK'));
+  const reasons = Object.fromEntries(r.failed.map(s => [s.symbol, s._failReasons.join(' | ')]));
+  assert.match(reasons.TODAY_UP, /F41: Price 118\.00 is above the peak \(100\.00-105\.00\), not within the peak-to-trough range/);
 });
 
 test('F41 via runScreener: a min depth drops stocks that are too flat, with the fail reason; 0 means no minimum', () => {

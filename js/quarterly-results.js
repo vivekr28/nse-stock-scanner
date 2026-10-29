@@ -162,7 +162,7 @@ function qrYoyPair(rec, earnings) {
 // quarter a year earlier (the numbers the chart table shows). F28 "EPS YoY% change" / F29 "Sales YoY% change": the latest quarter's YoY %
 // minus the previous quarter's, in percentage points, strictly above X (Jun-2026 +384% against Mar-2026 +3% = +381 pts). F32 / F33 are the
 // turnarounds: the YoY % was NEGATIVE in the previous quarter and is POSITIVE now (Dec-2025 -33%, Mar-2026 +3%). Each stock is judged on its own
-// latest declared quarter, or on the quarter F40 picks (the quarter before THAT one is then the previous quarter). A quarter with no YoY % (no result, or a loss / zero year-ago base) cannot be
+// latest declared quarter, or on the quarter F40 picks (the quarter before THAT one is then the previous quarter). A quarter with no YoY % (no result, or a zero year-ago base; an EPS loss a year ago has the table's (new - old) / |old| %) cannot be
 // compared and fails with that reason. checks: [{ code, earnings, min? }]; returns the reasons ([] = passes).
 function qrYoyReasons(symbol, checks, quarter) {
   const reasons = [];
@@ -178,7 +178,7 @@ function qrYoyReasons(symbol, checks, quarter) {
     if (!pair) { reasons.push(`${c.code}: No ${pq} result on file to compare ${q} with`); continue; }
     const [now, prev] = pair;
     const missing = (v, label) => v === null || v === undefined
-      ? `${c.code}: No ${name} YoY % for ${label} (no result for it or the same quarter a year earlier, or that year-ago figure was a loss / zero)` : '';
+      ? `${c.code}: No ${name} YoY % for ${label} (no result for it or the same quarter a year earlier, or that year-ago figure was zero)` : '';
     const why = missing(now, q) || missing(prev, pq);
     if (why) { reasons.push(why); continue; }
     if (c.turnaround) {

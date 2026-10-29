@@ -139,7 +139,8 @@ def build_quarterly_growth(path):
             record (q, cmp, s, sp, e, ep, sg, eg, st, et, ab, yy; a None / False one is left out), each judged against its own year-ago quarter. The scanner's quarter
             picker ("Results for quarter") makes every Quarterly Results filter use one of these (or the record itself) instead of the latest
       yy    [EPS YoY %, EPS YoY % a quarter earlier, sales YoY %, sales YoY % a quarter earlier] of the latest quarter and the quarter before
-            it (the same figures the chart table shows in h); None for a quarter that is missing or has no YoY % (loss / zero year-ago base).
+            it (the same figures the chart table shows: h's growth, or hx's (new - old) / |old| where the year-ago EPS was a loss); None for a quarter that
+            is missing or has no YoY % (zero year-ago base).
             The "against the previous quarter" filters (F28 / F29 change in YoY %, F32 / F33 YoY turned from negative to positive) read it
       s/sp  sales (Rs crore) this quarter / a year ago;  e/ep  net profit (Rs crore) this quarter / a year ago
       sg/eg sales / net-profit growth %, None unless cmp is 'ok' AND the year-ago figure is positive
@@ -152,8 +153,9 @@ def build_quarterly_growth(path):
             three more items, [..., 'S'|'C', sales this quarter, sales a year ago] on that basis, and the two growth figures
             are on that basis too);
             a quarter with no result on file is [d, None, None, None, None, 'none', 0]
-      hx    DISPLAY ONLY, present only when needed: {index into h: {'e': plain (new - old) / old % of EPS}} for a quarter whose year-ago EPS was a
-            loss, whatever the EPS is now (h's own EPS growth is None there: it needs a positive base). The scanner's filters never use it
+      hx    present only when needed: {index into h: {'e': (new - old) / |old| % of EPS, 's': the same of sales, 'ez' / 'sz': +1 / -1 where the year-ago figure was ZERO (no %, only the n/a's colour)}} for a quarter whose year-ago EPS was a
+            loss ('e') or whose year-ago sales were negative ('s') (so a rise in EPS is always +), whatever the EPS is now (h's own EPS growth is None there: it needs a positive base). The profit-growth filters (eg) never use it;
+            the "against the previous quarter" EPS filters read it through yy, so they judge the same % the table shows
     Sales is revenue from operations (total income for banks); profit is the owners' share where reported."""
     if not os.path.exists(path):
         return {}
@@ -179,6 +181,14 @@ def build_quarterly_growth(path):
         hist = []
         hx = {}
         earlier = {}
+
+        def eps_pct(i):
+            """The EPS % the chart table shows for history index i: hx where the year-ago EPS was a loss, else h's own growth."""
+            return hx.get(i, {}).get('e', hist[i][4])
+
+        def sales_pct(i):
+            """The sales % the chart table shows for history index i: hx where the year-ago sales were negative, else h's own growth."""
+            return hx.get(i, {}).get('s', hist[i][2])
         for n in range(-9, 1):
             d = _shift_quarter(latest, n)
             row = quarters.get(d)
@@ -203,9 +213,18 @@ def build_quarterly_growth(path):
                     eps_growth = _growth_pct(cur_eps, prev_eps)
                     eps_turnaround = int(prev_eps < 0 and cur_eps > 0)
                     eps_pair = (cur_eps, prev_eps)
-            # a year-ago LOSS: the plain mathematical % (new - old) / old, for the table to show instead of n/a (or the word "Turnaround")
+            # a year-ago LOSS: (new - old) / |old|, for the table to show instead of n/a (or the word "Turnaround"). Dividing by the
+            # size of the loss keeps the sign true to the direction: any rise in EPS is positive (a loss that narrows, or turns to a profit), any fall negative
             if eps_pair and eps_pair[1] < 0:
-                hx[n + 9] = {'e': round((eps_pair[0] - eps_pair[1]) / eps_pair[1] * 100, 2)}
+                hx[n + 9] = {'e': round((eps_pair[0] - eps_pair[1]) / abs(eps_pair[1]) * 100, 2)}
+            # a ZERO year-ago EPS has no %, but the table colours its n/a by the direction of the change: 'ez' = +1 (rose) / -1 (fell)
+            if eps_pair and eps_pair[1] == 0 and eps_pair[0] != 0:
+                hx.setdefault(n + 9, {})['ez'] = 1 if eps_pair[0] > 0 else -1
+            # the same for year-ago NEGATIVE sales (a handful of finance companies report negative total income); zero stays n/a
+            if c['cmp'] == 'ok' and c['s'] is not None and c['sp'] is not None and c['sp'] < 0:
+                hx.setdefault(n + 9, {})['s'] = round((c['s'] - c['sp']) / abs(c['sp']) * 100, 2)
+            if c['cmp'] == 'ok' and c['s'] is not None and c['sp'] == 0 and c['s'] != 0:
+                hx.setdefault(n + 9, {})['sz'] = 1 if c['s'] > 0 else -1   # zero year-ago sales: no %, the n/a takes the direction's colour
             # a quarter whose own figures look mis-scaled shows no sales (its EPS is per share and is unaffected)
             shown = _result_num(row.get('REVENUE_CR'))       # the stored figure, whatever basis the comparison used
             sales = None if _looks_mis_scaled(sales_by_date, d) or shown is None else round(shown, 1)
@@ -218,14 +237,15 @@ def build_quarterly_growth(path):
                 # (a missing key reads as None / False in the browser, so those are left out to keep the payload small)
                 q = {k: v for k, v in c.items() if v is not None and v is not False}
                 q['q'] = d.isoformat()
-                q['yy'] = [entry[4], hist[-2][4], entry[2], hist[-2][2]]
+                q['yy'] = [eps_pct(n + 9), eps_pct(n + 8), sales_pct(n + 9), sales_pct(n + 8)]
                 earlier[d.isoformat()] = q
         rec['h'] = hist
         if earlier:
             rec['qq'] = earlier
         # the scanner's "against the previous quarter" filters compare YoY % with YoY %: [EPS YoY % now, EPS YoY % a quarter ago,
-        # sales YoY % now, sales YoY % a quarter ago], each None where the quarter has no result or no YoY % (a loss / zero year-ago base)
-        rec['yy'] = [hist[-1][4], hist[-2][4], hist[-1][2], hist[-2][2]]
+        # sales YoY % now, sales YoY % a quarter ago], each None where the quarter has no result or no YoY % (a zero year-ago base; an EPS
+        # loss or negative sales a year ago has the table's (new - old) / |old| figure from hx)
+        rec['yy'] = [eps_pct(9), eps_pct(8), sales_pct(9), sales_pct(8)]
         if hx:
             rec['hx'] = hx
         out[sym] = rec
