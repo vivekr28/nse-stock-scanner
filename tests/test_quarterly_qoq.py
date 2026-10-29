@@ -1,7 +1,8 @@
 """`yy` in src/quarterly_results.py: a stock's EPS and sales YoY % for its latest quarter AND the quarter before it, behind the Stock Scanner's
 "against the previous quarter" filters (F28 / F29 the change in YoY %, F32 / F33 YoY turned from negative to positive). The figures are the same
 ones the chart table shows in `h`: each quarter against the same quarter a year earlier. A quarter with no result, or no YoY % (a loss or zero
-year-ago base), is None."""
+year-ago base), is None. A year-ago EPS LOSS has the chart table's (new - old) / |old| figure (hx), so a loss turning to a profit is a positive
+YoY % and the turnaround filters can see it."""
 import json
 
 import quarterly_results as qr
@@ -43,11 +44,23 @@ def test_a_fall_is_a_negative_percentage(tmp_path):
     assert g['a']['yy'] == [25.0, -40.0, -10.0, -20.0]
 
 
-def test_a_loss_or_zero_year_ago_base_has_no_percentage_for_that_quarter_only(tmp_path):
+def test_a_loss_year_ago_base_has_the_tables_percentage_and_a_zero_base_has_none(tmp_path):
     g = growth(tmp_path, arow('A', '31-Mar-2025', 100, -2), arow('A', '30-Jun-2025', 100, 3),
                arow('A', '31-Mar-2026', 120, 5), arow('A', '30-Jun-2026', 130, 6))
-    assert g['a']['yy'][0] == 100.0 and g['a']['yy'][1] is None   # Mar-26 EPS has a loss a year earlier: no %; Jun-26 does (3 -> 6)
+    assert g['a']['yy'][0] == 100.0 and g['a']['yy'][1] == 350.0  # Mar-26: (5 - -2) / |-2| = +350% (the table's number); Jun-26: 3 -> 6
     assert g['a']['yy'][2] == 30.0 and g['a']['yy'][3] == 20.0    # sales are fine in both
+    z = growth(tmp_path, arow('Z', '31-Mar-2025', 100, 0), arow('Z', '30-Jun-2025', 100, 3),
+               arow('Z', '31-Mar-2026', 120, 5), arow('Z', '30-Jun-2026', 130, 6))
+    assert z['z']['yy'][0] == 100.0 and z['z']['yy'][1] is None   # a zero year-ago EPS cannot be divided: still no %
+
+
+def test_a_loss_that_turns_to_a_profit_then_keeps_growing_is_not_a_second_turnaround(tmp_path):
+    # PVRINOX-like: Jun-25 -5.51 vs -18.21 (+70%), Sep-25 10.78 vs -1.20 (+998%), then Sep-26 26.82 against 10.78 (+149%) after Jun-26 5.75 vs -5.51 (+204%)
+    g = growth(tmp_path, arow('P', '30-Jun-2024', 100, -18.21), arow('P', '30-Sep-2024', 100, -1.2),
+               arow('P', '30-Jun-2025', 100, -5.51), arow('P', '30-Sep-2025', 100, 10.78),
+               arow('P', '30-Jun-2026', 100, 5.75), arow('P', '30-Sep-2026', 100, 26.82))['p']
+    assert g['yy'][:2] == [148.79, 204.36]                        # Sep-26 and Jun-26: positive both, so F32 (negative then, positive now) does not fire
+    assert g['qq']['2025-09-30']['yy'][:2] == [998.33, 69.74]     # Sep-25 and Jun-25: a loss that narrowed, then a profit
 
 
 def test_a_missing_previous_quarter_is_none_but_the_latest_is_still_measured(tmp_path):

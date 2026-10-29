@@ -94,14 +94,21 @@ function qctTableHtml(stock) {
       const [q, sales, salesG, eps, epsG, cmp, epsT, ab, abSales, abSalesPrev] = h;
       const epsCell = { text: eps === null || eps === undefined ? '-' : eps.toFixed(2), cls: '', title: eps === null || eps === undefined ? 'No EPS reported in this filing' : '' };
       const epsPct = qctPctCell(epsG, cmp === 'scale' || cmp === 'blank' ? 'ok' : cmp, { naTitle: 'No % change: the same quarter a year ago had zero EPS' });
-      // the year-ago EPS was a loss: just the plain mathematical % (new - old) / old, which the server sends for display (rec.hx)
+      // the year-ago EPS was a loss: just the % (new - old) / |old| (a rise is always +), which the server sends for display (rec.hx)
       const lossPct = rec.hx && rec.hx[i] ? rec.hx[i].e : undefined;
       if (lossPct !== undefined) Object.assign(epsPct, qctPctCell(lossPct, 'ok'));
+      // a zero year-ago figure has no %: the n/a still takes the colour of the direction the figure moved (+1 up, -1 down)
+      const zeroDir = (v, dir) => { if (v.text === 'n/a' && dir) v.cls = dir > 0 ? 'positive' : 'negative'; };
+      if (rec.hx && rec.hx[i]) zeroDir(epsPct, rec.hx[i].ez);
       if (eps === null || eps === undefined) { epsPct.text = '-'; epsPct.cls = ''; epsPct.title = 'No EPS reported in this filing'; }
       const note = epsPct.text !== '-' && epsPct.text !== 'n/a' ? qctEpsSplitNote(stock, q) : '';
       if (note) { epsPct.mark = true; epsPct.title = note; }
       const salesCell = { text: sales === null || sales === undefined ? '-' : qctFmtSales(sales), cls: '', title: sales === null || sales === undefined ? (QCT_CMP_NOTE[cmp === 'ok' ? 'blank' : cmp] || '') : '' };
       const salesPct = qctPctCell(salesG, cmp, { naTitle: 'No % change: sales a year ago were zero' });
+      // year-ago sales were negative (a few finance companies): the same (new - old) / |old| % as for a loss
+      const lossSales = rec.hx && rec.hx[i] ? rec.hx[i].s : undefined;
+      if (lossSales !== undefined) Object.assign(salesPct, qctPctCell(lossSales, 'ok'));
+      if (rec.hx && rec.hx[i]) zeroDir(salesPct, rec.hx[i].sz);
       if (ab) {   // compared on the one basis both quarters hold - say so on the cells that show a number
         const name = ab === 'S' ? 'Standalone' : 'Consolidated';
         const why = `The year-ago quarter was filed on a different basis, so this change is computed on ${name} results`;
