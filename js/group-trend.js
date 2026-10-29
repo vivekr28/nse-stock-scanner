@@ -1,9 +1,9 @@
 // Stock Scanner popup's "Sector & Industry" tab: two trend filters on the group a stock belongs to, not on the stock itself.
-//   F37 "Sector above SMA"    - the equal-weight index of the stock's sector closes above its own 10 / 20 / 50 SMA
+//   F37 "Sector above SMA"    - the equal-weight index of the stock's sector closes above its own 10 / 20 / 50 / 65 / 200 SMA
 //   F38 "Industry above SMA"  - the same for the stock's industry
 // The equal-weight index is the one the Market Overview tab charts for an industry and the chart popup's "Industry Chart" tab shows
 // (icComputeIndustryIndex in js/industry-charts.js: every stock's own daily % move averaged across the group's stocks, chained from 100), so
-// "above its 50 SMA" here is what the eye sees on that chart. Tick any of 10 / 20 / 50: the index must be above EVERY ticked SMA. Ticking an
+// "above its 50 SMA" here is what the eye sees on that chart. Tick any of 10 / 20 / 50 / 65 / 200: the index must be above EVERY ticked SMA. Ticking an
 // SMA switches the filter on; unticking the last one switches it off; switching it on with none ticked ticks the 20.
 //   F39 "Industry EW % Change" - the % change of the stock's industry's equal-weight index between two dates, each on a chosen Open / High /
 //   Low / Close, at least N% (the industry version of the % Change filter on the Relative Strength tab; a date that is not a trading day uses the
@@ -11,7 +11,7 @@
 // A group with no index (too little history) fails. screener.js reaches this file only through the hooks below (each call guarded by typeof,
 // like js/group-breadth.js), so the scanner holds none of these controls, fields or columns.
 
-const GT_LENGTHS = [10, 20, 50];
+const GT_LENGTHS = [10, 20, 50, 65, 200];
 const GT_FILTERS = [
   { code: 'F37', prefix: 'scrF37', level: 'sector',   noun: 'Sector',   stateKey: 'sec', key: '_gtSec', colLabel: 'Sector EW vs SMA' },
   { code: 'F38', prefix: 'scrF38', level: 'industry', noun: 'Industry', stateKey: 'ind', key: '_gtInd', colLabel: 'Ind EW vs SMA' },
@@ -21,7 +21,7 @@ const GT_UNKNOWN = 'Undefined-Diversified';
 
 let _gtCache = {};   // level -> { sig, map }
 
-// Core, pure. For each group of one level ('industry' | 'sector'): { close, sma: { 10, 20, 50 } } of its equal-weight index today
+// Core, pure. For each group of one level ('industry' | 'sector'): { close, sma: { 10, 20, 50, 65, 200 } } of its equal-weight index today
 // (an SMA is NaN while the index has fewer closes than its length). Cached until the loaded data changes.
 function gtGroupMap(level) {
   const dates = Store.dates || [];
