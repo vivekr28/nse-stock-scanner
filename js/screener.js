@@ -713,7 +713,7 @@ function runScreener() {
     // F34 / F35: breadth of the stock's industry / sector (js/group-breadth.js)
     if (gb && gb.any) failReasons.push(...gbApplyToStock(s, gb, gbMaps));
 
-    // F37 / F38: the equal-weight index of the stock's sector / industry above its 10 / 20 / 50 SMA (js/group-trend.js)
+    // F37 / F38: the equal-weight index of the stock's sector / industry above its 10 / 20 / 50 / 65 / 200 SMA (js/group-trend.js)
     if (gt && gt.any) failReasons.push(...gtApplyToStock(s, gt, gtMaps));
 
     // F24: closed above the O/H/L/C of a chosen date within the next n trading days (js/relative-strength.js)

@@ -1,7 +1,7 @@
 'use strict';
 // Stock Scanner popup's "Sector & Industry" tab, F37 / F38 (js/group-trend.js): "Sector above SMA" / "Industry above SMA" - the equal-weight
 // index of the stock's own sector / industry (icComputeIndustryIndex, the Market Overview / chart popup index) closes above every ticked one of
-// its 10 / 20 / 50 SMA. Covers the pure group map, both filters end to end through runScreener() (every ticked SMA must hold, fail reasons, the
+// its 10 / 20 / 50 / 65 / 200 SMA. Covers the pure group map, both filters end to end through runScreener() (every ticked SMA must hold, fail reasons, the
 // column), the tick / switch-on behaviour, the hooks, presets, the popup's HTML (two filters per row) and that screener.js holds none of it.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -42,7 +42,7 @@ function setup(opts = {}) {
   for (const f of ['37', '38']) {
     const o = opts['f' + f] || {};
     dom.el(`scrF${f}On`).checked = !!o.on;
-    for (const len of [10, 20, 50]) dom.el(`scrF${f}Sma${len}`).checked = (o.lens || []).includes(len);
+    for (const len of [10, 20, 50, 65, 200]) dom.el(`scrF${f}Sma${len}`).checked = (o.lens || []).includes(len);
   }
   sb.renderScreenerTable = () => {};
   sb.updateToggleButton = () => {};
@@ -379,4 +379,54 @@ test('guard: screener.js holds none of the feature\'s ids or logic - only typeof
     const lines = src.split(/\r?\n/).filter(l => l.includes(name + '('));
     assert.ok(lines.length > 0 && lines.every(l => /\bgt\b\s*&&/.test(l)), name);
   }
+});
+
+// ─── 65 and 200 SMA ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+const LONG_DATES = Array.from({ length: 220 }, (_, i) => { const d = new Date(2025, 0, 1 + i); return `${String(d.getDate()).padStart(2, '0')}-${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()]}-${d.getFullYear()}`; });
+function longRun(opts) {
+  setup(opts);
+  const longBars = closes => closes.map((c, i) => ({ date: LONG_DATES[i], open: c, high: c, low: c, close: c, turnover: 10 }));
+  // UP rises all 220 days (above every SMA); LATE rises for 200 days then falls 8 (below its 10 SMA, still above its 65 and 200 SMA); DOWN falls all 220 days
+  sb.Store.dailyBySymbol = { UP: longBars(range(100, 1, 220)), LATE: longBars([...range(100, 1, 200), ...range(299, -2, 8)]), DOWN: longBars(range(400, -1, 220)) };
+  sb.Store.latestBySymbol = { UP: stock('UP', 'UP', 'S1'), LATE: stock('LATE', 'LATE', 'S3'), DOWN: stock('DOWN', 'DOWN', 'S2') };
+  sb.Store.dates = LONG_DATES.slice();
+  vm.runInContext('_gtCache = {}', sb);
+  sb.runScreener();
+  return { passed: Array.from(vm.runInContext('screenerPassed', sb), s => s.symbol).sort(),
+           failed: Object.fromEntries(Array.from(vm.runInContext('screenerFailed', sb), s => [s.symbol, Array.from(s._failReasons).join('|')])) };
+}
+
+test('the group map also holds the 65 and 200 SMA: NaN until the index has that many closes', () => {
+  setup({});
+  const short = sb.gtGroupMap('industry').UP;                          // 60 closes
+  assert.deepEqual(Object.keys(short.sma).map(Number), [10, 20, 50, 65, 200]);
+  assert.ok(isNaN(short.sma[65]) && isNaN(short.sma[200]));
+  longRun({});
+  const long = sb.gtGroupMap('industry').UP;                           // 220 closes
+  assert.ok(long.sma[65] > 0 && long.sma[200] > 0 && long.close > long.sma[200]);
+});
+
+test('F38 above the 65 / 200 SMA: every ticked one must hold, the 200 is a longer test than the 65', () => {
+  assert.deepEqual(longRun({ f38: { on: true, lens: [65] } }).passed, ['LATE', 'UP']);
+  assert.deepEqual(longRun({ f38: { on: true, lens: [200] } }).passed, ['LATE', 'UP']);
+  assert.deepEqual(longRun({ f38: { on: true, lens: [10, 200] } }).passed, ['UP']);   // LATE is below its 10 SMA
+  const r = longRun({ f38: { on: true, lens: [65, 200] } });
+  assert.match(r.failed.DOWN, /^F38: Industry 'DOWN' EW index [\d.]+ not above 65 SMA [\d.]+, 200 SMA [\d.]+$/);
+});
+
+test('a 65 / 200 SMA with too little history fails the group, saying n/a', () => {
+  setup({ f38: { on: true, lens: [200] } });
+  sb.runScreener();
+  const failed = Array.from(vm.runInContext('screenerFailed', sb), s => Array.from(s._failReasons).join('|'));
+  assert.equal(vm.runInContext('screenerPassed', sb).length, 0);
+  assert.ok(failed.every(r => /200 SMA \(n\/a\)/.test(r)));
+});
+
+test('the 65 and 200 SMA boxes exist for both filters and are saved in presets', () => {
+  for (const f of ['37', '38']) for (const len of [65, 200]) assert.ok(html.includes(`id="scrF${f}Sma${len}"`), `scrF${f}Sma${len}`);
+  const dom = setup({ f38: { on: true, lens: [65, 200] } });
+  const state = sb.capturePresetState();
+  assert.deepEqual([state.scrF38Sma65, state.scrF38Sma200, state.scrF37Sma65, state.scrF37Sma200], [true, true, false, false]);
+  sb.applyPresetState(Object.assign({}, state, { scrF38Sma65: false, scrF38Sma200: false }));
+  assert.equal(dom.el('scrF38Sma65').checked, false);
 });
