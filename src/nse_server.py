@@ -154,7 +154,7 @@ DOWNLOAD_SCRIPT = 'Download-NSE-Bhavcopy.ps1'
 # NSE_DATA/Sector-Stock-Mapping.csv, a watched input - so it is refused while a reprocess is reading it, and a
 # reprocess is refused while it is writing it.
 SECTOR_BUILD_SCRIPT = os.path.join('src', 'build_screener_classification.py')
-SECTOR_MAX_AGE_DAYS = 30    # the script's own --max-age-days default: company-page entries older than this are re-fetched
+SECTOR_STALE_DAYS = 30      # a mapping last rebuilt longer ago than this is advised a full run (nothing expires or is re-fetched by age)
 _sector_lock = threading.Lock()
 _sector_state = {
     'status': 'idle',   # 'idle' | 'running' | 'done' | 'error'
@@ -2194,7 +2194,7 @@ def diff_sector_snapshots(before, after, limit=15):
 
 def summarize_sector_mapping(base_dir, today=None):
     """State of NSE_DATA/Sector-Stock-Mapping.csv for the Data Quality "Refresh Data" tab: how many stocks it
-    classifies, whether a rebuild is due (new listings missing from it, entries older than SECTOR_MAX_AGE_DAYS) and
+    classifies, whether a rebuild is due (new listings missing from it, nothing rebuilt for SECTOR_STALE_DAYS) and
     whether it is newer than the processed data (i.e. a Reprocess is needed for it to take effect)."""
     data_dir = os.path.join(base_dir, DATA_SUBDIR)
     path = os.path.join(data_dir, SECTOR_FILE)
@@ -2208,8 +2208,6 @@ def summarize_sector_mapping(base_dir, today=None):
     listed = {r.get('SYMBOL', '') for r in read_csv_file(os.path.join(data_dir, EQUITY_LIST_FILE))} - {''}
     in_mapping = {r.get('Stock Name', '') for r in rows}
     classified = sum(1 for r in rows if r.get('Sector') and r.get('Basic Industry'))
-    cutoff = (today - timedelta(days=SECTOR_MAX_AGE_DAYS)).isoformat()
-    expired = sum(1 for r in rows if r.get('Source') == 'company' and r.get('Fetched') and r['Fetched'] < cutoff)
     fetched = [r['Fetched'] for r in rows if r.get('Fetched')]
     last_fetched = max(fetched) if fetched else None
     try:
@@ -2222,12 +2220,10 @@ def summarize_sector_mapping(base_dir, today=None):
     reasons = []
     if missing:
         reasons.append(f'{missing} newly listed stock{"s are" if missing != 1 else " is"} not in the mapping yet')
-    if expired:
-        reasons.append(f'{expired} classification{"s are" if expired != 1 else " is"} older than {SECTOR_MAX_AGE_DAYS} days')
-    if age_days is not None and age_days > SECTOR_MAX_AGE_DAYS:
+    if age_days is not None and age_days > SECTOR_STALE_DAYS:
         reasons.append(f'it was last rebuilt {age_days} days ago')
     # A stale mapping (no run for a month) wants the full walk; otherwise filling gaps is enough.
-    if age_days is None or age_days > SECTOR_MAX_AGE_DAYS:
+    if age_days is None or age_days > SECTOR_STALE_DAYS:
         suggest = 'full'
     else:
         suggest = 'quick' if reasons else None
@@ -2237,7 +2233,7 @@ def summarize_sector_mapping(base_dir, today=None):
         when = 'today' if age_days == 0 else f'{age_days} day{"s" if age_days != 1 else ""} ago'
         advice = {'level': 'ok', 'text': 'Up to date' + (f' - last rebuilt {when}.' if age_days is not None else '.')}
     return {'exists': True, 'stocks': len(rows), 'classified': classified, 'unclassified': len(rows) - classified,
-            'missing': missing, 'expired': expired, 'lastFetched': last_fetched, 'ageDays': age_days,
+            'missing': missing, 'lastFetched': last_fetched, 'ageDays': age_days,
             'updatedAt': updated_at, 'processedAt': processed_at,
             'reprocessNeeded': processed_at is None or updated_at > processed_at,
             'suggest': suggest, 'advice': advice}
@@ -2746,7 +2742,7 @@ class NSEHandler(http.server.SimpleHTTPRequestHandler):
     def _handle_sector_start(self):
         """POST /api/sector-mapping/start[?quick=1] - rebuild Sector-Stock-Mapping.csv from Screener.in in a
         background thread; the Data Quality "Refresh Data" tab polls /api/sector-mapping/status. `quick` skips the
-        industry-page walk (only new / unclassified / expired stocks are fetched). Same same-origin header rule as the
+        industry-page walk (only new / unclassified stocks are fetched). Same same-origin header rule as the
         TradingView endpoints. Refused while a refresh/reprocess is reading the mapping. Never started automatically."""
         if self.headers.get('X-Requested-With') != 'nse-dashboard':
             self._send_json({'ok': False, 'error': 'Forbidden'}, 403)

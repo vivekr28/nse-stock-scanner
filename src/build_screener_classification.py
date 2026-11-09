@@ -5,7 +5,7 @@ Rebuild NSE_DATA/Sector-Stock-Mapping.csv from Screener.in's copy of the NSE fou
 Broad Industry / Industry). Screener is the only source of the classification.
 
 Usage: python src/build_screener_classification.py [--dir /path/to/NSE-StockScanner] [--skip-walk]
-                                                    [--delay 1.0] [--max-age-days 30]
+                                                    [--delay 1.0]
 
 How it works
   1. The stock universe (symbol, listing date) comes from NSE_DATA/EQUITY_L.csv, which the downloader refreshes
@@ -15,13 +15,14 @@ How it works
      point: its `Source` / `Fetched` columns record where and when each stock was last classified.
   3. Walks the leaf industry pages listed on https://www.screener.in/market/. Each page lists at most 25
      companies (`?page=N` is disallowed by Screener's robots.txt, so it is not used).
-  4. Fetches the company page of every stock without a classification, of every stock the walk did not return
-     that was last classified on an earlier walk, and of every company-page entry older than --max-age-days.
+  4. Fetches the company page of every stock without a classification, and of every stock the walk did not return
+     that was last classified on an earlier walk. A classification taken from a company page never expires (a
+     stock's industry rarely changes); a later walk replaces it when the stock shows up on an industry page.
   5. Writes Sector-Stock-Mapping.csv (to NSE_DATA/ and to the git-tracked reference-data/): `Sector` = Screener
      Sector, `Basic Industry` = Screener Industry (the finest tier, ~190 values), plus `Macro Sector`,
      `Industry Group`, `Source` (`walk` | `company`) and `Fetched` (date). Market cap is not stored here: it
      comes from NSE_MarketCap.csv (see nse_server.load_market_caps).
---skip-walk skips step 3 and only fetches missing or expired stocks. Requests are rate-limited (--delay): ~4 min for
+--skip-walk skips step 3 and only fetches stocks that have no classification. Requests are rate-limited (--delay): ~4 min for
 a walk, ~20 min for a first run with no previous mapping.
 """
 
@@ -34,7 +35,7 @@ import shutil
 import time
 import urllib.error
 import urllib.request
-from datetime import date, timedelta
+from datetime import date
 
 BASE = 'https://www.screener.in'
 UA = {'User-Agent': 'Mozilla/5.0 (personal research; low rate)'}
@@ -154,9 +155,8 @@ def load_previous(*paths):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--dir', default=os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-    ap.add_argument('--skip-walk', action='store_true', help='only fetch stocks that are missing or expired')
+    ap.add_argument('--skip-walk', action='store_true', help='only fetch stocks that have no classification')
     ap.add_argument('--delay', type=float, default=1.0, help='seconds between requests')
-    ap.add_argument('--max-age-days', type=int, default=30, help='re-fetch company-page entries older than this')
     args = ap.parse_args()
 
     data_dir = os.path.join(args.dir, 'NSE_DATA')
@@ -195,14 +195,12 @@ def main():
                 print(f'  walked {n}/{len(leaves)}')
         write_mapping()
 
-    cutoff = (date.today() - timedelta(days=args.max_age_days)).isoformat()
-
     def needs_company_page(symbol):
         entry = state.get(symbol)
         if not entry:
             return True
         if entry['src'] == 'company':
-            return entry['at'] < cutoff
+            return False                            # a company-page classification is kept for good
         return not args.skip_walk and entry['at'] != today   # a walk was run and did not return it this time
 
     todo = [s for s in universe if needs_company_page(s)]

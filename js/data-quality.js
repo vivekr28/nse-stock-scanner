@@ -857,7 +857,7 @@ function dqRenderSectorStatus(s) {
   const m = s.mapping;
   document.getElementById('dqSectorSummary').innerHTML = dqSectorSummaryHtml(m);
 
-  // Pre-tick Quick when the gap is small (new listings / expired entries) - only on the first load, never over the user's choice.
+  // Pre-tick Quick when the gap is small (new listings / unclassified stocks) - only on the first load, never over the user's choice.
   if (_dqSector.firstLoad && m) {
     _dqSector.firstLoad = false;
     const q = document.getElementById('dqSectorQuick');

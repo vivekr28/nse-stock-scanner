@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NSE EOD Dashboard</title>
-<link rel="stylesheet" href="css/styles.css?v=29">
+<link rel="stylesheet" href="css/styles.css?v=30">
 </head>
 <body>
 
@@ -1375,7 +1375,7 @@
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:10px 0;">
       <button id="dqFullBtn" class="btn btn-primary" onclick="dqRunTvFull(false)">Verify all stocks</button>
       <button id="dqFullResumeBtn" class="btn btn-secondary" style="display:none;" onclick="dqRunTvFull(true)">Resume</button>
-      <button id="dqFullStopBtn" class="btn btn-secondary" style="display:none;" onclick="dqStopTvFull()">Stop</button>
+      <button id="dqFullStopBtn" class="btn btn-stop" style="display:none;" onclick="dqStopTvFull()">Stop</button>
       <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);font-weight:400;">Scope
         <select id="dqFullScope" class="dq-select">
           <option value="">All stocks</option>
@@ -1410,13 +1410,13 @@
     </div>
 
     <h3 class="dq-h" style="margin-top:22px;">Stock sector mapping</h3>
-    <p style="color:var(--text2);font-size:12px;margin:8px 0;">Each stock's sector and industry come from <code>Sector-Stock-Mapping.csv</code>, which is rebuilt from Screener.in's copy of NSE's industry classification &mdash; it is <b>not</b> updated by Refresh Data. NSE reclassifies rarely, so monthly is enough, or when new listings show up as &ldquo;In Bhavcopy but NOT in Sector Mapping&rdquo;. A full refresh walks Screener's industry pages (about 4 minutes) and then fetches company pages for anything missing or expired (up to ~20 minutes from scratch); <b>Quick</b> skips the walk and only fills gaps. It makes about one request per second, only when you click, and changes nothing the dashboard shows until you Reprocess Data afterwards.</p>
+    <p style="color:var(--text2);font-size:12px;margin:8px 0;">Each stock's sector and industry come from <code>Sector-Stock-Mapping.csv</code>, which is rebuilt from Screener.in's copy of NSE's industry classification &mdash; it is <b>not</b> updated by Refresh Data. NSE reclassifies rarely, so monthly is enough, or when new listings show up as &ldquo;In Bhavcopy but NOT in Sector Mapping&rdquo;. A full refresh walks Screener's industry pages (about 4 minutes) and then fetches company pages for anything it did not classify (up to ~20 minutes from scratch); <b>Quick</b> skips the walk and only fills gaps. It makes about one request per second, only when you click, and changes nothing the dashboard shows until you Reprocess Data afterwards.</p>
     <div id="dqSectorSummary" style="font-size:12px;margin:8px 0;"></div>
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:10px 0;">
       <button id="dqSectorBtn" class="btn btn-primary" onclick="dqRunSectorMapping()">Refresh sector mapping</button>
-      <button id="dqSectorStopBtn" class="btn btn-secondary" style="display:none;" onclick="dqStopSectorMapping()">Stop</button>
+      <button id="dqSectorStopBtn" class="btn btn-stop" style="display:none;" onclick="dqStopSectorMapping()">Stop</button>
       <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);font-weight:400;cursor:pointer;">
-        <input type="checkbox" id="dqSectorQuick"> Quick: only new, unclassified or expired stocks (skip the industry walk)
+        <input type="checkbox" id="dqSectorQuick"> Quick: only new or unclassified stocks (skip the industry walk)
       </label>
       <span id="dqSectorStatus" style="font-size:12px;color:var(--text2);"></span>
     </div>
@@ -1435,7 +1435,7 @@
     <div id="qrfSummary" style="font-size:12px;margin:8px 0;"></div>
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:10px 0;">
       <button id="qrfBtn" class="btn btn-primary" onclick="qrfStart()" title="Read NSE's new quarterly result filings and update QuarterlyResults.csv">Fetch quarterly results</button>
-      <button id="qrfStopBtn" class="btn btn-secondary" style="display:none;" onclick="qrfStop()">Stop</button>
+      <button id="qrfStopBtn" class="btn btn-stop" style="display:none;" onclick="qrfStop()">Stop</button>
       <span id="qrfStatus" style="font-size:12px;color:var(--text2);"></span>
     </div>
     <div id="qrfProgress" style="display:none;margin:6px 0 10px;">

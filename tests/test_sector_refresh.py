@@ -119,7 +119,7 @@ def test_summary_up_to_date(proj):
     _write_mapping(str(proj / 'NSE_DATA' / 'Sector-Stock-Mapping.csv'), [_row('AAA'), _row('BBB')])
     _equity(str(proj / 'NSE_DATA' / 'EQUITY_L.csv'), ['AAA', 'BBB'])
     s = _summary(proj)
-    assert (s['stocks'], s['classified'], s['unclassified'], s['missing'], s['expired']) == (2, 2, 0, 0, 0)
+    assert (s['stocks'], s['classified'], s['unclassified'], s['missing']) == (2, 2, 0, 0)
     assert s['advice']['level'] == 'ok' and s['suggest'] is None and s['ageDays'] == 9
 
 
@@ -136,7 +136,7 @@ def test_summary_a_stale_mapping_suggests_the_full_walk(proj):
     _write_mapping(str(proj / 'NSE_DATA' / 'Sector-Stock-Mapping.csv'), [_row('AAA', fetched=old)])
     _equity(str(proj / 'NSE_DATA' / 'EQUITY_L.csv'), ['AAA'])
     s = _summary(proj)
-    assert s['expired'] == 1 and s['ageDays'] == 45 and s['suggest'] == 'full' and s['advice']['level'] == 'due'
+    assert 'expired' not in s and s['ageDays'] == 45 and s['suggest'] == 'full' and s['advice']['level'] == 'due'
 
 
 def test_summary_unclassifiable_stocks_alone_do_not_make_a_refresh_due(proj):
