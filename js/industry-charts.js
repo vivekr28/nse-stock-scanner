@@ -10,7 +10,7 @@ let icIndList = [];      // the industries the popup was opened from (Industry A
 let icIndIndex = -1;     // the open industry's position in icIndList
 let icStocks = [];       // stocks in the clicked industry, sorted by market cap desc
 let icPage = 0;
-let icActiveCell = 0;    // Stock Charts grid: position (0 = first) of the chart the X / R keys act on; click a chart to move it
+let icActiveCell = 0;    // Stock Charts grid: position (0 = first) of the chart the Alt+X / Alt+R keys act on; click a chart to move it
 let icMode = 'industry'; // 'industry' (tabs + grid + pagination) | 'single' (one stock, no tabs/pagination)
 let icActiveTab = 'stocks'; // 'stocks' | 'industry' | 'moneyflow' — only meaningful in 'industry' mode
 let icMfChartInst = null;   // Industry Money Flow Chart tab: {chart, series, sizeWatcher}
@@ -25,6 +25,7 @@ let icLayout = '2x2';    // key of IC_LAYOUTS (default '2x2') — Stock Charts t
 let icRange = '6m';        // '6m' | '1y' | '2y' | 'custom' - visible window of the per-stock charts (grid + single-stock)
 let icCustomCandles = 0;   // bars shown when icRange is 'custom' (the user zoomed a chart by hand); carried to every next chart
 let icRightOffset = 10;    // where the last bar sits: empty bar-widths to its right (negative = the user scrolled back in time); = IC_RIGHT_OFFSET until the user pans/zooms by hand
+let icTimeframe = 'd';     // 'd' | 'w' - daily or weekly candles on every chart: the per-stock charts (grid + single-stock) and the Industry Chart tab
 let icSyncCrosshair = false; // Stock Charts 2x2 grid only: hovering one chart moves the crosshair on the others to the same date
 
 // Stock Charts grid layouts: rows x columns of charts per page ('3x4' = 3 rows of 4).
@@ -37,8 +38,15 @@ const IC_LAYOUTS = {
 };
 const IC_UP_COLOR = '#18eee7';
 const IC_DOWN_COLOR = '#ff1616';
-const IC_SMA_COLORS = { 10: '#15ff00', 20: '#ff9800', 50: '#ff1616' };
-const IC_SMA_LENGTHS = [10, 20, 50];
+const IC_SMA_COLORS = { 10: '#15ff00', 20: '#ff9800', 50: '#ff1616', 200: '#ffffff', w13: '#ff9800', w40: '#ff1616', w52: '#ffffff' };
+const IC_SMA_LENGTHS = [10, 20, 50, 200];       // the Daily chart's SMAs (checkboxes icSMA10 / icSMA20 / icSMA50 / icSMA200)
+const IC_SMA_WEEKLY_LENGTHS = [13, 40, 52];     // the Weekly chart's SMAs, in weeks: ~3 months, ~200 days, ~1 year (checkboxes icSMAw13 / icSMAw40 / icSMAw52)
+// Every SMA line a chart can carry: { key: series key, len: candles, id: checkbox id, weekly: drawn on the Weekly chart only }. Each chart holds all of
+// them and draws only the ticked ones of its own time frame (the menu shows the matching set).
+const IC_SMA_DEFS = [
+  ...IC_SMA_LENGTHS.map(len => ({ key: len, len, id: 'icSMA' + len, weekly: false })),
+  ...IC_SMA_WEEKLY_LENGTHS.map(len => ({ key: 'w' + len, len, id: 'icSMAw' + len, weekly: true })),
+];
 const IC_CHART_BG = '#000000';
 const IC_MF_DOT_COLOR = '#9c27b0';
 const IC_MF_DOT_MIN_CR = 40;   // money flow (turnover) threshold, in crores
@@ -52,8 +60,11 @@ const IC_VOLUME_SMA_HIGH_LOOKBACK = 65; // trading days
 const IC_RIGHT_OFFSET = 10; // empty candle-widths of space kept to the right of the last bar
 // Default visible window of the per-stock charts, by range button (plus the right margin on top).
 const IC_RANGE_CANDLES = { '6m': 126, '1y': 252, '2y': 504 }; // ~trading days in 6 months / 1 year / 2 years
+const IC_RANGE_WEEKS = { '6m': 26, '1y': 52, '2y': 104 };   // the same windows in weekly candles
+const IC_WEEKS_PER_DAY_RATIO = 5;                            // ~5 trading days per weekly candle (converts a hand-zoomed width between the two)
 const IC_MIN_CUSTOM_CANDLES = 5;
 const IC_INDUSTRY_VISIBLE_CANDLES = 252 - IC_RIGHT_OFFSET; // ~1 trading year, minus the right margin
+const IC_INDUSTRY_VISIBLE_WEEKS = 52 - IC_RIGHT_OFFSET;    // the same year on the weekly chart
 
 // ── One-shot Measure / Trend Line tools (chart-tools.js) ──────────────────────
 // The header Draw buttons (and the Money Flow tab's own copy of them) drive EVERY chart on screen
@@ -235,10 +246,11 @@ function icStepIndustry(delta) {
 }
 
 // Single-stock mode: opened from the Symbol column — one big chart, no tabs, with
-// Prev/Next to step through the same list currently shown in the results table.
-function openStockChart(isin) {
+// Prev/Next to step through the same list currently shown in the results table. `fromList` is that list when the caller has one (the Stocks tab
+// passes its own); otherwise it is the Stock Scanner's results.
+function openStockChart(isin, fromList) {
   icMode = 'single';
-  const list = (typeof screenerResults !== 'undefined' && screenerResults.length) ? screenerResults : [];
+  const list = Array.isArray(fromList) ? fromList : (typeof screenerResults !== 'undefined' && screenerResults.length) ? screenerResults : [];
   let idx = list.findIndex(s => s.isin === isin);
   const stock = idx >= 0 ? list[idx] : Store.latestBySymbol[isin];
   if (!stock) return;
@@ -278,8 +290,9 @@ function icRenderSingleStock() {
   const days = Store.dailyBySymbol[stock.isin] || [];
   document.getElementById('icSingleStats').textContent = icStatsLine(days);
   if (!container || days.length === 0 || typeof LightweightCharts === 'undefined') return;
-  const { candleData, volumeData, closes } = icBuildBarsFromDays(days);
+  const { candleData, volumeData, closes } = icApplyTimeframe(icBuildBarsFromDays(days));
   icIndustryChartInst = icCreateChart(container, 'icVolumeSingle', icLegendStock(stock));
+  icIndustryChartInst.weekly = icTimeframe === 'w';
   icWatchManualRange(icIndustryChartInst, container);
   icSetChartData(icIndustryChartInst, candleData, volumeData, closes, icVisibleCandles(), icRightOffset);
   if (typeof qctWatch === 'function') qctWatch(container);
@@ -289,6 +302,7 @@ function closeIndustryCharts() {
   document.getElementById('industryChartsModal').classList.remove('active');
   icIndList = []; icIndIndex = -1;
   if (typeof icSetIndicatorsOpen === 'function') icSetIndicatorsOpen(false);
+  if (typeof icFindSetOpen === 'function') icFindSetOpen(false);
   if (typeof qctRelease === 'function') qctRelease();
   icDisposeCharts();
   icDisposeIndustryChart();
@@ -307,10 +321,12 @@ function icUpdateControlVisibility() {
   const singleStats = document.getElementById('icSingleStats');
   const layoutToggle = document.getElementById('icLayoutToggle');
   const rangeToggle = document.getElementById('icRangeToggle');
+  const tfToggle = document.getElementById('icTfToggle');
   const syncWrap = document.getElementById('icSyncCrosshairWrap');
   const mfWrap = document.getElementById('icMoneyFlowWrap');
   const modalBox = document.querySelector('#industryChartsModal .ic-modal-box');
   if (typeof qctShow === 'function') qctShow(icMode === 'single');   // quarterly table: single-stock chart only
+  icSyncSmaMenu();   // the SMA ticks of this time frame (the time frame outlives the popup)
 
   // The money flow tab has none of the candlestick controls (SMAs, dots, layout,
   // pagination...), so its header controls are hidden wholesale via this class.
@@ -327,6 +343,7 @@ function icUpdateControlVisibility() {
     if (singleStats) singleStats.style.display = '';
     if (layoutToggle) layoutToggle.style.display = 'none';
     if (rangeToggle) rangeToggle.style.display = '';
+    if (tfToggle) tfToggle.style.display = '';
   } else {
     tabbar.style.display = '';
     singlePagination.style.display = 'none';
@@ -339,6 +356,7 @@ function icUpdateControlVisibility() {
     if (mfWrap) mfWrap.style.display = icActiveTab === 'moneyflow' ? '' : 'none';
     if (layoutToggle) layoutToggle.style.display = showGrid ? '' : 'none';
     if (rangeToggle) rangeToggle.style.display = showGrid ? '' : 'none';
+    if (tfToggle) tfToggle.style.display = showGrid || icActiveTab === 'industry' ? '' : 'none';   // not on the money flow tab
   }
   // Industry-to-industry stepping: only when the popup was opened from a list of industries (Industry Analysis)
   const indNav = document.getElementById('icIndNavWrap');
@@ -460,8 +478,9 @@ function icRenderPage() {
     const days = Store.dailyBySymbol[s.isin] || [];
     if (!container || days.length === 0) return;
 
-    const { candleData, volumeData, closes } = icBuildBarsFromDays(days);
+    const { candleData, volumeData, closes } = icApplyTimeframe(icBuildBarsFromDays(days));
     const inst = icCreateChart(container, 'icVolume' + i, icLegendStock(s));
+    inst.weekly = icTimeframe === 'w';
     icChartInstances.push(inst);
     icWatchManualRange(inst, container);
     icSetChartData(inst, candleData, volumeData, closes, icVisibleCandles(), icRightOffset);
@@ -600,9 +619,9 @@ function icCreateChart(container, volumeScaleId, stock) {
   if (volumePane) { chart.panes()[0].setStretchFactor(5); volumePane.setStretchFactor(1); }
 
   const smaSeries = {};
-  IC_SMA_LENGTHS.forEach(len => {
-    smaSeries[len] = chart.addSeries(LightweightCharts.LineSeries, {
-      color: IC_SMA_COLORS[len], lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
+  IC_SMA_DEFS.forEach(d => {
+    smaSeries[d.key] = chart.addSeries(LightweightCharts.LineSeries, {
+      color: IC_SMA_COLORS[d.key], lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
     });
   });
 
@@ -701,7 +720,74 @@ function icApplyVisibleRange(inst, visibleCandles, rightOffset = IC_RIGHT_OFFSET
 
 // Bars the per-stock charts show right now: the chosen 6M / 1Y / 2Y button, or the width the user zoomed to.
 function icVisibleCandles() {
-  return icRange === 'custom' ? icCustomCandles : IC_RANGE_CANDLES[icRange];
+  return icRange === 'custom' ? icCustomCandles : icRangeCandles(icRange);
+}
+
+// Candles the 6M / 1Y / 2Y buttons show on the current chart type: trading days on the daily chart, weeks on the weekly one.
+function icRangeCandles(range) {
+  return icTimeframe === 'w' ? IC_RANGE_WEEKS[range] : IC_RANGE_CANDLES[range];
+}
+
+// The Monday of the week (Monday to Friday) a business day {year, month, day} belongs to, as a business day too.
+function icWeekStart(t) {
+  const d = new Date(t.year, t.month - 1, t.day);
+  const m = new Date(d.getFullYear(), d.getMonth(), d.getDate() - ((d.getDay() + 6) % 7));
+  return { year: m.getFullYear(), month: m.getMonth() + 1, day: m.getDate() };
+}
+
+// Weekly candles from daily ones (the output of icBuildBarsFromDays / icComputeIndustryIndex): open = the week's first open, high / low = the
+// extremes, close = its last close, turnover summed, dated on the week's FIRST trading day (Monday, or Tuesday when Monday was a holiday, and so on; the latest week is the week so far).
+function icWeeklyFromDaily({ candleData, volumeData }) {
+  const wc = [], wv = [], closes = [];
+  let key = NaN;
+  candleData.forEach((c, i) => {
+    const start = icWeekStart(c.time);
+    const k = start.year * 10000 + start.month * 100 + start.day;
+    const turnover = volumeData[i] ? volumeData[i].value : 0;
+    if (wc.length && k === key) {
+      const w = wc[wc.length - 1];
+      if (c.high > w.high) w.high = c.high;
+      if (c.low < w.low) w.low = c.low;
+      w.close = c.close;
+      wv[wv.length - 1].value += turnover;
+    } else {
+      wc.push({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close });
+      wv.push({ time: c.time, value: turnover });
+      key = k;
+    }
+  });
+  wc.forEach((w, i) => {
+    wv[i].color = w.close >= w.open ? ewHexToRgba(IC_UP_COLOR, 0.5) : ewHexToRgba(IC_DOWN_COLOR, 0.5);
+    closes.push(w.close);
+  });
+  return { candleData: wc, volumeData: wv, closes };
+}
+
+// The bars every chart is drawn from: the daily ones as built, or weekly ones on the Weekly chart.
+function icApplyTimeframe(built) {
+  return icTimeframe === 'w' ? icWeeklyFromDaily(built) : built;
+}
+
+function icSyncTimeframeButtons() {
+  document.querySelectorAll('#icTfToggle .ic-layout-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tf === icTimeframe);
+  });
+}
+
+// Daily / Weekly buttons: every chart on screen (grid page, the single stock or the Industry Chart tab) is redrawn from the other kind of bar.
+// SMAs and the turnover pane follow the bars (a 20 SMA is 20 weeks on the weekly chart); the 6M / 1Y / 2Y window keeps its meaning in time, and
+// a width the user zoomed to by hand is converted (about 5 days a week) so the chart keeps showing the same stretch of time.
+function icSetTimeframe(tf) {
+  if (tf !== 'd' && tf !== 'w') return;
+  if (tf === icTimeframe) { icSyncTimeframeButtons(); return; }
+  if (icRange === 'custom') {
+    icCustomCandles = tf === 'w' ? Math.max(IC_MIN_CUSTOM_CANDLES, Math.round(icCustomCandles / IC_WEEKS_PER_DAY_RATIO)) : icCustomCandles * IC_WEEKS_PER_DAY_RATIO;
+  }
+  icTimeframe = tf;
+  icSyncTimeframeButtons();
+  icSyncSmaMenu();
+  if (icMode !== 'single' && icActiveTab === 'industry') { icDisposeIndustryChart(); icBuildIndustryChart(); return; }
+  icRefreshCurrentView();
 }
 
 function icSyncRangeButtons() {
@@ -719,7 +805,7 @@ function icSetRange(range) {
   icRightOffset = IC_RIGHT_OFFSET; // a button puts the last bar back at the default spot
   icSyncRangeButtons();
   const insts = icMode === 'single' && icIndustryChartInst ? [icIndustryChartInst] : icChartInstances;
-  insts.forEach(inst => icApplyVisibleRange(inst, IC_RANGE_CANDLES[range]));
+  insts.forEach(inst => icApplyVisibleRange(inst, icRangeCandles(range)));
 }
 
 // Manual zoom: once the user changes how much history a per-stock chart shows (wheel / pinch /
@@ -856,8 +942,10 @@ function icBuildIndustryChart() {
   const data = icComputeIndustryIndex(icStocks);
   if (!data || data.candleData.length === 0) return;
 
+  const built = icApplyTimeframe(data);
   icIndustryChartInst = icCreateChart(container, 'icVolumeIndustry');
-  icSetChartData(icIndustryChartInst, data.candleData, data.volumeData, data.closes, IC_INDUSTRY_VISIBLE_CANDLES);
+  icIndustryChartInst.weekly = icTimeframe === 'w';
+  icSetChartData(icIndustryChartInst, built.candleData, built.volumeData, built.closes, icTimeframe === 'w' ? IC_INDUSTRY_VISIBLE_WEEKS : IC_INDUSTRY_VISIBLE_CANDLES);
 }
 
 function icDisposeIndustryChart() {
@@ -1149,12 +1237,12 @@ function icSetMfRocLag(lag) {
 
 // ── SMA toggle (updates existing chart instances without rebuilding them) ────
 function icUpdateInstanceSMA(inst) {
-  IC_SMA_LENGTHS.forEach(len => {
-    const cb = document.getElementById('icSMA' + len);
-    if (!cb || !cb.checked || inst.closes.length < len) { inst.smaSeries[len].setData([]); return; }
-    const sma = ewComputeSMA(inst.closes, len);
+  IC_SMA_DEFS.forEach(d => {
+    const cb = document.getElementById(d.id);
+    if (!cb || !cb.checked || d.weekly !== !!inst.weekly || inst.closes.length < d.len) { inst.smaSeries[d.key].setData([]); return; }
+    const sma = ewComputeSMA(inst.closes, d.len);
     const offset = inst.closes.length - sma.length;
-    inst.smaSeries[len].setData(sma.map((v, idx) => ({ time: inst.candleData[idx + offset].time, value: v })));
+    inst.smaSeries[d.key].setData(sma.map((v, idx) => ({ time: inst.candleData[idx + offset].time, value: v })));
   });
 }
 
@@ -1196,12 +1284,32 @@ function icUpdateVolumeSMA(inst) {
 document.getElementById('icSMA10').addEventListener('change', icUpdateAllSMA);
 document.getElementById('icSMA20').addEventListener('change', icUpdateAllSMA);
 document.getElementById('icSMA50').addEventListener('change', icUpdateAllSMA);
+document.getElementById('icSMA200').addEventListener('change', icUpdateAllSMA);
+IC_SMA_WEEKLY_LENGTHS.forEach(len => document.getElementById('icSMAw' + len).addEventListener('change', icUpdateAllSMA));
 
-// ── "Indicators" dropdown: the 10 / 20 / 50 SMA and Purple Dots checkboxes live in a menu behind one header button,
-// so the header stays short. The checkboxes keep their ids (icSMA10/20/50, icShowMFDots), so everything that reads them is unchanged; this
+// ── "Indicators" dropdown: the 10 / 20 / 50 / 200 SMA and Purple Dots checkboxes live in a menu behind one header button,
+// so the header stays short. The checkboxes keep their ids (icSMA10/20/50/200, icShowMFDots), so everything that reads them is unchanged; this
 // only opens / closes the menu and shows how many are ticked. Closes on a click anywhere else, on Escape
 // (before Escape closes the popup) and when the popup closes.
-const IC_INDICATOR_IDS = ['icSMA10', 'icSMA20', 'icSMA50', 'icShowMFDots'];
+const IC_INDICATOR_IDS = ['icSMA10', 'icSMA20', 'icSMA50', 'icSMA200', 'icSMAw13', 'icSMAw40', 'icSMAw52', 'icShowMFDots'];
+
+// The menu shows the SMAs of the chart's time frame: 10 / 20 / 50 / 200 on the Daily chart, 13W / 40W / 52W on the Weekly one. Their ticks are kept
+// apart, so going back and forth keeps each time frame's own choice.
+function icIndicatorIdsShown() {
+  return IC_INDICATOR_IDS.filter(id => {
+    const d = IC_SMA_DEFS.find(x => x.id === id);
+    return !d || d.weekly === (icTimeframe === 'w');
+  });
+}
+
+function icSyncSmaMenu() {
+  IC_SMA_DEFS.forEach(d => {
+    const cb = document.getElementById(d.id);
+    const label = cb && cb.parentElement;
+    if (label && label.style) label.style.display = d.weekly === (icTimeframe === 'w') ? '' : 'none';
+  });
+  icUpdateIndicatorsCount();
+}
 
 function icIndicatorsOpen() {
   const menu = document.getElementById('icIndicatorsMenu');
@@ -1222,7 +1330,7 @@ function icToggleIndicators(e) {
 
 // Number of indicators ticked, shown as a badge on the button.
 function icUpdateIndicatorsCount() {
-  const n = IC_INDICATOR_IDS.filter(id => document.getElementById(id).checked).length;
+  const n = icIndicatorIdsShown().filter(id => document.getElementById(id).checked).length;
   const el = document.getElementById('icIndicatorsCount');
   if (el) el.textContent = n ? String(n) : '';
 }
@@ -1265,7 +1373,7 @@ function icComputeMFDotMarkers(inst) {
 
 function icUpdateInstanceMFDots(inst) {
   const cb = document.getElementById('icShowMFDots');
-  inst.markersPlugin.setMarkers((cb && cb.checked) ? icComputeMFDotMarkers(inst) : []);
+  inst.markersPlugin.setMarkers((cb && cb.checked && !inst.weekly) ? icComputeMFDotMarkers(inst) : []);   // the rule is per DAY: no dots on the weekly chart
 }
 
 function icUpdateAllMFDots() {
@@ -1320,11 +1428,18 @@ document.getElementById('screenerBody').addEventListener('click', e => {
   if (stockLink) { e.preventDefault(); openStockChart(stockLink.dataset.isin); }
 });
 
-// X selects / R deselects the stock you are looking at: the single-stock chart, or in the Stock Charts
-// grid the active chart (the first one, or the one last clicked). Returns true when the key was used.
+// The Stocks tab's Symbol column opens the same chart, and Up / Down in it walk that tab's own (filtered, sorted) list.
+document.getElementById('scannerBody').addEventListener('click', e => {
+  const stockLink = e.target.closest('.stock-link');
+  if (stockLink) { e.preventDefault(); openStockChart(stockLink.dataset.isin, typeof scannerResults !== 'undefined' ? scannerResults : undefined); }
+});
+
+// Alt+X selects / Alt+R deselects the stock you are looking at: the single-stock chart, or in the Stock Charts
+// grid the active chart (the first one, or the one last clicked). Returns true when the key was used. (Plain X / R used to do this; they now
+// start the type-to-jump stock search below, since stock names start with any letter.)
 function icHandleSelectKey(e) {
-  if (e.ctrlKey || e.metaKey || e.altKey) return false;
-  const key = (e.key || '').toLowerCase();
+  if (e.ctrlKey || e.metaKey || !e.altKey) return false;
+  const key = e.code === 'KeyX' ? 'x' : e.code === 'KeyR' ? 'r' : (e.key || '').toLowerCase();
   if (key !== 'x' && key !== 'r') return false;
   const t = e.target;
   if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName || ''))) return false;
@@ -1342,15 +1457,150 @@ function icHandleSelectKey(e) {
   return true;
 }
 
-// ── Keyboard: Down = next stock/page, Up = previous stock/page (single and grid views); Up / Down on the Industry / Money Flow tabs = next / previous industry; X / R = select / deselect; Escape = close ──────────────────────────
+// ── Type-to-jump: with the single-stock chart or the Stock Charts tab showing, just start typing a stock's symbol or name - a small box opens with
+// the best matches among ALL stocks, Up / Down move the highlight, Enter (or a click) opens that stock's chart, Escape closes the box. A stock of the
+// industry on show is brought up in the grid (its page, as the active chart); any other opens in the single-stock view (like the Symbol column
+// does), where the Up / Down walk through the Stock Scanner results if the stock is among them and stop at that one stock otherwise.
+const IC_FIND_MAX = 8;
+let icFindMatches = [];
+let icFindPos = 0;
+
+// Where typing may start a search: the single-stock chart, or the Stock Charts tab (any layout - 1x1 is the natural one).
+function icFindAvailable() {
+  const modal = document.getElementById('industryChartsModal');
+  if (!modal || !modal.classList.contains('active')) return false;
+  return icMode === 'single' || icActiveTab === 'stocks';
+}
+
+function icFindIsOpen() {
+  const box = document.getElementById('icFind');
+  return !!box && box.style.display === 'block';   // shown as 'block', hidden as 'none' (a page without the box is never open)
+}
+
+// Best matches for what was typed, best first: exact symbol, symbol starts with it, company name starts with it, a word of the name starts with it,
+// then symbol / name merely containing it; ties go to the bigger company. Only stocks that have a chart (daily bars).
+function icFindStocks(query, max = IC_FIND_MAX) {
+  const q = (query || '').trim().toLowerCase();
+  if (!q) return [];
+  const out = [];
+  for (const key in Store.latestBySymbol) {
+    const s = Store.latestBySymbol[key];
+    if (!s || !s.isin || !(Store.dailyBySymbol[s.isin] || []).length) continue;
+    const sym = (s.symbol || '').toLowerCase(), name = (s.companyName || '').toLowerCase();
+    let rank;
+    if (sym === q) rank = 0;
+    else if (sym.startsWith(q)) rank = 1;
+    else if (name.startsWith(q)) rank = 2;
+    else if (name.includes(' ' + q)) rank = 3;
+    else if (sym.includes(q)) rank = 4;
+    else if (name.includes(q)) rank = 5;
+    else continue;
+    out.push({ s, rank });
+  }
+  out.sort((a, b) => a.rank - b.rank || (b.s.marketCap || 0) - (a.s.marketCap || 0) || (a.s.symbol || '').localeCompare(b.s.symbol || ''));
+  return out.slice(0, max).map(x => x.s);
+}
+
+function icFindRender() {
+  const list = document.getElementById('icFindList');
+  if (!list) return;
+  list.innerHTML = icFindMatches.length
+    ? icFindMatches.map((s, i) =>
+        `<div class="ic-find-row${i === icFindPos ? ' active' : ''}" onmousedown="event.preventDefault(); icFindPick('${escapeHtml(s.isin)}')">` +
+        `<b>${escapeHtml(s.symbol || '')}</b><span>${escapeHtml(s.companyName || '')}</span></div>`).join('')
+    : '<div class="ic-find-empty">No stock matches</div>';
+}
+
+function icFindUpdate() {
+  const input = document.getElementById('icFindInput');
+  icFindMatches = icFindStocks(input ? input.value : '');
+  icFindPos = 0;
+  icFindRender();
+}
+
+function icFindSetOpen(open) {
+  const box = document.getElementById('icFind');
+  const input = document.getElementById('icFindInput');
+  if (!box) return;
+  box.style.display = open ? 'block' : 'none';
+  if (!open) {
+    icFindMatches = []; icFindPos = 0;
+    if (input) { input.value = ''; if (input.blur) input.blur(); }
+  }
+}
+
+// A printable key (letter or digit) with the chart showing and nothing being typed into: open the box with that character in it. Returns true when
+// it started a search.
+function icFindStartKey(e) {
+  if (e.ctrlKey || e.metaKey || e.altKey) return false;
+  if (!/^[A-Za-z0-9]$/.test(e.key || '')) return false;
+  const t = e.target;
+  if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName || ''))) return false;
+  if (!icFindAvailable()) return false;
+  const input = document.getElementById('icFindInput');
+  if (!input) return false;
+  icFindSetOpen(true);
+  input.value = e.key;
+  input.focus();
+  icFindUpdate();
+  return true;
+}
+
+// Show the stock's chart: in the grid when it is one of the industry's stocks, otherwise in the single-stock view.
+function icJumpToStock(isin) {
+  if (icMode !== 'single' && icActiveTab === 'stocks') {
+    const idx = icStocks.findIndex(s => s.isin === isin);
+    if (idx >= 0) {
+      icPage = Math.floor(idx / icPageSize());
+      icActiveCell = idx % icPageSize();
+      icRenderPage();
+      return;
+    }
+  }
+  openStockChart(isin);
+}
+
+function icFindPick(isin) {
+  icFindSetOpen(false);
+  if (isin) icJumpToStock(isin);
+}
+
+// Keys inside the box (it has the focus, so the popup's own Up / Down / Escape handlers must not see them).
+function icFindOnKey(e) {
+  e.stopPropagation();
+  if (e.key === 'Escape') { e.preventDefault(); icFindSetOpen(false); return; }
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    const s = icFindMatches[icFindPos];
+    if (s) icFindPick(s.isin);
+    return;
+  }
+  if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && icFindMatches.length) {
+    e.preventDefault();
+    icFindPos = (icFindPos + (e.key === 'ArrowDown' ? 1 : -1) + icFindMatches.length) % icFindMatches.length;
+    icFindRender();
+  }
+}
+
+(function wireFind() {
+  const input = document.getElementById('icFindInput');
+  if (!input) return;
+  input.addEventListener('keydown', icFindOnKey);
+  input.addEventListener('input', icFindUpdate);
+  input.addEventListener('blur', () => icFindSetOpen(false));   // a click on a row uses mousedown (kept from blurring), so a blur is a click elsewhere
+})();
+
+// ── Keyboard: Down = next stock/page, Up = previous stock/page (single and grid views); Up / Down on the Industry / Money Flow tabs = next / previous industry; Alt+X / Alt+R = select / deselect; typing a stock name = jump to it; Escape = close ──────────────────────────
 document.addEventListener('keydown', e => {
   if (!document.getElementById('industryChartsModal').classList.contains('active')) return;
   if (e.key === 'Escape') {
+    if (icFindIsOpen()) { e.preventDefault(); icFindSetOpen(false); return; } // an open stock search box closes first
     if (icDismissIndicatorsMenu()) { e.preventDefault(); return; } // an open Indicators menu closes first
     if (icToolsBusy()) return; // chart-tools.js cancels the armed tool / deselects the drawing instead
     e.preventDefault(); closeIndustryCharts(); return;
   }
   if (icHandleSelectKey(e)) { e.preventDefault(); return; }
+  if (icFindStartKey(e)) { e.preventDefault(); return; }   // typing a stock name opens the jump box
   if (icMode === 'single') {
     if (e.key === 'ArrowDown') { e.preventDefault(); icNextStock(); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); icPrevStock(); }

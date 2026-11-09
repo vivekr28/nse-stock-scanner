@@ -69,6 +69,7 @@ function openPopup() {
   const p = loadPopup();
   p.el('industryChartsModal').classList.add('active');
   p.el('icIndicatorsMenu').style.display = 'none';
+  p.el('icFind').style.display = 'none';   // as in index.html
   p.run("icMode = 'industry'; icActiveTab = 'stocks'");
   return p;
 }
@@ -109,13 +110,13 @@ test('closing the popup also closes the menu, so it is not open next time', () =
   assert.equal(p.el('icIndicatorsBtn').attrs['aria-expanded'], 'false');
 });
 
-test('every indicator checkbox (10/20/50 SMA, Purple Dots) updates the badge on change', () => {
+test('every indicator checkbox (10/20/50/200 SMA, Purple Dots) updates the badge on change', () => {
   const p = openPopup();
-  for (const id of ['icSMA10', 'icSMA20', 'icSMA50', 'icShowMFDots']) {
+  for (const id of ['icSMA10', 'icSMA20', 'icSMA50', 'icSMA200', 'icShowMFDots']) {
     assert.ok((p.el(id).listeners.change || []).length >= 1, `${id} has no change listener`);
   }
   const fireChange = id => p.el(id).listeners.change.forEach(fn => fn({}));
-  for (const id of ['icSMA10', 'icSMA20', 'icSMA50', 'icShowMFDots']) p.el(id).checked = false;
+  for (const id of ['icSMA10', 'icSMA20', 'icSMA50', 'icSMA200', 'icShowMFDots']) p.el(id).checked = false;
   fireChange('icSMA10');
   assert.equal(p.el('icIndicatorsCount').textContent, '');
   p.el('icSMA10').checked = true;  fireChange('icSMA10');
@@ -138,6 +139,77 @@ test('ticking an SMA redraws the SMA lines on every chart; Purple Dots redraws t
   assert.equal(dotCalls.length, 0);
   p.el('icShowMFDots').listeners.change.forEach(fn => fn({}));
   assert.equal(dotCalls.length, 2, 'both charts should be asked to redraw their purple dots');
+});
+
+test('Escape with the stock search box open closes only the box; typing a letter on the Stock Charts tab opens it', () => {
+  const p = openPopup();
+  assert.equal(p.el('icFind').style.display, 'none');
+  p.key('r');                                                  // plain R used to deselect; it now starts the search
+  assert.equal(p.el('icFind').style.display, 'block');
+  assert.equal(p.el('icFindInput').value, 'r');
+  const first = p.key('Escape');
+  assert.equal(p.el('icFind').style.display, 'none');
+  assert.equal(modalOpen(p), true, 'the popup must stay open');
+  assert.ok(first.prevented >= 1);
+  p.key('Escape');
+  assert.equal(modalOpen(p), false, 'a second Escape closes the popup');
+});
+
+test('closing the popup also closes the stock search box', () => {
+  const p = openPopup();
+  p.key('t');
+  assert.equal(p.el('icFind').style.display, 'block');
+  p.sandbox.closeIndustryCharts();
+  assert.equal(p.el('icFind').style.display, 'none');
+});
+
+test('the search box input is wired: keydown, input and blur listeners', () => {
+  const p = openPopup();
+  const l = p.el('icFindInput').listeners;
+  for (const type of ['keydown', 'input', 'blur']) assert.ok((l[type] || []).length >= 1, type);
+});
+
+// --- the Stocks tab's Symbol column opens the chart ---------------------------------------------------
+
+test('a click on a Symbol link in the Stocks tab opens the chart with the Stocks tab list; the Stock Scanner table keeps its own list', () => {
+  const p = openPopup();
+  const calls = [];
+  p.sandbox.openStockChart = (isin, list) => calls.push([isin, list]);
+  p.run("var scannerResults = [{ isin: 'A' }, { isin: 'B' }, { isin: 'C' }]");
+  const link = { dataset: { isin: 'B' } };
+  const evt = { prevented: 0, preventDefault() { this.prevented++; }, target: { closest: sel => (sel === '.stock-link' ? link : null) } };
+  p.el('scannerBody').listeners.click.forEach(fn => fn(evt));
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], 'B');
+  assert.deepEqual(Array.from(calls[0][1]).map(s => s.isin), ['A', 'B', 'C']);   // the list the Stocks tab is showing
+  assert.equal(evt.prevented, 1);                                                // the link's href="#" is not followed
+  p.el('screenerBody').listeners.click.forEach(fn => fn(evt));
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1][0], 'B');
+  assert.equal(calls[1][1], undefined);                                          // the Stock Scanner table passes none: it uses its own results
+  const other = { prevented: 0, preventDefault() { this.prevented++; }, target: { closest: () => null } };   // a click elsewhere in the table
+  p.el('scannerBody').listeners.click.forEach(fn => fn(other));
+  assert.equal(calls.length, 2);
+  assert.equal(other.prevented, 0);
+});
+
+test('openStockChart with a list steps through that list (Up / Down); without one it uses the Stock Scanner results; a stock outside the list stands alone', () => {
+  const p = openPopup();
+  p.sandbox.icRenderSingleStock = () => {};
+  p.sandbox.icUpdateControlVisibility = () => {};
+  p.sandbox.Store.latestBySymbol = { Z: { isin: 'Z', symbol: 'Z' } };
+  p.run("var screenerResults = [{ isin: 'S1' }, { isin: 'S2' }]");
+  const list = [{ isin: 'A' }, { isin: 'B' }, { isin: 'C' }];
+  p.sandbox.openStockChart('B', list);
+  assert.equal(p.run('icSingleIndex'), 1);
+  assert.equal(p.run('icSingleList.length'), 3);
+  assert.equal(p.run("icSingleList[icSingleIndex].isin"), 'B');
+  p.sandbox.openStockChart('S2');
+  assert.equal(p.run('icSingleIndex'), 1);
+  assert.equal(p.run('icSingleList.length'), 2);
+  p.sandbox.openStockChart('Z', list);                         // not in the list passed: that one stock
+  assert.equal(p.run('icSingleList.length'), 1);
+  assert.equal(p.run('icSingleList[0].isin'), 'Z');
 });
 
 // --- headers: what the render functions write ---------------------------------------------------------

@@ -243,7 +243,7 @@ function withGridCheckbox(isin, fn) {
   sb.document.querySelectorAll = sel => (sel === '#icGrid .ic-cell' ? [cell] : []);
   try { fn(cb); } finally { sb.document.querySelectorAll = realQsa; }
 }
-const key = (k, extra = {}) => { sb.__e = { key: k, target: { tagName: 'DIV' }, ...extra }; return run('icHandleSelectKey(__e)'); };
+const key = (k, extra = {}) => { sb.__e = { key: k, altKey: true, target: { tagName: 'DIV' }, ...extra }; return run('icHandleSelectKey(__e)'); };
 const picked = () => Array.from(run('Array.from(selectedStocks)'));
 const gridOf = (n, size = '2x2') => run(`selectedStocks.clear(); icMode = 'industry'; icActiveTab = 'stocks'; icLayout = '${size}'; icPage = 0; icActiveCell = 0; icStocks = Array.from({ length: ${n} }, (_, i) => ({ isin: 'S' + i }))`);
 
