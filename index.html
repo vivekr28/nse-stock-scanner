@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NSE EOD Dashboard</title>
-<link rel="stylesheet" href="css/styles.css?v=30">
+<link rel="stylesheet" href="css/styles.css?v=42">
 </head>
 <body>
 
@@ -25,6 +25,18 @@
       <pre id="tvModalContent"></pre>
     </div>
     <div class="modal-footer" id="tvModalFooter"></div>
+  </div>
+</div>
+
+<!-- Stock Scanner Overview (js/scanner-overview.js): sector and industry donut charts of the stocks in the results table -->
+<div class="modal-overlay" id="scrOverviewModal" onclick="if(event.target===this)closeScannerOverview()">
+  <div class="modal-box ov-box">
+    <div class="modal-header">
+      <h3 id="scrOverviewTitle">Overview</h3>
+      <div class="modal-actions"><button class="modal-close-btn" onclick="closeScannerOverview()" title="Close">&times;</button></div>
+    </div>
+    <div class="modal-body ov-modal-body" id="scrOverviewBody"></div>
+    <div class="modal-footer" id="scrOverviewFoot"></div>
   </div>
 </div>
 
@@ -162,6 +174,7 @@
         <button type="button" class="ic-dd-item" onclick="exportTradingViewWatchlist('flat')">No grouping (flat list)</button>
       </div>
     </div>
+    <button class="btn btn-secondary" id="scrOverviewBtn" onclick="openScannerOverview()" title="Pie charts of the sectors and industries the scanned stocks fall in">Overview</button>
     <button class="btn btn-secondary scr-toggle-btn showing-passed" id="scrToggleView" onclick="togglePassedFailed()">Showing Passed — Click for Failed</button>
     <span style="width:1px;align-self:stretch;background:var(--border);"></span>
     <button class="btn btn-secondary export-btn sel-action-btn" onclick="copySelectedStocksWatchlist()" title="Copy stocks picked in chart popups, grouped by industry" disabled>Copy Selected</button>
@@ -1453,6 +1466,7 @@
 <script src="js/data-processor.js?v=2"></script>
 <script src="js/scanner.js?v=3"></script>
 <script src="js/screener.js?v=27"></script>
+<script src="js/scanner-overview.js?v=7"></script>
 <script src="js/quarterly-results.js?v=13"></script>
 <script src="js/relative-strength.js?v=3"></script>
 <script src="js/group-breadth.js?v=1"></script>
