@@ -427,6 +427,9 @@ select option {
 }
 .btn-primary { background: var(--accent); color: #fff; }
 .btn-secondary { background: var(--bg3); color: var(--text2); border: 1px solid var(--border); }
+/* A Stop button: red outline and text so it reads as live (the plain secondary grey looks disabled); the disabled "Stopping..." state dims it. */
+.btn-stop { background: transparent; color: var(--red); border: 1px solid var(--red); }
+.btn-stop:hover:not(:disabled) { background: var(--red); color: #fff; opacity: 1; }
 .btn:hover { opacity: 0.85; }
 
 /* Table */

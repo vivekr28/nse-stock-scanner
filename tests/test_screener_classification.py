@@ -178,23 +178,22 @@ def test_a_fresh_clone_starts_from_the_tracked_copy(run, tmp_path):
     assert rows['GHOST']['Basic Industry'] == 'Dyes And Pigments'
 
 
-def test_skip_walk_only_refetches_missing_and_expired_company_entries(run):
+def test_skip_walk_only_fetches_missing_stocks_and_never_expires_company_entries(run):
     today = date.today().isoformat()
     old = (date.today() - timedelta(days=45)).isoformat()
     previous = {'BODALCHEM': ('walk', today), 'FRESHCO': ('company', today), 'OLDCO': ('company', old)}
     fetched, rows = run({}, previous, '--skip-walk')
     assert '/market/' not in fetched                                 # no industry walk
-    assert {p.split('/')[2] for p in fetched} == {'NEWCO', 'GHOST', 'OLDCO'}   # missing + expired only
-    assert rows['FRESHCO']['Fetched'] == today and rows['OLDCO']['Fetched'] == old   # 404s keep the old entry
+    assert {p.split('/')[2] for p in fetched} == {'NEWCO', 'GHOST'}   # missing only: OLDCO's 45-day-old entry is kept
+    assert rows['FRESHCO']['Fetched'] == today and rows['OLDCO']['Fetched'] == old
 
 
-def test_max_age_days_controls_expiry(run):
-    ten_days_ago = (date.today() - timedelta(days=10)).isoformat()
-    previous = {s: ('company', ten_days_ago) for s in SYMBOLS}
-    fetched, _ = run({}, previous, '--skip-walk', '--max-age-days', '5')
-    assert len(fetched) == 10                                        # 5 stocks x (consolidated + standalone)
-    fetched, _ = run({}, previous, '--skip-walk', '--max-age-days', '30')
-    assert fetched == []
+def test_company_page_entries_never_expire_in_a_full_run_either(run):
+    ancient = (date.today() - timedelta(days=400)).isoformat()
+    previous = {s: ('company', ancient) for s in SYMBOLS}
+    fetched, rows = run({'/market/': ''}, previous)                  # the walk finds nothing today
+    assert not [p for p in fetched if p.startswith('/company/')]     # no company page is fetched
+    assert all(rows[s]['Fetched'] == ancient for s in SYMBOLS)
 
 
 def test_stale_walk_entry_is_refetched_when_the_walk_no_longer_returns_it(run):

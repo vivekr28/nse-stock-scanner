@@ -31,7 +31,7 @@ function stubFetch(sb, handler) {
 }
 
 const mapping = (over = {}) => ({
-  exists: true, stocks: 2592, classified: 2586, unclassified: 6, missing: 0, expired: 0, ageDays: 3,
+  exists: true, stocks: 2592, classified: 2586, unclassified: 6, missing: 0, ageDays: 3,
   updatedAt: 1760000000, processedAt: 1760000500, reprocessNeeded: false, suggest: null,
   advice: { level: 'ok', text: 'Up to date - last rebuilt 3 days ago.' }, ...over,
 });
