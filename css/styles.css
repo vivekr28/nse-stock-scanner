@@ -694,6 +694,16 @@ canvas { max-width: 100%; display: block; }
 .ic-dd-item:hover { background: rgba(59, 130, 246, 0.15); color: var(--text); }
 .ic-header-controls .ic-dd-menu label { padding: 6px 8px; border-radius: 6px; }
 .ic-header-controls .ic-dd-menu label:hover { background: rgba(59, 130, 246, 0.15); color: var(--text); }
+/* Type-to-jump stock search: a small box pinned at the top centre of the chart popup. */
+.ic-find { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); z-index: 10001; width: min(440px, 92vw);
+  background: var(--bg2); border: 1px solid var(--accent); border-radius: 10px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6); overflow: hidden; }
+.ic-find-input { width: 100%; box-sizing: border-box; padding: 10px 14px; background: transparent; border: none; outline: none;
+  color: var(--text); font-size: 14px; border-bottom: 1px solid var(--border); }
+.ic-find-row { display: flex; align-items: baseline; gap: 10px; padding: 7px 14px; font-size: 13px; color: var(--text2); cursor: pointer; }
+.ic-find-row b { color: var(--text); font-weight: 600; flex-shrink: 0; }
+.ic-find-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ic-find-row.active, .ic-find-row:hover { background: rgba(59, 130, 246, 0.2); color: var(--text); }
+.ic-find-empty { padding: 10px 14px; font-size: 13px; color: var(--text2); }
 .ic-tabbar { display: flex; gap: 6px; padding: 10px 16px 0; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .ic-tab {
   background: none; border: none; color: var(--text2); font-size: 13px; font-weight: 600;

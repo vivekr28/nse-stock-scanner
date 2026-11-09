@@ -93,7 +93,7 @@ function runScanner() {
 
 function renderScannerTable() {
   const cols = [
-    { key: 'symbol', label: 'Symbol', fmt: v => v },
+    { key: 'symbol', label: 'Symbol', fmt: (v, row) => `<a href="#" class="stock-link" data-isin="${escapeHtml(row.isin)}">${escapeHtml(v)}</a>` },   // opens the chart popup (js/industry-charts.js)
     { key: 'series', label: 'Series', fmt: v => v },
     { key: 'sector', label: 'Sector', fmt: v => v || '-' },
     { key: 'industry', label: 'Industry', fmt: v => v || '-' },
@@ -127,7 +127,7 @@ function renderScannerTable() {
     '<tr>' + cols.map(c => {
       const v = row[c.key];
       const cls = c.cls ? c.cls(v) : '';
-      return `<td class="${cls}">${c.fmt(v)}</td>`;
+      return `<td class="${cls}">${c.fmt(v, row)}</td>`;
     }).join('') + '</tr>'
   ).join('');
 

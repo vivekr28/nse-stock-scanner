@@ -1,11 +1,12 @@
 'use strict';
 // The chart popup's header controls (index.html + js/industry-charts.js):
-//   - the 10 / 20 / 50 SMA and Purple Dots checkboxes sit in an "Indicators" dropdown (open / close / count badge /
+//   - the 10 / 20 / 50 / 200 SMA and Purple Dots checkboxes sit in an "Indicators" dropdown (open / close / count badge /
 //     Escape / click away)
 //   - ADR / Avg MF are on the same line as the name (single-stock title) / the checkbox (grid cell), not below it
 //   - the page buttons are just < and > (with a tooltip and aria-label), no "Prev" / "Next" text
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const vm = require('node:vm');
 const fs = require('node:fs');
 const path = require('node:path');
 const { loadScripts } = require('./load');
@@ -24,7 +25,7 @@ function page({ checked = ['icSMA20'] } = {}) {
   const btn = dom.el('icIndicatorsBtn');
   const attrs = {};
   btn.setAttribute = (k, v) => { attrs[k] = v; };
-  for (const id of ['icSMA10', 'icSMA20', 'icSMA50', 'icShowMFDots']) dom.el(id).checked = checked.includes(id);
+  for (const id of ['icSMA10', 'icSMA20', 'icSMA50', 'icSMA200', 'icSMAw13', 'icSMAw40', 'icSMAw52', 'icShowMFDots']) dom.el(id).checked = checked.includes(id);
   return { dom, menu, btn, attrs, count: dom.el('icIndicatorsCount') };
 }
 
@@ -82,9 +83,92 @@ test('the badge counts the ticked indicators and is empty when none are', () => 
   p.dom.el('icShowMFDots').checked = true;                    // Purple Dots counts as an indicator too
   sb.icUpdateIndicatorsCount();
   assert.equal(p.count.textContent, '4');
-  for (const id of ['icSMA10', 'icSMA20', 'icSMA50', 'icShowMFDots']) p.dom.el(id).checked = false;
+  for (const id of ['icSMA10', 'icSMA20', 'icSMA50', 'icSMA200', 'icShowMFDots']) p.dom.el(id).checked = false;
   sb.icUpdateIndicatorsCount();
   assert.equal(p.count.textContent, '');
+});
+
+const run = code => vm.runInContext(code, sb);
+
+// --- the 200 SMA line (stock charts and the Industry Chart tab share icUpdateInstanceSMA) ------------------
+
+test('the 200 SMA line is drawn only when ticked and only once there are 200 closes', () => {
+  const p = page({ checked: ['icSMA200'] });
+  const mk = n => {
+    const candleData = Array.from({ length: n }, (_, i) => ({ time: '2025-01-' + String(i + 1).padStart(3, '0') }));
+    const calls = {};
+    const smaSeries = {};
+    for (const d of run('IC_SMA_DEFS')) smaSeries[d.key] = { setData: data => { calls[d.key] = data; } };
+    return { inst: { closes: candleData.map((_, i) => 100 + i), candleData, smaSeries }, calls };
+  };
+  assert.deepEqual(Array.from(run('IC_SMA_LENGTHS')), [10, 20, 50, 200]);
+  const full = mk(250);
+  sb.icUpdateInstanceSMA(full.inst);
+  assert.equal(full.calls[200].length, 51);                  // 250 closes -> 51 points, the first at the 200th candle
+  assert.equal(full.calls[200][0].time, full.inst.candleData[199].time);
+  assert.equal(full.calls[200][0].value, 199.5);             // mean of 100..299 is 199.5 (closes 100..299)
+  assert.equal(full.calls[20].length, 0);                      // unticked ones stay empty
+  const short = mk(150);
+  sb.icUpdateInstanceSMA(short.inst);
+  assert.equal(short.calls[200].length, 0);                    // not enough history: no line, no error
+  p.dom.el('icSMA200').checked = false;
+  const off = mk(250);
+  sb.icUpdateInstanceSMA(off.inst);
+  assert.equal(off.calls[200].length, 0);
+});
+
+test('ticking 200 SMA redraws the lines on the stock charts and the industry chart', () => {
+  page({ checked: ['icSMA200'] });
+  const seen = [], orig = sb.icUpdateInstanceSMA;
+  sb.icUpdateInstanceSMA = inst => seen.push(inst);
+  run('icChartInstances = [{ n: 1 }, { n: 2 }]; icIndustryChartInst = { n: "industry" }');
+  sb.icUpdateAllSMA();
+  assert.equal(seen.length, 3);
+  sb.icUpdateInstanceSMA = orig;
+});
+
+test('Weekly chart: 13W / 40W / 52W SMAs are drawn instead of 10 / 20 / 50 / 200, each only when ticked and with enough weeks', () => {
+  const p = page({ checked: ['icSMA20', 'icSMAw13', 'icSMAw52'] });
+  assert.deepEqual(Array.from(run('IC_SMA_WEEKLY_LENGTHS')), [13, 40, 52]);
+  const mk = (n, weekly) => {
+    const candleData = Array.from({ length: n }, (_, i) => ({ time: { year: 2025, month: 1, day: i + 1 } }));
+    const calls = {};
+    const smaSeries = {};
+    for (const d of run('IC_SMA_DEFS')) smaSeries[d.key] = { setData: data => { calls[d.key] = data; } };
+    return { inst: { weekly, closes: candleData.map((_, i) => 100 + i), candleData, smaSeries }, calls };
+  };
+  const wk = mk(60, true);
+  sb.icUpdateInstanceSMA(wk.inst);
+  assert.equal(wk.calls.w13.length, 48);                     // 60 weeks -> 48 points
+  assert.equal(wk.calls.w52.length, 9);
+  assert.equal(wk.calls.w40.length, 0);                      // not ticked
+  assert.equal(wk.calls[20].length, 0);                      // the daily 20 SMA is ticked but is not drawn on the weekly chart
+  const young = mk(40, true);
+  sb.icUpdateInstanceSMA(young.inst);
+  assert.equal(young.calls.w52.length, 0);                   // 40 weeks: no 52W line, no error
+  const dy = mk(60, false);
+  sb.icUpdateInstanceSMA(dy.inst);
+  assert.equal(dy.calls.w13.length, 0);                      // and the weekly ones are not drawn on the daily chart
+  assert.equal(dy.calls[20].length, 41);
+  p.dom.el('icSMAw13').checked = false;
+});
+
+test('the menu shows the SMAs of the chart time frame and the badge counts only those', () => {
+  const p = page({ checked: ['icSMA20', 'icSMAw13', 'icSMAw40'] });
+  const labels = {};
+  for (const id of ['icSMA10', 'icSMA20', 'icSMA50', 'icSMA200', 'icSMAw13', 'icSMAw40', 'icSMAw52']) p.dom.el(id).parentElement = labels[id] = { style: {} };
+  run("icTimeframe = 'd'");
+  sb.icSyncSmaMenu();
+  assert.equal(labels.icSMA20.style.display, '');
+  assert.equal(labels.icSMAw13.style.display, 'none');
+  assert.equal(p.count.textContent, '1');                    // just the 20 SMA
+  run("icTimeframe = 'w'");
+  sb.icSyncSmaMenu();
+  assert.equal(labels.icSMA20.style.display, 'none');
+  assert.equal(labels.icSMAw13.style.display, '');
+  assert.equal(labels.icSMAw52.style.display, '');
+  assert.equal(p.count.textContent, '2');                    // 13W and 40W
+  run("icTimeframe = 'd'");
 });
 
 // --- index.html -----------------------------------------------------------------------------------------
@@ -98,11 +182,15 @@ test('SMAs and Purple Dots live inside the Indicators menu, keep their ids and d
   assert.match(menu, /<input type="checkbox" id="icSMA10"> 10 SMA/);
   assert.match(menu, /<input type="checkbox" id="icSMA20" checked> 20 SMA/);        // 20 SMA on by default
   assert.match(menu, /<input type="checkbox" id="icSMA50"> 50 SMA/);
+  assert.match(menu, /<input type="checkbox" id="icSMA200"> 200 SMA/);            // 200 SMA off by default
+  assert.match(menu, /<label style="display:none;"><input type="checkbox" id="icSMAw13" checked> 13W SMA<\/label>/);   // the weekly set: hidden until the Weekly chart, 13W on by default
+  assert.match(menu, /id="icSMAw40"> 40W SMA/);
+  assert.match(menu, /id="icSMAw52"> 52W SMA/);
   assert.match(menu, /<input type="checkbox" id="icShowMFDots" checked> Purple Dots/); // Purple Dots on by default
   assert.match(menu, /title="Purple dot below the candle's low/);                    // its explanation survived the move
   assert.match(dropdown, /id="icIndicatorsMenu" style="display:none;"/);              // closed until the button is clicked
   // each of them appears exactly once - not also left in the header row
-  for (const id of ['icSMA10', 'icSMA20', 'icSMA50', 'icShowMFDots']) assert.equal(html.split(`id="${id}"`).length - 1, 1, id);
+  for (const id of ['icSMA10', 'icSMA20', 'icSMA50', 'icSMA200', 'icSMAw13', 'icSMAw40', 'icSMAw52', 'icShowMFDots']) assert.equal(html.split(`id="${id}"`).length - 1, 1, id);
 });
 
 test('the dropdown button is wired and labelled "Indicators"', () => {

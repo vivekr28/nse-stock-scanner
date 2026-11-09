@@ -861,6 +861,11 @@
      hidden when a `.panel` other than Stock Scanner is the active tab -->
 <div class="modal-overlay" id="industryChartsModal" onclick="if(event.target===this)closeIndustryCharts()">
   <div class="modal-box ic-modal-box">
+    <!-- Type-to-jump stock search (js/industry-charts.js): opens when you start typing on the single-stock chart or the Stock Charts tab -->
+    <div class="ic-find" id="icFind" style="display:none;">
+      <input type="text" id="icFindInput" class="ic-find-input" placeholder="Jump to a stock: type a symbol or name, Up / Down, Enter" autocomplete="off" spellcheck="false" aria-label="Jump to a stock">
+      <div class="ic-find-list" id="icFindList"></div>
+    </div>
     <div class="modal-header">
       <div class="ic-title-wrap">
         <div class="ic-title-line1">
@@ -876,7 +881,11 @@
             <label><input type="checkbox" id="icSMA10"> 10 SMA</label>
             <label><input type="checkbox" id="icSMA20" checked> 20 SMA</label>
             <label><input type="checkbox" id="icSMA50"> 50 SMA</label>
-            <label title="Purple dot below the candle's low on any day with Money Flow >= 40 Cr and |change%| >= 5% (up or down)"><input type="checkbox" id="icShowMFDots" checked> Purple Dots</label>
+            <label><input type="checkbox" id="icSMA200"> 200 SMA</label>
+            <label style="display:none;"><input type="checkbox" id="icSMAw13" checked> 13W SMA</label>
+            <label style="display:none;"><input type="checkbox" id="icSMAw40"> 40W SMA</label>
+            <label style="display:none;"><input type="checkbox" id="icSMAw52"> 52W SMA</label>
+            <label title="Purple dot below the candle's low on any day with Money Flow >= 40 Cr and |change%| >= 5% (up or down). Daily chart only."><input type="checkbox" id="icShowMFDots" checked> Purple Dots</label>
           </div>
         </div>
         <label><input type="checkbox" id="icPctMode"> % Change</label>
@@ -894,6 +903,10 @@
           <button class="btn btn-secondary ic-layout-btn active" data-range="6m" onclick="icSetRange('6m')">6M</button>
           <button class="btn btn-secondary ic-layout-btn" data-range="1y" onclick="icSetRange('1y')">1Y</button>
           <button class="btn btn-secondary ic-layout-btn" data-range="2y" onclick="icSetRange('2y')">2Y</button>
+        </div>
+        <div class="ic-layout-toggle" id="icTfToggle" title="Daily or weekly candles on the charts (the weekly candles are built from the daily ones)">
+          <button class="btn btn-secondary ic-layout-btn active" data-tf="d" onclick="icSetTimeframe('d')">Daily</button>
+          <button class="btn btn-secondary ic-layout-btn" data-tf="w" onclick="icSetTimeframe('w')">Weekly</button>
         </div>
         <div class="ic-layout-toggle" id="icLayoutToggle">
           <button class="btn btn-secondary ic-layout-btn active" data-layout="2x2" onclick="icSetLayout('2x2')" title="2 rows x 2 columns (4 charts)">2×2</button>
@@ -1438,7 +1451,7 @@
 <script src="js/utils.js?v=4"></script>
 <script src="js/cache.js?v=2"></script>
 <script src="js/data-processor.js?v=2"></script>
-<script src="js/scanner.js?v=2"></script>
+<script src="js/scanner.js?v=3"></script>
 <script src="js/screener.js?v=27"></script>
 <script src="js/quarterly-results.js?v=13"></script>
 <script src="js/relative-strength.js?v=3"></script>
@@ -1454,7 +1467,7 @@
 <script src="js/ew-index.js?v=6"></script>
 <script src="js/chart-tools.js?v=6"></script>
 <script src="js/market-overview.js?v=8"></script>
-<script src="js/industry-charts.js?v=25"></script>
+<script src="js/industry-charts.js?v=32"></script>
 <script src="js/data-quality.js?v=13"></script>
 <script src="js/quarterly-results-fetch.js?v=1"></script>
 <script src="js/presets.js?v=23"></script>
