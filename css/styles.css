@@ -661,6 +661,48 @@ canvas { max-width: 100%; display: block; }
 }
 .modal-header h3 { font-size: 15px; font-weight: 600; color: var(--text); margin: 0; }
 
+/* Stock Scanner "Overview" modal: sector / industry donut charts (js/scanner-overview.js) */
+.ov-box { width: 94%; max-width: 1500px; max-height: 92vh; }
+.ov-modal-body { display: flex; flex-wrap: wrap; gap: 28px 40px; align-items: flex-start; padding: 18px 24px; }
+.ov-sec { flex: 1 1 560px; min-width: 0; }
+.ov-sec h4 { font-size: 15px; font-weight: 600; color: var(--text); margin: 0 0 10px; }
+.ov-sec h4 span { color: var(--text2); font-weight: 400; margin-left: 6px; }
+.ov-body { display: flex; gap: 16px; align-items: flex-start; }
+.ov-chart { flex: 0 0 230px; text-align: center; }
+.ov-donut { width: 230px; height: 230px; display: block; }
+.ov-slice { transition: opacity 0.12s; cursor: default; }
+.ov-chart:hover .ov-slice:not(.hot) { opacity: 0.45; }
+.ov-slice.hot { opacity: 1; }
+.ov-mid-main { font-size: 26px; font-weight: 700; fill: var(--text); }
+.ov-mid-sub { font-size: 11px; fill: var(--text2); }
+.ov-cap { min-height: 36px; margin-top: 8px; font-size: 13px; color: var(--text); word-break: break-word; }
+.ov-listbox { flex: 1 1 auto; min-width: 0; max-height: min(420px, 52vh); overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
+/* The list is a grid so every figure lines up: colour dot | name | Stocks | Share | Passing % (with a bar) | passed / group size. */
+.ov-head, .ov-row { display: grid; grid-template-columns: 10px minmax(0, 1fr) 40px 46px 88px 54px; column-gap: 8px; align-items: center; padding: 7px 12px; }
+.ov-head { position: sticky; top: 0; z-index: 1; background: var(--bg3); border-bottom: 1px solid var(--border);
+  font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.03em; }
+.ov-h-name { justify-self: start; }
+.ov-h-pass { padding-right: 6px; }   /* the Passing numbers sit 6px inside their bar, the header lines up with them */
+.ov-h-num, .ov-h-share, .ov-h-pass { justify-self: end; text-align: right; white-space: nowrap; }
+.ov-sort span { display: inline-block; width: 11px; font-size: 9px; color: var(--accent); }
+.ov-h-name span { margin-left: 2px; }
+.ov-h-pass span { margin: 0 2px 0 -13px; }   /* Passing: the arrow hangs to the left of the label ... */
+.ov-h-share span { margin: 0 -13px 0 2px; }   /* ... Share: to the right of it (the free space before the Passing column) */   /* the arrow of a right-aligned label hangs to its left, so the label stays over its numbers */
+.ov-row { font-size: 13px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.ov-row i { width: 10px; height: 10px; border-radius: 3px; }
+.ov-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }   /* a long name ends in ... (the row's tooltip shows it in full) */
+.ov-row b { text-align: right; font-weight: 600; color: var(--text); }
+.ov-row em { font-style: normal; text-align: right; color: var(--text2); }
+.ov-row em.ov-pass { color: var(--text); font-weight: 600; padding: 2px 6px; border-radius: 4px;
+  background: linear-gradient(to right, rgba(59,130,246,0.45) var(--bar, 0%), transparent var(--bar, 0%)); }   /* the bar: this group's % relative to the highest in the list */
+.ov-frac { text-align: right; font-size: 12px; color: var(--text2); font-variant-numeric: tabular-nums; }
+.ov-sort { background: none; border: none; padding: 0; font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit; cursor: pointer; }
+.ov-sort:hover, .ov-sort.on { color: var(--text); }
+.ov-row:last-child { border-bottom: none; }
+.ov-row.hot { background: var(--bg3); }
+.ov-empty { color: var(--text2); padding: 20px 0; }
+@media (max-width: 640px) { .ov-donut { width: 220px; height: 220px; } .ov-chart { flex-basis: auto; } .ov-body { flex-direction: column; align-items: center; } .ov-listbox { width: 100%; } }
+
 /* Industry / Symbol column links in the Stock Scanner results table */
 .industry-link, .stock-link { color: var(--accent); text-decoration: none; }
 .industry-link:hover, .stock-link:hover { text-decoration: underline; }
