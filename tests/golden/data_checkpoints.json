@@ -123,10 +123,10 @@
   ]
  ],
  "expected": {
-  "bhavcopyRows": 1260538,
-  "tradingDays": 516,
+  "bhavcopyRows": 1265307,
+  "tradingDays": 518,
   "priceBandRows": 1262912,
-  "indexRows": 26899,
+  "indexRows": 27003,
   "stockCloses": {
    "RELIANCE|02-Sep-2024": 3032.5,
    "RELIANCE|18-Dec-2024": 1253.25,

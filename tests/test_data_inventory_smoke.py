@@ -65,8 +65,11 @@ def test_per_day_folders_and_merged_files_cover_the_same_trading_days():
     assert band_files == merged_band, (
         f'per-day price band files vs merged file differ: only files {sorted(band_files - merged_band, key=rd.day)[:5]}, '
         f'only merged {sorted(merged_band - band_files, key=rd.day)[:5]}')
-    assert bhav_files == band_files, (
-        f'bhavcopy and price band cover different days: {sorted(bhav_files ^ band_files, key=rd.day)[:10]}')
+    # No price-band file is fetched for a weekend special session (Muhurat, Budget day): the dashboard keeps the previous
+    # band on a day with no row. Every other day must have both.
+    weekend_sessions = {d for d in bhav_files if rd.day(d).weekday() >= 5}
+    assert bhav_files - weekend_sessions == band_files, (
+        f'bhavcopy and price band cover different days: {sorted((bhav_files - weekend_sessions) ^ band_files, key=rd.day)[:10]}')
 
 
 def test_merged_bhavcopy_has_every_row_of_every_per_day_file():
@@ -183,11 +186,17 @@ def test_tradingview_corrections_file_is_valid_and_every_correction_is_applied()
     assert rows and {'ISIN', 'SYMBOL', 'EXDATE', 'FACTOR', 'STATUS'} <= set(rows[0])
     assert {r['STATUS'] for r in rows} <= {'adjusted', 'tv-unadjusted', 'inconclusive'}, f'unknown STATUS values: {sorted({r["STATUS"] for r in rows})}'
     applied = {(a['isin'], a['exDate']): a['factor'] for a in data['adjustedCorpActions']}
+    # only events inside the retained MAX_DAILY_DAYS price window are applied (older ones have no bars left to adjust)
+    window_start = rd.day(data['dates'][-ns.MAX_DAILY_DAYS])
     for r in rows:
         if r['STATUS'] != 'adjusted':
             continue
         factor = float(r['FACTOR'])
-        assert 0 < factor < 2, f'{r["SYMBOL"]} {r["EXDATE"]}: implausible factor {factor}'
+        # below 1 for a split/bonus/rights, ABOVE 1 for a consolidation (reverse split): CCAVENUE's 10-for-1 on 19-Oct-2026
+        # is x10 and TradingView confirms it (prices before it x10 line up with 130.05 on the day)
+        assert 0.001 < factor < 1000, f'{r["SYMBOL"]} {r["EXDATE"]}: implausible factor {factor}'
+        if rd.day(r['EXDATE']) <= window_start:
+            continue
         key = (r['ISIN'], r['EXDATE'])
         assert key in applied, f'TradingView correction for {r["SYMBOL"]} {r["EXDATE"]} is not applied in the processed data'
         assert abs(applied[key] - factor) < 1e-4, f'{r["SYMBOL"]} {r["EXDATE"]}: applied factor {applied[key]} != file {factor}'
@@ -234,5 +243,11 @@ def test_golden_corporate_action_adjustments_are_reproduced():
     maths together rebuild to the same prices."""
     g = rd.golden()
     m = rd.measure(g)['adjustmentRatios']
-    bad = {k: (m[k], v) for k, v in g['expected']['adjustmentRatios'].items() if m[k] is None or abs(m[k] / v - 1) > 5e-4}
+    # The processed data keeps only the last MAX_DAILY_DAYS bars per stock, so an event whose ex-date has rolled out of
+    # that window (or sits on its first bar, with no "day before") can no longer be measured - skip those, which grow in
+    # number as the days pass; the rest still prove the adjustment maths.
+    window_start = rd.day(rd.processed()['dates'][-ns.MAX_DAILY_DAYS])
+    pinned = {k: v for k, v in g['expected']['adjustmentRatios'].items() if rd.day(k.split('|', 1)[1]) > window_start}
+    assert len(pinned) >= 8, f'only {len(pinned)} pinned corporate-action events are still inside the retained price window - regenerate tests/golden/data_checkpoints.json'
+    bad = {k: (m[k], v) for k, v in pinned.items() if m[k] is None or abs(m[k] / v - 1) > 5e-4}
     assert not bad, f'{len(bad)} adjusted price ratios differ from the pinned values (have, golden): {dict(list(bad.items())[:5])}'

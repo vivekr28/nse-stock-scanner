@@ -100,10 +100,14 @@ def test_stock_calendar_matches_the_official_index_calendar(data, index_closes):
     assert not only_index, f'trading days NSE published an index close for but the stock data lacks: {only_index[:10]}'
 
 
-def test_dates_are_weekdays_with_no_long_gaps(data):
+def test_dates_are_weekdays_with_no_long_gaps(data, index_closes):
     ds = [day(d) for d in data['dates']]
     assert ds == sorted(ds) and len(set(ds)) == len(ds), 'dates are not strictly increasing'
-    assert not [d for d in data['dates'] if day(d).weekday() >= 5], 'weekend dates present'
+    # A weekend date is legitimate only as a special session (Muhurat, Budget day), which NSE also publishes an index
+    # close for; anything else on a Saturday/Sunday is a bad date.
+    index_dates = set(index_closes['Nifty 500'])
+    stray = [d for d in data['dates'] if day(d).weekday() >= 5 and d not in index_dates]
+    assert not stray, f'weekend dates with no NSE index close (not a real session): {stray}'
     gaps = [(data['dates'][i], data['dates'][i + 1]) for i in range(len(ds) - 1) if (ds[i + 1] - ds[i]).days > 5]
     assert not gaps, f'gaps of more than 5 calendar days (a missing week?): {gaps}'
 

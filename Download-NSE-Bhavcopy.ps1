@@ -259,6 +259,8 @@ function Download-BhavFile {
         [string]$DateLabel
     )
 
+    $script:LastBhavHttpCode = $null   # HTTP status of the last failed request, for the weekend probe (404 = no session, 403 = blocked/throttled)
+
     # Skip if CSV already exists and is valid
     if (Test-Path $CsvPath) {
         $sz = (Get-Item $CsvPath).Length
@@ -315,6 +317,7 @@ function Download-BhavFile {
         if (Test-Path $zipPath) { Remove-Item $zipPath -Force -ErrorAction SilentlyContinue }
         $code = $null
         if ($_.Exception.Response) { $code = [int]$_.Exception.Response.StatusCode }
+        $script:LastBhavHttpCode = $code
         if ($code -eq 404 -or $code -eq 403) { return "HOLIDAY" }
         return "FAIL|$($_.Exception.Message)"
     }
@@ -396,6 +399,63 @@ foreach ($Day in $TradingDays) {
     if ($bhavResult -like "OK*" -or $bandResult -like "OK*") {
         Start-Sleep -Seconds $RetryDelay
     }
+}
+
+# -- Weekend special sessions (Muhurat trading, Budget-day Saturday/Sunday, ...) -----------------------------
+# NSE trades on a weekend only on rare days, and publishes the same bhavcopy file for them. The weekday loop above never
+# asks for a Saturday/Sunday, and an incremental run starts AFTER the newest file it already has, so a weekend that fell
+# before that would never be asked for either. So every weekend from the first bhavcopy on is probed once:
+#   * 404 = no session that day -> remembered in NSE_DATA\WeekendNoSession.txt and never probed again (not while the
+#     date is under 3 days old, as a file can be published late);
+#   * 403 / network error = NSE blocked or throttled the request, which says nothing about the day -> NOT remembered,
+#     retried next run.
+# The first run after this was added probes every weekend since the first bhavcopy once (a few minutes); later runs only
+# the latest weekend. Price-band files are not fetched for weekends (the dashboard keeps the previous band on a day with no
+# row); the index file for a weekend session is fetched further down.
+$WeekendNoSessionFile = Join-Path $MergedFolder "WeekendNoSession.txt"
+$wkNoSession = New-Object 'System.Collections.Generic.HashSet[string]'
+if (Test-Path $WeekendNoSessionFile) {
+    foreach ($l in (Get-Content $WeekendNoSessionFile)) { if ($l.Trim()) { [void]$wkNoSession.Add($l.Trim()) } }
+}
+$wkFirst = $StartDate
+foreach ($bf in (Get-ChildItem -Path $BhavFolder -Filter "BhavCopy_CM_*.csv" -ErrorAction SilentlyContinue)) {
+    $bd = Get-BhavFileDate $bf.BaseName
+    if ($bd -and $bd -lt $wkFirst) { $wkFirst = $bd }
+}
+$wkRecheckAfter = $EndDate.AddDays(-3)
+$wkToProbe = @()
+for ($d = $wkFirst; $d -le $EndDate; $d = $d.AddDays(1)) {
+    if ($d.DayOfWeek -ne [DayOfWeek]::Saturday -and $d.DayOfWeek -ne [DayOfWeek]::Sunday) { continue }
+    $key = $d.ToString("yyyyMMdd")
+    if (Test-Path (Join-Path $BhavFolder "BhavCopy_CM_$key.csv")) { continue }   # already have it
+    if ($wkNoSession.Contains($key)) { continue }                                 # already known: no session
+    $wkToProbe += $d
+}
+if ($wkToProbe.Count -gt 0) {
+    Write-Host "Checking $($wkToProbe.Count) weekend day(s) for special sessions (Muhurat / Budget-day)..." -ForegroundColor Cyan
+    $wkFound = 0; $wkBlocked = 0; $wkRemembered = 0
+    foreach ($d in $wkToProbe) {
+        $key = $d.ToString("yyyyMMdd")
+        $res = Download-BhavFile -Url ($BhavBaseUrl -f $key) -CsvPath (Join-Path $BhavFolder "BhavCopy_CM_$key.csv") -DateLabel $d.ToString("dd-MMM-yyyy")
+        if ($res -like "OK*") {
+            $wkFound++
+            $label = "$($d.ToString('dd-MMM-yyyy')) ($($d.DayOfWeek))"
+            $BhavOK += $label
+            Write-Host "  $label  |  Bhav:OK($($res.Split('|')[1])KB)  |  special session" -ForegroundColor Green
+            Start-Sleep -Seconds $RetryDelay
+        }
+        elseif ($res -eq "HOLIDAY" -and $script:LastBhavHttpCode -eq 404) {
+            if ($d -le $wkRecheckAfter) { if ($wkNoSession.Add($key)) { $wkRemembered++ } }
+        }
+        elseif ($res -ne "SKIP") {
+            $wkBlocked++   # 403 / network error / unreadable zip: says nothing about the day, try again next run
+        }
+        Start-Sleep -Milliseconds 250
+    }
+    if ($wkRemembered -gt 0) {
+        Set-Content -Path $WeekendNoSessionFile -Value @($wkNoSession | Sort-Object) -Encoding UTF8
+    }
+    Write-Host "  Weekend special sessions: $wkFound found, $($wkToProbe.Count - $wkFound - $wkBlocked) without a session$(if ($wkBlocked -gt 0) { ", $wkBlocked could not be checked (blocked or network error - retried next run)" })" -ForegroundColor $(if ($wkBlocked -gt 0) { "Yellow" } else { "Green" })
 }
 
 # -- Download EQUITY_L.csv (master equity list with ISIN) ----------------------
@@ -482,7 +542,8 @@ catch {
 # -- Download NSE index closing values (broad-market + sector indexes) ---------
 # NSE publishes one file per trading day with OHLC/volume/turnover/PE/PB for every index. The raw daily files are
 # kept in NSE_DATA\IndexClose (already-downloaded days are skipped), and the indexes listed below are merged into
-# NSE_DATA\NSE_Indices_Combined.csv. Weekends/holidays have no file (404) and are skipped.
+# NSE_DATA\NSE_Indices_Combined.csv. Holidays have no file (404) and are skipped; a weekend is asked for only when it
+# has a bhavcopy file (a special session - see "Weekend special sessions" above).
 Write-Host "`nDownloading NSE index closing values..." -ForegroundColor Cyan
 $IndexFolder   = Resolve-FolderCI -Parent $MergedFolder -Name "IndexClose"
 $IndexCombined = Join-Path $MergedFolder "NSE_Indices_Combined.csv"
@@ -515,7 +576,8 @@ try {
     if ($IndexStartFrom -ne "") { $idxStart = [DateTime]::Parse($IndexStartFrom).Date }   # explicit start, e.g. to rebuild the same history
     $idxNew = 0; $idxSkipped = 0
     for ($d = $idxStart; $d -le (Get-Date).Date; $d = $d.AddDays(1)) {
-        if ($d.DayOfWeek -eq 'Saturday' -or $d.DayOfWeek -eq 'Sunday') { continue }
+        # A weekend only counts when NSE traded (a special session): it then has a bhavcopy file, found above.
+        if (($d.DayOfWeek -eq 'Saturday' -or $d.DayOfWeek -eq 'Sunday') -and -not (Test-Path (Join-Path $BhavFolder ("BhavCopy_CM_{0}.csv" -f $d.ToString("yyyyMMdd"))))) { continue }
         $idxFile = Join-Path $IndexFolder ("ind_close_all_{0}.csv" -f $d.ToString("yyyyMMdd"))
         if (Test-Path $idxFile) { continue }
         try {
@@ -693,6 +755,7 @@ $AllBhav = Get-ChildItem -Path $BhavFolder -Filter "*.csv" -ErrorAction Silently
 
 if ($AllBhav.Count -gt 0) {
     $MergedBhav = Join-Path $MergedFolder "NSE_Bhavcopy_Combined.csv"
+    $WeekendMergedFile = Join-Path $MergedFolder "WeekendMerged.txt"
 
     # Output header: old column names + ISIN + COMPANY_NAME (backward compatible)
     $outHeader = "SYMBOL, SERIES, DATE1, PREV_CLOSE, OPEN_PRICE, HIGH_PRICE, LOW_PRICE, LAST_PRICE, CLOSE_PRICE, AVG_PRICE, TTL_TRD_QNTY, TURNOVER_LACS, NO_OF_TRADES, DELIV_QTY, DELIV_PER, ISIN, COMPANY_NAME"
@@ -712,7 +775,14 @@ if ($AllBhav.Count -gt 0) {
         }
         if ($lastMergedDate) {
             $newFiles = @($AllBhav | Where-Object { $_.Date -gt $lastMergedDate })
-            if ($newFiles.Count -eq 0) {
+            # A weekend special-session file fetched AFTER the days that follow it were merged (first run with weekend
+            # probing, or a later backfill) is older than the newest merged day, so appending "newer" files would skip it
+            # forever. WeekendMerged.txt lists the weekend dates the combined file is known to contain.
+            $wkMergedList = @(); if (Test-Path $WeekendMergedFile) { $wkMergedList = @(Get-Content $WeekendMergedFile | ForEach-Object { $_.Trim() }) }
+            $wkUnmerged = @($AllBhav | Where-Object { $_.Date.DayOfWeek -in 'Saturday','Sunday' -and $_.Date -le $lastMergedDate -and ($wkMergedList -notcontains $_.Date.ToString('yyyyMMdd')) })
+            if ($wkUnmerged.Count -gt 0) {
+                Write-Host "  $($wkUnmerged.Count) weekend special-session file(s) ($(($wkUnmerged | ForEach-Object { $_.Date.ToString('dd-MMM-yyyy') }) -join ', ')) predate the newest merged day - rebuilding the combined file so they are included" -ForegroundColor Yellow
+            } elseif ($newFiles.Count -eq 0) {
                 $bhavToProcess = @()
                 $sz = [math]::Round((Get-Item $MergedBhav).Length / 1MB, 2)
                 Write-Host "  Bhavcopy up to date ($sz MB)" -ForegroundColor Green
@@ -824,6 +894,13 @@ if ($AllBhav.Count -gt 0) {
         $sz = [math]::Round((Get-Item $MergedBhav).Length / 1MB, 2)
         Write-Host "  Full merge: $($allLines.Count - 1) rows, $sz MB" -ForegroundColor Green
     }
+    }
+
+    # Record which weekend special sessions the combined file now contains (it is current with every file in the folder here)
+    $wkNow = @($AllBhav | Where-Object { $_.Date.DayOfWeek -in 'Saturday','Sunday' } | ForEach-Object { $_.Date.ToString('yyyyMMdd') })
+    if ($wkNow.Count -gt 0) {
+        $wkOld = @(); if (Test-Path $WeekendMergedFile) { $wkOld = @(Get-Content $WeekendMergedFile | ForEach-Object { $_.Trim() }) }
+        if ((($wkNow -join ',') -ne ($wkOld -join ','))) { Set-Content -Path $WeekendMergedFile -Value $wkNow -Encoding UTF8 }
     }
 }
 
