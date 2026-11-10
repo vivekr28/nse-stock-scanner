@@ -59,6 +59,16 @@ function computeDynEMAPartial(days, field, length) {
 }
 
 // Compute dynamic ADR for a given lookback length (strict: requires full length)
+// F42 "Fast MA > Slow MA": is today's fast moving average of the close strictly above the slow one? `type` is 'sma' | 'ema' (both
+// averages use it); allowPartial falls back to the bars available (at least 5), like every other filter. `valid` is false when either
+// average can't be computed (too little history), `gapPct` is how far the fast one sits above (+) or below (-) the slow one.
+function computeMaCross(days, type, fastLen, slowLen, allowPartial) {
+  const fn = type === 'ema' ? (allowPartial ? computeDynEMAPartial : computeDynEMA) : (allowPartial ? computeDynSMAPartial : computeDynSMA);
+  const fast = fn(days, 'close', fastLen), slow = fn(days, 'close', slowLen);
+  const valid = !isNaN(fast) && !isNaN(slow);
+  return { fast, slow, valid, ok: valid && fast > slow, gapPct: valid && slow > 0 ? (fast / slow - 1) * 100 : NaN };
+}
+
 function computeDynADR(days, length) {
   if (days.length < length) return NaN;
   const slice = days.slice(-length);
@@ -369,6 +379,11 @@ function runScreener() {
   const f8Min = parseFloat(document.getElementById('scrF8Min').value) || 0;
   const f8Max = parseFloat(document.getElementById('scrF8Max').value) || 999;
 
+  const f42On = document.getElementById('scrF42On').checked;
+  const f42Type = document.getElementById('scrF42Type').value === 'ema' ? 'ema' : 'sma';
+  const f42Fast = parseInt(document.getElementById('scrF42Fast').value) || 20;
+  const f42Slow = parseInt(document.getElementById('scrF42Slow').value) || 50;
+
   const f9On = document.getElementById('scrF9On').checked;
   const f9Val = parseFloat(document.getElementById('scrF9Val').value) || 0;
   const f9MinStk = parseInt(document.getElementById('scrF9MinStk').value) || 1;
@@ -377,6 +392,7 @@ function runScreener() {
   const f10On = document.getElementById('scrF10On').checked;
   const f10_20sma = document.getElementById('scrF10_20sma').checked;
   const f10_50sma = document.getElementById('scrF10_50sma').checked;
+  const f10_65sma = document.getElementById('scrF10_65sma').checked;
   const f10_200sma = document.getElementById('scrF10_200sma').checked;
   const f10_200ema = document.getElementById('scrF10_200ema').checked;
 
@@ -593,6 +609,20 @@ function runScreener() {
       }
     }
 
+    // F42: Fast MA > Slow MA
+    if (f42On) {
+      const m = computeMaCross(days, f42Type, f42Fast, f42Slow, allowPartial);
+      s._f42Fast = m.fast;
+      s._f42Slow = m.slow;
+      s._f42Gap = m.gapPct;
+      const T = f42Type.toUpperCase();
+      if (!m.valid) {
+        failReasons.push(`F42: Insufficient data for ${f42Fast} / ${f42Slow} ${T}`);
+      } else if (!m.ok) {
+        failReasons.push(`F42: ${f42Fast} ${T} ${m.fast.toFixed(2)} not above ${f42Slow} ${T} ${m.slow.toFixed(2)}`);
+      }
+    }
+
     // F9: Industry RS filter
     if (f9On) {
       const rs = indRSMap[s.industry];
@@ -615,6 +645,11 @@ function runScreener() {
         const smaFn = allowPartial ? computeDynSMAPartial : computeDynSMA;
         const v = smaFn(days, 'close', 50);
         maResults.push({ name: '50SMA', val: v, ok: !isNaN(v) && s.close > v });
+      }
+      if (f10_65sma) {
+        const smaFn = allowPartial ? computeDynSMAPartial : computeDynSMA;
+        const v = smaFn(days, 'close', 65);
+        maResults.push({ name: '65SMA', val: v, ok: !isNaN(v) && s.close > v });
       }
       if (f10_200sma) {
         const smaFn = allowPartial ? computeDynSMAPartial : computeDynSMA;
@@ -784,7 +819,7 @@ function runScreener() {
   scrSortCol = null;
 
   // Count active filters
-  const activeCount = [f1On, f2On, f3On, f4On, f5On, f6On, f7On, f8On, f9On, f10On, f12On, f13On, f14On, f15On, f16On, f17On, f18On, f41On].filter(Boolean).length + (typeof qrActiveCount === 'function' ? qrActiveCount() : 0) + (typeof gbActiveCount === 'function' ? gbActiveCount() : 0) + (typeof gtActiveCount === 'function' ? gtActiveCount() : 0) + (typeof gsActiveCount === 'function' ? gsActiveCount() : 0);
+  const activeCount = [f1On, f2On, f3On, f4On, f5On, f6On, f7On, f8On, f9On, f10On, f12On, f13On, f14On, f15On, f16On, f17On, f18On, f41On, f42On].filter(Boolean).length + (typeof qrActiveCount === 'function' ? qrActiveCount() : 0) + (typeof gbActiveCount === 'function' ? gbActiveCount() : 0) + (typeof gtActiveCount === 'function' ? gtActiveCount() : 0) + (typeof gsActiveCount === 'function' ? gsActiveCount() : 0);
 
   // Stats
   const advancing = passed.filter(s => s.changePct > 0).length;
@@ -822,6 +857,7 @@ function renderScreenerTable() {
   const f17On = document.getElementById('scrF17On').checked;
   const f18On = document.getElementById('scrF18On').checked;
   const f41On = document.getElementById('scrF41On').checked;
+  const f42On = document.getElementById('scrF42On').checked;
   const f41Len = parseInt(document.getElementById('scrF41Len').value) || 30;
   const f41Spikes = Math.max(0, parseInt(document.getElementById('scrF41Spikes').value) || 0);
   const f19On = document.getElementById('scrF19On').checked && !!document.getElementById('scrF19Date').value;
@@ -864,6 +900,12 @@ function renderScreenerTable() {
   if (f8On) {
     cols.push({ key: '_dynCloseSMA', label: 'SMA Close', fmt: v => fmt2(v) });
     cols.push({ key: '_dynPriceRatio', label: 'Price/SMA', fmt: v => isNaN(v) ? '-' : v.toFixed(3), cls: v => v >= 1 ? 'positive' : 'negative' });
+  }
+  if (f42On) {
+    const T = document.getElementById('scrF42Type').value === 'ema' ? 'EMA' : 'SMA';
+    cols.push({ key: '_f42Fast', label: `${parseInt(document.getElementById('scrF42Fast').value) || 20} ${T}`, fmt: v => fmt2(v) });
+    cols.push({ key: '_f42Slow', label: `${parseInt(document.getElementById('scrF42Slow').value) || 50} ${T}`, fmt: v => fmt2(v) });
+    cols.push({ key: '_f42Gap', label: 'Fast vs Slow', fmt: v => fmtPct(v), cls: v => v >= 0 ? 'positive' : 'negative' });
   }
   if (f10On) {
     cols.push({ key: '_f10MAs', label: 'MA Status', fmt: (v) => {
@@ -1008,6 +1050,7 @@ function resetScreener() {
   document.getElementById('scrF10On').checked = false;
   document.getElementById('scrF10_20sma').checked = true;
   document.getElementById('scrF10_50sma').checked = false;
+  document.getElementById('scrF10_65sma').checked = false;
   document.getElementById('scrF10_200sma').checked = false;
   document.getElementById('scrF10_200ema').checked = false;
   document.getElementById('scrF12On').checked = false;
@@ -1078,6 +1121,10 @@ function resetScreener() {
   document.getElementById('scrF8Len').value = '50';
   document.getElementById('scrF8Min').value = '0.97';
   document.getElementById('scrF8Max').value = '1.10';
+  document.getElementById('scrF42On').checked = false;
+  document.getElementById('scrF42Type').value = 'sma';
+  document.getElementById('scrF42Fast').value = '20';
+  document.getElementById('scrF42Slow').value = '50';
   document.getElementById('scrF9Val').value = '60';
   document.getElementById('scrF9MinStk').value = '3';
   document.getElementById('scrF9MinMcap').value = '0';
@@ -1092,10 +1139,10 @@ function exportScreenerCSV() {
   if (screenerResults.length === 0) return;
   const keys = ['symbol','series','sector','industry','close','changePct','vol','turnover',
     'adr','_dynADR','_dynTurnoverSMA_f1','_dynTurnoverSMA_f2','_turnoverToSMA','_f4Hits','_dynCloseSMA','_dynPriceRatio',
-    'high52w','low52w','distFrom52H','distFrom52L','bandPct','marketCap','_indRS','_indMF','_indMFRoc','_perf','_dateChg','_f10MAs'];
+    'high52w','low52w','distFrom52H','distFrom52L','bandPct','marketCap','_indRS','_indMF','_indMFRoc','_perf','_dateChg','_f10MAs','_f42Fast','_f42Slow','_f42Gap'];
   const labels = ['Symbol','Series','Sector','Industry','Close','Change%','Volume','Turnover',
     'ADR%','DynADR%','F1_SMA_Turnover','F2_SMA_Turnover','Turnover_x_SMA','CoOccur_Hits','SMA_Close','Price_SMA_Ratio',
-    '52W_High','52W_Low','From_52H%','From_52L%','Band','MarketCap_Cr','Industry_RS','Ind_MoneyFlow%','Ind_MoneyFlow_RoC_pp','Performance%','DateRange_Chg%','MA_Status'];
+    '52W_High','52W_Low','From_52H%','From_52L%','Band','MarketCap_Cr','Industry_RS','Ind_MoneyFlow%','Ind_MoneyFlow_RoC_pp','Performance%','DateRange_Chg%','MA_Status','MA_Fast','MA_Slow','MA_Fast_vs_Slow%'];
   let csv = labels.join(',') + '\n';
   screenerResults.forEach(r => {
     csv += keys.map(k => {
@@ -1295,7 +1342,7 @@ function updateApplyBtn() {
 }
 
 function updateFilterBadge() {
-  const techIds = ['scrF1On','scrF2On','scrF3On','scrF4On','scrF5On','scrF6On','scrF7On','scrF8On','scrF41On','scrF10On','scrF18On','scrF19On'];   // F15 (Performance) and F16 (% Change) live on the Relative Strength tab now
+  const techIds = ['scrF1On','scrF2On','scrF3On','scrF4On','scrF5On','scrF6On','scrF7On','scrF8On','scrF41On','scrF10On','scrF18On','scrF19On','scrF42On'];   // F15 (Performance) and F16 (% Change) live on the Relative Strength tab now
   const indIds  = ['scrF9On','scrF12On','scrF13On','scrF14On','scrF17On'];
   const countChecked = ids => ids.filter(id => { const el = document.getElementById(id); return el && el.checked; }).length;
 

@@ -33,9 +33,9 @@ function gridChildren() {
   return kids;
 }
 
-test('the Technicals grid holds two columns and then the F4 card, as a direct child of the grid', () => {
+test('the Technicals grid holds two columns and then the F4 and F41 cards, as direct children of the grid', () => {
   const kids = gridChildren();
-  assert.deepEqual(kids.map(k => k.cls), ['scr-tech-col', 'scr-tech-col', 'scr-filter-pair']);
+  assert.deepEqual(kids.map(k => k.cls), ['scr-tech-col', 'scr-tech-col', 'scr-filter-pair', 'scr-filter-pair']);
   const [left, right, pair] = kids;
   for (const id of ['scrF4On', 'scrF4Val', 'scrF4Mult', 'scrF4SmaLen', 'scrF4MinTimes', 'scrF4Lookback']) {
     assert.ok(pair.html.includes(`id="${id}"`), `${id} is in the F4 card`);
@@ -55,8 +55,21 @@ test('the F4 card is one row: every control (incl. the "at least N times in the 
 test('the two columns hold the other Technicals filters, six and five (F15 and F16 now live on Relative Strength)', () => {
   const [left, right] = gridChildren();
   const ids = h => [...h.html.matchAll(/id="(scrF\d+On)"/g)].map(m => m[1]);
-  assert.deepEqual(ids(left), ['scrF10On', 'scrF2On', 'scrF5On', 'scrF18On', 'scrF41On', 'scrF8On']);
+  assert.deepEqual(ids(left), ['scrF10On', 'scrF2On', 'scrF5On', 'scrF18On', 'scrF8On', 'scrF42On']);
   assert.deepEqual(ids(right), ['scrF1On', 'scrF3On', 'scrF6On', 'scrF7On', 'scrF19On']);
+});
+
+test('the F41 Consolidating card is one row, like F4, in a card of its own below the F4 card and spanning both columns', () => {
+  const kids = gridChildren();
+  const f41 = kids[3].html;
+  assert.ok(kids[2].html.includes('id="scrF4On"') && !kids[2].html.includes('scrF41'), 'the F4 card is above and does not hold F41');
+  assert.equal((f41.match(/class="scr-filter-row[ "]/g) || []).length, 1, 'one filter row');
+  assert.ok(!/scr-sub/.test(f41), 'no second (sub) row');
+  assert.ok(/class="scr-filter-row scr-highlight"/.test(f41), 'the same highlighted row as the F4 card');
+  for (const id of ['scrF41On', 'scrF41Len', 'scrF41Min', 'scrF41Max', 'scrF41Spikes', 'scrF41Pos']) assert.ok(f41.includes(`id="${id}"`), `${id} is in the F41 card`);
+  assert.ok(/Consolidating:/.test(f41) && /Days depth/.test(f41) && /spike\(s\)/.test(f41));
+  for (const col of [kids[0], kids[1]]) assert.ok(!col.html.includes('scrF41'), 'F41 is in neither column');
+  assert.ok(!/id="scrF41Spikes"[^>]*style=/.test(f41), 'the Spikes box has the standard input width, not a narrow inline one');
 });
 
 test('the stylesheet makes the F4 card span every column of the Technicals grid', () => {
