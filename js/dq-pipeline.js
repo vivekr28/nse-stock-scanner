@@ -125,7 +125,7 @@ function dqPipelineState(inp, now) {
     const when = f.finishedAt ? dqPipeFmt(f.finishedAt) : 'earlier';
     const summary = `${f.match} match, ${f.minor} minor, ${f.major} major`;
     if (f.major > 0 && inp.lastCorrectionAt && f.finishedAt && inp.lastCorrectionAt > f.finishedAt) {
-      audit.detail = `The last full run (${when}) is older than the corrections you applied since (${summary} at that time). Its major rows may already be fixed: re-run to refresh the table.`;
+      audit.detail = `The last full run (${when}) is older than the corrections you applied since (${summary} at that time). Its major rows may already be fixed: re-check just the flagged stocks (scope "Only flagged stocks", about a minute) or re-run the full audit.`;
     } else if (f.major > 0) {
       audit.status = 'attention';
       audit.detail = `The last full run (${when}) found ${dqPipePlural(f.major, 'major difference')}. Open the tab to see why; fix with step 2 and 3.`;

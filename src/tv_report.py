@@ -225,6 +225,9 @@ def build_report(payload, prev=None, corp_index=None):
            + (f" ({meta['durationSec'] / 60:.0f} min)" if meta.get('durationSec') else '')
            + (' (resumed after an interruption)' if meta.get('resumed') else ''),
            f"- **Dashboard data:** prices up to {meta.get('dataDate') or '?'} (about 510 trading days of history per stock)",
+           *([f"- **Re-check:** {meta['recheck'].get('count', 0):,} of the {meta['recheck'].get('of', 0):,} stocks flagged by that run were "
+              f"re-verified on {meta['recheck'].get('at') or '?'} (data up to {meta['recheck'].get('dataDate') or '?'}); "
+              "every other stock is as of the run above."] if meta.get('recheck') else []),
            f"- **Scope:** {scope} in the dashboard, {n:,} verified",
            '- **Method:** each stock\'s daily closes are compared with TradingView\'s over every date both have. A bar '
            'counts as different when TradingView/dashboard differs by more than 1% (plus a rounding allowance for cheap '

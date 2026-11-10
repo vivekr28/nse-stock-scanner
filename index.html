@@ -1435,6 +1435,7 @@
           <option value="">All stocks</option>
           <option value="500">Top 500 by turnover</option>
           <option value="100">Top 100 by turnover (quick check)</option>
+          <option value="flagged" disabled>Only flagged stocks (none: run a full verification first)</option>
         </select>
       </label>
       <span id="dqFullStatus" style="font-size:12px;color:var(--text2);"></span>
@@ -1442,7 +1443,8 @@
     <dl class="dq-guide">
       <dt>What it does</dt><dd>Compares <b>every</b> stock with TradingView and writes a report to <code>NSE_DATA/verification-reports/</code>. Read-only: no price is changed. About 35 minutes for all stocks, about 2 minutes for <i>Top 100</i>.</dd>
       <dt>Reading the table</dt><dd><b>Major</b>: a sustained level shift (worst bar 5% or more, or 5+ bars off). <b>Minor</b>: a few bars differ, worst under 5%. The <b>Why</b> column gives the cause. <i>TradingView adjusts for an action we have no event for</i> means: run step 2 for that stock.</dd>
-      <dt>This table is a snapshot</dt><dd>It shows the <b>last full run</b> and does not update when you apply corrections in steps 2 or 3. A fixed stock stays listed here until you run <b>Verify all stocks</b> again.</dd>
+      <dt>Scope</dt><dd><b>All stocks</b>: the full audit. <b>Top 500 / Top 100</b>: quick samples of the most-traded stocks. <b>Only flagged stocks</b>: re-checks just the minor + major stocks listed below (about a minute) and updates this table, the summary and a new report in place; every other stock keeps its result from the full run. Use it after applying corrections to confirm the flagged stocks are fixed.</dd>
+      <dt>This table is a snapshot</dt><dd>It shows the <b>last full run</b> and does not update when you apply corrections in steps 2 or 3. A fixed stock stays listed here until you run <b>Verify all stocks</b> again, or re-check the flagged ones with the <b>Only flagged stocks</b> scope.</dd>
       <dt>Needs</dt><dd>TradingView in debug mode, left alone and visible, and the PC awake. <b>Stop</b> saves progress and <b>Resume</b> continues, as long as the data was not refreshed in between.</dd>
     </dl>
     <div id="dqFullProgress" style="display:none;margin:6px 0 10px;">

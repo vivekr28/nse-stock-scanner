@@ -600,6 +600,23 @@ function dqFullSetRunning(running, stopping) {
   document.getElementById('dqFullProgress').style.display = running ? '' : 'none';
 }
 
+// The "Only flagged stocks" scope re-verifies the minor + major stocks of the last COMPLETE run, so it is offered (with
+// its count) only when there is such a run with flagged stocks; the other scopes are always available.
+function dqFullUpdateScopeOptions() {
+  const sel = document.getElementById('dqFullScope');
+  const opt = sel && sel.querySelector('option[value="flagged"]');
+  if (!opt) return;
+  const last = _dqFull.last;
+  const c = (last && last.categories) || {};
+  const n = (c.minor || 0) + (c.major || 0);
+  const ok = !!(last && last.complete && n > 0);
+  opt.disabled = !ok;
+  opt.textContent = ok
+    ? `Only flagged stocks (${dqFullInt(n)} minor + major, about ${dqFullDuration(n * DQ_FULL_SECONDS_PER_STOCK)})`
+    : 'Only flagged stocks (none: run a full verification first)';
+  if (!ok && sel.value === 'flagged') sel.value = '';
+}
+
 function dqFullFilterChange(v) {
   _dqFull.filter = v;
   dqRenderFullTable();
@@ -613,15 +630,20 @@ function dqRenderFullSummary() {
   document.getElementById('dqFullEta').textContent = stocks
     ? `A run over all ${dqFullInt(stocks)} stocks takes roughly ${dqFullDuration(stocks * DQ_FULL_SECONDS_PER_STOCK)}.` : '';
   badge.textContent = '';
+  dqFullUpdateScopeOptions();
   if (!last) { el.innerHTML = '<span style="color:var(--text2)">No full verification has been run yet.</span>'; return; }
 
   const c = last.categories || {};
   const flaggedN = (c.minor || 0) + (c.major || 0);
   const cannot = (c['not-found'] || 0) + (c['tv-error'] || 0) + (c['few-bars'] || 0) + (c.predates || 0) + (c.other || 0);
   const scope = last.limit ? `top ${dqFullInt(last.limit)} by turnover` : 'all stocks';
+  const rc = last.recheck;
+  const recheckNote = rc ? `<div style="color:var(--text2);margin-top:4px;">↻ The ${dqFullInt(rc.count)} flagged stocks were re-checked on ${escapeHtml(rc.at || '?')} ` +
+    `(prices up to ${escapeHtml(rc.dataDate || '?')}); every other stock is as of the full run above.</div>` : '';
   let html = `<div><span style="color:var(--text2)">Last run ${escapeHtml(last.startedAt || '?')} → ${escapeHtml(last.finishedAt || '(interrupted)')}` +
     `${last.durationSec ? ' (' + dqFullDuration(last.durationSec) + ')' : ''} · prices up to ${escapeHtml(last.dataDate || '?')} · ${scope}</span>` +
-    `${last.complete ? '' : ' <span class="negative">· ' + (last.stopped ? 'stopped' : 'interrupted') + ` at ${dqFullInt(last.verified)} of ${dqFullInt(last.universe)} stocks</span>`}</div>`;
+    `${last.complete ? '' : ' <span class="negative">· ' + (last.stopped ? 'stopped' : 'interrupted') + ` at ${dqFullInt(last.verified)} of ${dqFullInt(last.universe)} stocks</span>`}</div>` +
+    recheckNote;
   html += `<div style="margin-top:4px;"><span class="positive">${dqFullInt(c.match)} match</span> · ` +
     `<span class="negative">${dqFullInt(c.major)} major</span> · <span style="color:var(--orange)">${dqFullInt(c.minor)} minor</span> · ` +
     `<span style="color:var(--text2)">${dqFullInt(cannot)} could not be compared` +
@@ -712,6 +734,7 @@ async function dqRunTvFull(resume) {
     const params = [];
     const limit = document.getElementById('dqFullScope').value;
     if (resume) params.push('resume=1');
+    else if (limit === 'flagged') params.push('recheck=1');   // only the minor + major stocks of the last full run
     else if (limit) params.push('limit=' + encodeURIComponent(limit));
     const resp = await fetch('/api/tv-full/start' + (params.length ? '?' + params.join('&') : ''),
       { method: 'POST', headers: { 'X-Requested-With': 'nse-dashboard' } });
