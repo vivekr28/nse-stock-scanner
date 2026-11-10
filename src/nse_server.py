@@ -1984,7 +1984,8 @@ def write_full_report(base_dir, payload):
                                           load_corp_action_index(base_dir))
     out_dir = os.path.join(base_dir, DATA_SUBDIR, REPORTS_SUBDIR)
     os.makedirs(out_dir, exist_ok=True)
-    stem = 'TradingView-Verification_' + datetime.now().strftime('%Y-%m-%d_%H%M') + ('' if meta.get('complete') else '_partial')
+    stem = ('TradingView-Verification_' + datetime.now().strftime('%Y-%m-%d_%H%M') + ('' if meta.get('complete') else '_partial')
+            + ('_recheck' if meta.get('recheck') else ''))
     names = {'md': stem + '.md', 'csv': stem + '.csv'}
     with open(os.path.join(out_dir, names['md']), 'w', encoding='utf-8', newline='') as f:
         f.write(md)
@@ -2013,14 +2014,15 @@ def merge_full_run_into_queue(base_dir, payload, universe):
     merged = {**kept, **fresh}
     compared = sum(1 for r in payload['stocks'].values() if r.get('bars'))
     save_verification(base_dir, {
-        'verifiedAt': payload['meta'].get('finishedAt'), 'total': len(adj), 'checked': len(fresh),
+        'verifiedAt': (payload['meta'].get('recheck') or {}).get('at') or payload['meta'].get('finishedAt'),
+        'total': len(adj), 'checked': len(fresh),
         'complete': bool(payload['meta'].get('complete')),
         'summary': {k: sum(1 for r in merged.values() if r['status'] == k) for k in ('match', 'minor', 'major', 'inconclusive')},
         'calendar': (payload.get('calendar') if compared >= 10 else prev.get('calendar')) or {'tvOnly': [], 'oursOnly': []},
         'stocks': merged})
 
 
-def run_tv_verify_full(base_dir, port, limit=None, resume=False):
+def run_tv_verify_full(base_dir, port, limit=None, resume=False, recheck=False):
     """Background worker behind POST /api/tv-full/start: compare EVERY stock's stored daily closes with TradingView's
     (the same comparison as run_tv_verify, which only covers the price-adjusted stocks), most-traded stocks first,
     and finish with a report (Markdown + CSV, see tv_report). Read-only: no price is changed, nothing is reprocessed.
@@ -2028,7 +2030,13 @@ def run_tv_verify_full(base_dir, port, limit=None, resume=False):
     Progress is checkpointed to NSE_DATA/TradingViewFullVerification.json every 100 stocks, so a stopped
     (Stop button), interrupted (TradingView closed, server restarted) or crashed run keeps its results and can be
     resumed - but only against the same processed-data snapshot. `limit` restricts the run to the N most-traded
-    stocks (a quick sample). The user's chart symbol/resolution are restored afterwards."""
+    stocks (a quick sample). The user's chart symbol/resolution are restored afterwards.
+
+    `recheck=True` re-verifies ONLY the stocks the last COMPLETE run graded minor or major and merges the fresh
+    results into that run (every other stock keeps its result), so the table, summary and a new report show the
+    flagged stocks' current state without a 35-minute run. The last complete run is kept as the "previous run" so the
+    report says which stocks were resolved. It needs no matching data snapshot: the point is to re-check after a
+    correction, which reprocesses the data."""
     st = _tv_full_state
     payload = None
     finalized = False
@@ -2055,11 +2063,27 @@ def run_tv_verify_full(base_dir, port, limit=None, resume=False):
 
         existing = load_full_verification(base_dir)
         em = (existing or {}).get('meta') or {}
+        recheck_ids = set()
+        if recheck:
+            if not existing:
+                raise RuntimeError('There is no earlier full verification to re-check. Run "Verify all stocks" first.')
+            if not em.get('complete'):
+                raise RuntimeError('The last full verification did not finish. Resume or re-run it first, then re-check its flagged stocks.')
+            in_data = {s['isin'] for s in universe}
+            recheck_ids = {i for i, r in existing['stocks'].items() if r.get('status') in ('minor', 'major') and i in in_data}
+            if not recheck_ids:
+                raise RuntimeError('The last full verification has no flagged (minor or major) stocks to re-check.')
+            resume = False
         resumed = bool(resume and existing and not em.get('complete') and stamp_now is not None
                        and em.get('dataStamp') == stamp_now)
         if resume and not resumed:
             st['warning'] = 'There was no interrupted run on the current data to resume, so a new run was started.'
-        if resumed:
+        if recheck:
+            # Keep the last complete run as the "previous run" for the report, then update that same run in place.
+            _write_json_atomic(os.path.join(base_dir, DATA_SUBDIR, FULL_VERIFY_PREV_FILE), existing)
+            payload = existing
+            payload['meta']['report'] = None   # the previous report file stays on disk; a new one is written below
+        elif resumed:
             payload = existing
             limit = payload['meta'].get('limit')
             payload['meta'].update(resumed=True, complete=False, stopped=False, finishedAt=None)
@@ -2074,10 +2098,15 @@ def run_tv_verify_full(base_dir, port, limit=None, resume=False):
         meta, done = payload['meta'], payload['stocks']
         tv_by_date, ours_by_date = payload['tvOnlyByDate'], payload['oursOnlyByDate']
 
-        scope = universe[:limit] if limit else universe
-        meta['universe'] = len(scope)
-        todo = [s for s in scope if s['isin'] not in done]
-        counts = _count_statuses(done)
+        if recheck:
+            scope = [s for s in universe if s['isin'] in recheck_ids]   # most-traded first
+            todo = scope
+            counts = {'match': 0, 'minor': 0, 'major': 0, 'inconclusive': 0}   # progress counts for THIS re-check
+        else:
+            scope = universe[:limit] if limit else universe
+            meta['universe'] = len(scope)
+            todo = [s for s in scope if s['isin'] not in done]
+            counts = _count_statuses(done)
         st.update(total=len(todo), current=0, counts=dict(counts))
 
         stopped = False
@@ -2098,24 +2127,30 @@ def run_tv_verify_full(base_dir, port, limit=None, resume=False):
                         stopped_early = str(e)
                         break
                     tv_dates, ours_dates = res.pop('tvOnlyDates'), res.pop('oursOnlyDates')
-                    for d in tv_dates:
-                        tv_by_date[d] = tv_by_date.get(d, 0) + 1
-                    for d in ours_dates:
-                        ours_by_date[d] = ours_by_date.get(d, 0) + 1
+                    if not recheck:   # a re-check keeps the full run's calendar (these stocks are already counted in it)
+                        for d in tv_dates:
+                            tv_by_date[d] = tv_by_date.get(d, 0) + 1
+                        for d in ours_dates:
+                            ours_by_date[d] = ours_by_date.get(d, 0) + 1
                     res.update(symbol=s['symbol'], series=s['series'], turnover=s['turnover'], close=s['close'],
                                events=s['sig'], tvOnlyN=len(tv_dates), oursOnlyN=len(ours_dates), verifiedAt=now())
                     done[s['isin']] = res
                     counts[res['status'] if res['status'] in counts else 'inconclusive'] += 1
                     processed = i + 1
                     st['counts'] = dict(counts)
-                    if processed % 100 == 0:
+                    if processed % 100 == 0 and not recheck:
                         save_progress({'durationSec': round(base_seconds + time.time() - t0), 'verified': len(done)})
             st['current'] = processed
 
-        remaining = sum(1 for s in scope if s['isin'] not in done)
-        meta.update(complete=remaining == 0, stopped=stopped and remaining > 0, finishedAt=now(),
-                    durationSec=round(base_seconds + time.time() - t0), verified=len(done))
-        payload['calendar'] = _calendar_from_counts(payload)
+        if recheck:
+            # The full run's own times, scope and calendar stay; only a note of this re-check is added.
+            meta['recheck'] = {'at': now(), 'dataDate': data_date, 'count': processed, 'of': len(scope),
+                               'durationSec': round(time.time() - t0), 'stopped': bool(stopped or stopped_early)}
+        else:
+            remaining = sum(1 for s in scope if s['isin'] not in done)
+            meta.update(complete=remaining == 0, stopped=stopped and remaining > 0, finishedAt=now(),
+                        durationSec=round(base_seconds + time.time() - t0), verified=len(done))
+            payload['calendar'] = _calendar_from_counts(payload)
         save_progress()
         finalized = True
 
@@ -2135,7 +2170,14 @@ def run_tv_verify_full(base_dir, port, limit=None, resume=False):
         flagged = counts['minor'] + counts['major']
         summary = (f"{len(done):,} of {meta['universe']:,} stocks verified: {counts['match']:,} match, "
                    f"{flagged:,} flagged ({counts['major']:,} major), {counts['inconclusive']:,} could not be compared")
-        if meta['complete']:
+        if recheck:
+            note = ' Stopped early - the rest keep their earlier result.' if (stopped or stopped_early) else ''
+            st['step'] = (f"Re-checked {processed:,} of {len(scope):,} flagged stocks: now {counts['match']:,} match, "
+                          f"{counts['minor']:,} minor, {counts['major']:,} major, {counts['inconclusive']:,} could not be compared. "
+                          f"The table and report are updated.{note}")
+            if stopped_early:
+                st['warning'] = ((st['warning'] + ' ') if st['warning'] else '') + f'Stopped early: {stopped_early}'
+        elif meta['complete']:
             st['step'] = f'Done - {summary}. Report saved.'
         elif stopped:
             st['step'] = f'Stopped - {summary}. Progress is saved; Resume continues where it left off.'
@@ -2144,7 +2186,7 @@ def run_tv_verify_full(base_dir, port, limit=None, resume=False):
             st['warning'] = ((st['warning'] + ' ') if st['warning'] else '') +                 f'Stopped early: {stopped_early} Progress is saved; Resume continues where it left off.'
         else:
             st['step'] = summary + '.'
-        st['stopped'] = meta['stopped']
+        st['stopped'] = bool(meta['stopped'] or (recheck and (stopped or stopped_early)))
         st['status'] = 'done'
     except (tv_adjust.TradingViewError, RuntimeError, OSError, ValueError, KeyError) as e:
         st['status'] = 'error'
@@ -2154,8 +2196,9 @@ def run_tv_verify_full(base_dir, port, limit=None, resume=False):
         st['error'] = f'Unexpected error: {e}'
     finally:
         # Whatever ended the run, don't lose what it already verified (a fresh run that never got going
-        # has nothing to save and must not overwrite the previous run's file).
-        if not finalized and payload and payload['stocks']:
+        # has nothing to save and must not overwrite the previous run's file). A re-check that dies leaves the
+        # saved full run exactly as it was.
+        if not finalized and payload and payload['stocks'] and not recheck:
             try:
                 save_progress({'stopped': False, 'finishedAt': None})
             except (OSError, ValueError):
@@ -2914,9 +2957,10 @@ class NSEHandler(http.server.SimpleHTTPRequestHandler):
                          'tvPort': self.server.tv_port})
 
     def _handle_tv_full_start(self):
-        """POST /api/tv-full/start[?limit=N][&resume=1] - verify every stock against TradingView in a background
-        thread (read-only), then write the report. `limit` = only the N most-traded stocks; `resume` = continue an
-        interrupted run on the same data. Same same-origin header rule as the other TradingView endpoints; refused
+        """POST /api/tv-full/start[?limit=N][&resume=1][&recheck=1] - verify every stock against TradingView in a
+        background thread (read-only), then write the report. `limit` = only the N most-traded stocks; `resume` =
+        continue an interrupted run on the same data; `recheck` = re-verify only the stocks the last complete run
+        graded minor or major and update that run in place. Same same-origin header rule as the other TradingView endpoints; refused
         while any other run is using the TradingView chart (or the data is being reprocessed)."""
         if self.headers.get('X-Requested-With') != 'nse-dashboard':
             self._send_json({'ok': False, 'error': 'Forbidden'}, 403)
@@ -2941,7 +2985,8 @@ class NSEHandler(http.server.SimpleHTTPRequestHandler):
             _tv_full_stop.clear()
             _tv_full_state.update(status='running', step='Starting...', current=0, total=0, startedAt=time.time(),
                                   finishedAt=None, error=None, warning=None, stopping=False, stopped=False, counts={})
-        threading.Thread(target=run_tv_verify_full, args=(self.server.base_dir, self.server.tv_port, limit, 'resume' in query),
+        threading.Thread(target=run_tv_verify_full,
+                         args=(self.server.base_dir, self.server.tv_port, limit, 'resume' in query, 'recheck' in query),
                          daemon=True).start()
         self._send_json({'ok': True, 'started': True})
 
