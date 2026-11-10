@@ -728,7 +728,8 @@ function icRangeCandles(range) {
   return icTimeframe === 'w' ? IC_RANGE_WEEKS[range] : IC_RANGE_CANDLES[range];
 }
 
-// The Monday of the week (Monday to Friday) a business day {year, month, day} belongs to, as a business day too.
+// The Monday of the Monday-to-Sunday week a day {year, month, day} belongs to, as a business day too. A Saturday or Sunday special session
+// (Budget day, the Diwali Muhurat session) therefore joins the week it ends, not the next one.
 function icWeekStart(t) {
   const d = new Date(t.year, t.month - 1, t.day);
   const m = new Date(d.getFullYear(), d.getMonth(), d.getDate() - ((d.getDay() + 6) % 7));

@@ -169,3 +169,26 @@ test('the switch shows on the stock charts (grid and single stock) and the Indus
   assert.equal(show('industry', 'moneyflow'), 'none');
   assert.equal(show('single', 'stocks'), '');
 });
+
+test('weeks run Monday to Sunday: a weekend special session (Muhurat, Budget day) joins the week it ends, not the next one', () => {
+  const weekly = rows => vm.runInContext('icWeeklyFromDaily', sb)(built(rows));
+  const when = c => JSON.parse(JSON.stringify(c.time));
+  // Mon 2 - Fri 6 Nov 2026, then the Diwali Muhurat session on SUNDAY 8 Nov, then Mon 9 Nov starts a new week
+  const nov = weekly([
+    [2026, 11, 2, 100, 104, 99, 103, 1], [2026, 11, 3, 103, 106, 102, 105, 1], [2026, 11, 4, 105, 107, 100, 101, 1],
+    [2026, 11, 5, 101, 103, 98, 102, 1], [2026, 11, 6, 102, 104, 101, 103, 1],
+    [2026, 11, 8, 103, 109, 102, 108, 1],                                     // Sunday: part of the week of Mon 2 Nov
+    [2026, 11, 9, 108, 110, 106, 107, 1],
+  ]);
+  assert.equal(nov.candleData.length, 2);
+  assert.deepEqual(when(nov.candleData[0]), { year: 2026, month: 11, day: 2 });
+  assert.deepEqual({ o: nov.candleData[0].open, h: nov.candleData[0].high, c: nov.candleData[0].close }, { o: 100, h: 109, c: 108 });   // the Sunday is the week's last close and sets its high
+  assert.equal(nov.volumeData[0].value, 6);                                  // five weekdays + the Sunday session
+  assert.deepEqual(when(nov.candleData[1]), { year: 2026, month: 11, day: 9 });
+  // Budget day, Saturday 1 Feb 2025, closes the week of Mon 27 Jan
+  const feb = weekly([[2025, 1, 30, 10, 11, 9, 10, 1], [2025, 1, 31, 10, 12, 9, 11, 1], [2025, 2, 1, 11, 13, 10, 12, 1], [2025, 2, 3, 12, 13, 11, 12, 1]]);
+  assert.equal(feb.candleData.length, 2);
+  assert.equal(feb.candleData[0].close, 12);
+  assert.deepEqual(when(feb.candleData[0]), { year: 2025, month: 1, day: 30 });   // dated on the week's first trading day
+  assert.deepEqual(when(feb.candleData[1]), { year: 2025, month: 2, day: 3 });
+});
