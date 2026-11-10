@@ -170,6 +170,7 @@ function dqTvCell(row) {
 }
 
 function dqRenderCorpActions() {
+  if (typeof dqPipelineRender === 'function') setTimeout(dqPipelineRender, 0);
   const corpActions = Store.unadjustedCorpActions || [];
   document.getElementById('dqCorpActionCount').textContent = corpActions.length;
   const byKey = new Map(_dqTv.corrections.map(c => [dqTvKey(c.symbol, c.exDate), c]));
@@ -208,6 +209,7 @@ async function dqLoadTvState() {
     const s = await resp.json();
     _dqTv.corrections = s.corrections || [];
     _dqTv.appliedCount = s.appliedCount || 0;
+    if (typeof dqPipelineMark === 'function') dqPipelineMark('tv');
     const portEl = document.getElementById('dqTvPort');
     if (portEl && s.tvPort) portEl.textContent = s.tvPort;
     dqRenderCorpActions();
@@ -391,6 +393,7 @@ function dqRenderAdjusted() {
        <td>${dqVerifyCell(v, st === 'pending' && hadResult(a.isin))}</td></tr>`).join('');
 
   dqRenderVerifySummary(counts);
+  if (typeof dqPipelineRender === 'function') dqPipelineRender();
 }
 
 function dqRenderVerifySummary(counts) {
@@ -429,6 +432,7 @@ async function dqLoadTvVerify() {
     if (!resp.ok) return;
     const s = await resp.json();
     _dqVerify.last = s.last || null;
+    if (typeof dqPipelineMark === 'function') dqPipelineMark('verify');
     const portEl = document.getElementById('dqTvVerifyPort');
     if (portEl && s.tvPort) portEl.textContent = s.tvPort;
     dqRenderAdjusted();
@@ -675,9 +679,11 @@ async function dqLoadFullResults() {
     _dqFull.last = j.summary || null;
     _dqFull.flagged = j.flagged || [];
     _dqFull.calendar = j.calendar || null;
+    _dqFull.running = false;
   } catch (e) { /* no server */ }
   dqRenderFullSummary();
   dqRenderFullTable();
+  if (typeof dqPipelineMark === 'function') dqPipelineMark('full');
 }
 
 async function dqLoadTvFull() {
@@ -689,6 +695,8 @@ async function dqLoadTvFull() {
     if (portEl && s.tvPort) portEl.textContent = s.tvPort;
     if (s.status === 'running') {
       dqFullSetRunning(true, s.stopping);
+      _dqFull.running = true;
+      if (typeof dqPipelineMark === 'function') dqPipelineMark('full');
       dqPollTvFull();
       return;
     }

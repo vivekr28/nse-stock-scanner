@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NSE EOD Dashboard</title>
-<link rel="stylesheet" href="css/styles.css?v=42">
+<link rel="stylesheet" href="css/styles.css?v=45">
 </head>
 <body>
 
@@ -1296,6 +1296,7 @@
 <div id="panel-dataquality" class="panel">
   <div class="card" style="margin-bottom:16px;">
     <h3 style="margin-bottom:12px;">Data Quality Report</h3>
+    <div class="dq-pipeline" id="dqPipeline" style="display:none;"></div>
     <p style="color:var(--text2);margin-bottom:12px;">Stocks with missing or mismatched data across Bhavcopy, Price Band, and Sector Mapping files.</p>
     <div class="stats-grid" style="margin-bottom:16px;">
       <div class="stat-card"><div class="label">Bhavcopy Stocks</div><div class="value" id="dqBhavCount">-</div></div>
@@ -1351,15 +1352,40 @@
     <div class="table-wrap"><table id="dqNoBhavTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
   </div>
   <div class="card dq-section-body" id="dqCorpActionBody" style="display:none;">
+    <div class="dq-flow" role="navigation" aria-label="Price data workflow">
+      <div class="dq-flow-title">Price-data workflow &mdash; click a step to open it</div>
+      <ol>
+        <li class="dq-step" data-step="dqRefresh" onclick="dqSwitchTab('dqRefresh')"><b>1 · Refresh Data</b><span>Every day. Downloads the latest NSE data and reprocesses it.</span></li>
+        <li class="dq-step here" data-step="dqCorpAction" onclick="dqSwitchTab('dqCorpAction')" aria-current="step"><b>2 · Adjust prices from TradingView</b><span>When the "Not Price-Adjusted" tab lists new events (demergers etc.). Corrects those prices.</span></li>
+        <li class="dq-step" data-step="dqAdjusted" onclick="dqSwitchTab('dqAdjusted')"><b>3 · Verify against TradingView</b><span>After step 2. Confirms the price-adjusted stocks match TradingView.</span></li>
+        <li class="dq-step" data-step="dqFull" onclick="dqSwitchTab('dqFull')"><b>4 · Verify all stocks</b><span>Now and then. Full audit of every stock plus a report. A flagged unadjusted action sends you back to step 2.</span></li>
+      </ol>
+    </div>
     <p style="color:var(--text2);font-size:12px;margin:8px 0;">Splits and bonuses ARE back-adjusted automatically and don't appear here. These are other corporate actions (demergers, NCRPS bonuses, capital reductions, etc.) inside the ~510-day price history the dashboard keeps that cause a real price discontinuity NSE doesn't publish a clean adjustment ratio for — SMA, 52W high/low, ADR, and change% may look distorted for these stocks until the affected window rolls past the ex-date.</p>
     <p style="color:var(--text2);font-size:12px;margin:8px 0;">Use the button to correct these prices from TradingView's already-adjusted history. Corrected events are saved to <code>reference-data/TradingViewAdjustments.csv</code>, re-applied on every server start and removed from this list; anything TradingView can't confirm stays listed. TradingView is only contacted when you click — it must be running with <code>--remote-debugging-port=<span id="dqTvPort">9222</span></code> and have a chart open (your chart's symbol is restored afterwards).</p>
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:10px 0;">
       <button id="dqTvAdjustBtn" class="btn btn-primary" onclick="dqRunTvAdjust()">Adjust prices from TradingView</button>
       <span id="dqTvAdjustStatus" style="font-size:12px;color:var(--text2);"></span>
     </div>
+    <dl class="dq-guide">
+      <dt>What it does</dt><dd>For each event in the list below it reads TradingView's chart, works out the factor TradingView applied at the ex-date, and applies it to that stock's <b>earlier prices</b>. Only the listed events are touched, not all stocks.</dd>
+      <dt>After it runs</dt><dd><b>Adjusted</b>: the prices are corrected and the row moves to the <i>Price Adjustments Applied</i> tab. <b>TradingView shows no adjustment</b> or <b>inconclusive</b>: the row stays here and nothing is changed.</dd>
+      <dt>Needs</dt><dd>TradingView Desktop open in debug mode with a chart showing. Leave it alone while this runs (about a minute).</dd>
+      <dt>Next</dt><dd>Open step 3 and click <b>Verify against TradingView</b> to confirm the corrected stocks now match.</dd>
+      <dt>Undo</dt><dd>Delete the stock's row in <code>reference-data/TradingViewAdjustments.csv</code>, then <b>Reprocess Data</b>.</dd>
+    </dl>
     <div class="table-wrap"><table id="dqCorpActionTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
   </div>
   <div class="card dq-section-body" id="dqAdjustedBody" style="display:none;">
+    <div class="dq-flow" role="navigation" aria-label="Price data workflow">
+      <div class="dq-flow-title">Price-data workflow &mdash; click a step to open it</div>
+      <ol>
+        <li class="dq-step" data-step="dqRefresh" onclick="dqSwitchTab('dqRefresh')"><b>1 · Refresh Data</b><span>Every day. Downloads the latest NSE data and reprocesses it.</span></li>
+        <li class="dq-step" data-step="dqCorpAction" onclick="dqSwitchTab('dqCorpAction')"><b>2 · Adjust prices from TradingView</b><span>When the "Not Price-Adjusted" tab lists new events (demergers etc.). Corrects those prices.</span></li>
+        <li class="dq-step here" data-step="dqAdjusted" onclick="dqSwitchTab('dqAdjusted')" aria-current="step"><b>3 · Verify against TradingView</b><span>After step 2. Confirms the price-adjusted stocks match TradingView.</span></li>
+        <li class="dq-step" data-step="dqFull" onclick="dqSwitchTab('dqFull')"><b>4 · Verify all stocks</b><span>Now and then. Full audit of every stock plus a report. A flagged unadjusted action sends you back to step 2.</span></li>
+      </ol>
+    </div>
     <p style="color:var(--text2);font-size:12px;margin:8px 0;">Every stock whose historical prices were adjusted so an ex-date doesn't show up as a fake crash: splits and bonuses (ratio from NSE's corporate-actions feed), rights issues (theoretical ex-rights price from NSE's terms and the cum-rights close) and demergers (factor derived from TradingView — see the section above). <b>Factor</b> is what prices before the ex-date were multiplied by. Dividends are not adjusted. Stocks no longer trading, and events older than the price history the dashboard keeps, aren't listed.</p>
     <p style="color:var(--text2);font-size:12px;margin:8px 0;">Use the button to check these against what TradingView shows: our daily closes are compared with TradingView's over their whole shared history, and any stock that differs is flagged. Read-only — no price is changed. TradingView Desktop must be running with <code>--remote-debugging-port=<span id="dqTvVerifyPort">9222</span></code> and have a chart open (your chart's symbol is restored afterwards). The first run takes about five minutes for ~200 stocks (it loads about two years of TradingView history for each); later runs only check what is still listed. Differences are explained where possible, e.g. TradingView adjusting for a rights issue that isn't in the corporate-actions data. If TradingView's own "adjust for dividends" setting is on, it shows up as small steady differences.</p>
     <p style="color:var(--text2);font-size:12px;margin:8px 0;">This list is a to-do queue: a stock that matches TradingView is removed from it and only returns when it gets a new or changed adjustment. Stocks with a difference stay until they match, and the button re-checks only the stocks still listed.</p>
@@ -1367,6 +1393,12 @@
       <button id="dqTvVerifyBtn" class="btn btn-primary" onclick="dqRunTvVerify()">Verify against TradingView</button>
       <span id="dqTvVerifyStatus" style="font-size:12px;color:var(--text2);"></span>
     </div>
+    <dl class="dq-guide">
+      <dt>What it does</dt><dd>Compares the daily closes of every price-adjusted stock listed below with TradingView's, over their whole shared history. Read-only: no price is changed.</dd>
+      <dt>Reading the result</dt><dd><b>Not verified / awaiting verification</b>: not checked since its adjustment was added or changed, so click the button. <b>Match</b>: leaves this list (tick <i>Show verified stocks</i> to see it). <b>Minor</b>: a few bars differ, often one bar such as a special trading session. <b>Major</b>: a sustained shift, so the adjustment is probably missing or wrong.</dd>
+      <dt>If a stock is major</dt><dd>Run step 2 if the action is still in the Not Price-Adjusted list, or use <b>Correct major differences from TradingView</b> (appears here when a stock is graded major), then verify again.</dd>
+      <dt>Next</dt><dd>Optionally run step 4 for a full audit of every stock.</dd>
+    </dl>
     <div id="dqTvFixRow" style="display:none;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 10px;">
       <button id="dqTvFixBtn" class="btn btn-secondary" onclick="dqRunTvFix()" title="For every stock graded MAJOR below, apply the level changes TradingView shows (read from the last verification, no TradingView needed) as extra corrections in reference-data/TradingViewAdjustments.csv, then reprocess. Verify again afterwards to confirm. Delete a row from that file to undo it.">Correct major differences from TradingView</button>
       <span id="dqTvFixStatus" style="font-size:12px;color:var(--text2);"></span>
@@ -1383,6 +1415,15 @@
     <div class="table-wrap"><table id="dqAdjustedTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
   </div>
   <div class="card dq-section-body" id="dqFullBody" style="display:none;">
+    <div class="dq-flow" role="navigation" aria-label="Price data workflow">
+      <div class="dq-flow-title">Price-data workflow &mdash; click a step to open it</div>
+      <ol>
+        <li class="dq-step" data-step="dqRefresh" onclick="dqSwitchTab('dqRefresh')"><b>1 · Refresh Data</b><span>Every day. Downloads the latest NSE data and reprocesses it.</span></li>
+        <li class="dq-step" data-step="dqCorpAction" onclick="dqSwitchTab('dqCorpAction')"><b>2 · Adjust prices from TradingView</b><span>When the "Not Price-Adjusted" tab lists new events (demergers etc.). Corrects those prices.</span></li>
+        <li class="dq-step" data-step="dqAdjusted" onclick="dqSwitchTab('dqAdjusted')"><b>3 · Verify against TradingView</b><span>After step 2. Confirms the price-adjusted stocks match TradingView.</span></li>
+        <li class="dq-step here" data-step="dqFull" onclick="dqSwitchTab('dqFull')" aria-current="step"><b>4 · Verify all stocks</b><span>Now and then. Full audit of every stock plus a report. A flagged unadjusted action sends you back to step 2.</span></li>
+      </ol>
+    </div>
     <p style="color:var(--text2);font-size:12px;margin:8px 0;">Checks <b>every stock</b> the dashboard holds &mdash; not only the price-adjusted ones above &mdash; against TradingView: each stock's daily closes are compared with TradingView's over their whole shared history (about 2 years) and graded match / minor / major. Run it now and then to make sure our prices haven't drifted from what you see on TradingView. Read-only &mdash; no price is changed. When it finishes it writes a <b>report</b> (a Markdown summary plus a CSV with one row per stock) to <code>NSE_DATA/verification-reports/</code> for analysis, including what changed since the previous full run.</p>
     <p style="color:var(--text2);font-size:12px;margin:8px 0;">TradingView Desktop must be running with <code>--remote-debugging-port=<span id="dqFullPort">9222</span></code> and a chart open. <span id="dqFullEta"></span> While it runs the chart flips through every stock, so leave TradingView alone, keep its window open and the PC awake. You can <b>Stop</b> at any time (progress is saved) and <b>Resume</b> later, as long as the data hasn't been refreshed in between.</p>
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:10px 0;">
@@ -1398,6 +1439,12 @@
       </label>
       <span id="dqFullStatus" style="font-size:12px;color:var(--text2);"></span>
     </div>
+    <dl class="dq-guide">
+      <dt>What it does</dt><dd>Compares <b>every</b> stock with TradingView and writes a report to <code>NSE_DATA/verification-reports/</code>. Read-only: no price is changed. About 35 minutes for all stocks, about 2 minutes for <i>Top 100</i>.</dd>
+      <dt>Reading the table</dt><dd><b>Major</b>: a sustained level shift (worst bar 5% or more, or 5+ bars off). <b>Minor</b>: a few bars differ, worst under 5%. The <b>Why</b> column gives the cause. <i>TradingView adjusts for an action we have no event for</i> means: run step 2 for that stock.</dd>
+      <dt>This table is a snapshot</dt><dd>It shows the <b>last full run</b> and does not update when you apply corrections in steps 2 or 3. A fixed stock stays listed here until you run <b>Verify all stocks</b> again.</dd>
+      <dt>Needs</dt><dd>TradingView in debug mode, left alone and visible, and the PC awake. <b>Stop</b> saves progress and <b>Resume</b> continues, as long as the data was not refreshed in between.</dd>
+    </dl>
     <div id="dqFullProgress" style="display:none;margin:6px 0 10px;">
       <div class="progress-track"><div class="progress-fill" id="dqFullFill"></div></div>
       <div class="progress-detail" id="dqFullDetail"></div>
@@ -1414,6 +1461,15 @@
     <div class="table-wrap"><table id="dqFullTable" class="scanner-table"><thead><tr></tr></thead><tbody></tbody></table></div>
   </div>
   <div class="card dq-section-body" id="dqRefreshBody" style="display:none;">
+    <div class="dq-flow" role="navigation" aria-label="Price data workflow">
+      <div class="dq-flow-title">Price-data workflow &mdash; click a step to open it</div>
+      <ol>
+        <li class="dq-step here" data-step="dqRefresh" onclick="dqSwitchTab('dqRefresh')" aria-current="step"><b>1 · Refresh Data</b><span>Every day. Downloads the latest NSE data and reprocesses it.</span></li>
+        <li class="dq-step" data-step="dqCorpAction" onclick="dqSwitchTab('dqCorpAction')"><b>2 · Adjust prices from TradingView</b><span>When the "Not Price-Adjusted" tab lists new events (demergers etc.). Corrects those prices.</span></li>
+        <li class="dq-step" data-step="dqAdjusted" onclick="dqSwitchTab('dqAdjusted')"><b>3 · Verify against TradingView</b><span>After step 2. Confirms the price-adjusted stocks match TradingView.</span></li>
+        <li class="dq-step" data-step="dqFull" onclick="dqSwitchTab('dqFull')"><b>4 · Verify all stocks</b><span>Now and then. Full audit of every stock plus a report. A flagged unadjusted action sends you back to step 2.</span></li>
+      </ol>
+    </div>
     <h3 class="dq-h">NSE price data</h3>
     <p style="color:var(--text2);font-size:12px;margin:8px 0;"><b>Refresh Data</b> downloads any new bhavcopy, price-band, market-cap and corporate-actions files from NSE, reprocesses everything, then reloads the dashboard. <b>Reprocess Data</b> re-runs only the processing (split/bonus/rights adjustments, indicators, indices) on the files already on disk &mdash; use it after a code change, or after you edit a reference file such as <code>CorporateActions.csv</code>.</p>
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:10px 0;">
@@ -1421,6 +1477,11 @@
       <button id="dqReprocessBtn" class="btn btn-secondary" onclick="dqGoReprocess(false)" title="Re-run the server's CSV -&gt; JSON processing pipeline without re-downloading data">Reprocess Data</button>
       <span id="dqRefreshHint" style="font-size:12px;color:var(--text2);"></span>
     </div>
+    <dl class="dq-guide">
+      <dt>Refresh Data</dt><dd>Downloads the new NSE files (daily bhavcopy, index closes, price bands, corporate actions, and weekend special sessions such as the Diwali Muhurat session), then reprocesses and reloads the dashboard. Run it every day after the market closes.</dd>
+      <dt>Reprocess Data</dt><dd>Re-runs only the processing on the files already on disk. Use it after editing a reference file (for example <code>TradingViewAdjustments.csv</code>) or after a code change. It downloads nothing.</dd>
+      <dt>Next</dt><dd>Check the <b>Recent Corporate Actions Not Price-Adjusted</b> tab. If it lists new events, go to step 2.</dd>
+    </dl>
 
     <h3 class="dq-h" style="margin-top:22px;">Stock sector mapping</h3>
     <p style="color:var(--text2);font-size:12px;margin:8px 0;">Each stock's sector and industry come from <code>Sector-Stock-Mapping.csv</code>, which is rebuilt from Screener.in's copy of NSE's industry classification &mdash; it is <b>not</b> updated by Refresh Data. NSE reclassifies rarely, so monthly is enough, or when new listings show up as &ldquo;In Bhavcopy but NOT in Sector Mapping&rdquo;. A full refresh walks Screener's industry pages (about 4 minutes) and then fetches company pages for anything it did not classify (up to ~20 minutes from scratch); <b>Quick</b> skips the walk and only fills gaps. It makes about one request per second, only when you click, and changes nothing the dashboard shows until you Reprocess Data afterwards.</p>
@@ -1482,7 +1543,8 @@
 <script src="js/chart-tools.js?v=6"></script>
 <script src="js/market-overview.js?v=8"></script>
 <script src="js/industry-charts.js?v=32"></script>
-<script src="js/data-quality.js?v=13"></script>
+<script src="js/data-quality.js?v=14"></script>
+<script src="js/dq-pipeline.js?v=1"></script>
 <script src="js/quarterly-results-fetch.js?v=1"></script>
 <script src="js/presets.js?v=23"></script>
 <script src="js/asof-scan.js?v=3"></script>

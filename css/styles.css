@@ -864,6 +864,65 @@ canvas { max-width: 100%; display: block; }
 #dqFullBody .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 #dqRefreshBody .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .dq-h { font-size: 14px; font-weight: 600; color: var(--text); margin: 4px 0 0; }
+/* Data Quality tab - price-data workflow strip and the "what this does" box under each button */
+.dq-flow { margin: 6px 0 14px; }
+.dq-flow-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text2); margin-bottom: 6px; }
+.dq-flow ol { list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; }
+.dq-step {
+  display: flex; flex-direction: column; gap: 3px; cursor: pointer;
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
+  font-size: 12px; color: var(--text2); line-height: 1.35;
+}
+.dq-step b { color: var(--text); font-size: 13px; }
+.dq-step:hover { border-color: rgba(59,130,246,0.45); }
+.dq-step.here { border-color: var(--accent); background: rgba(59,130,246,0.12); }
+.dq-step.here b::after { content: "  \2190  you are here"; color: var(--accent); font-weight: 500; font-size: 11px; }
+.dq-guide {
+  display: grid; grid-template-columns: max-content 1fr; gap: 5px 14px; margin: 8px 0 12px;
+  padding: 8px 12px; background: var(--bg2); border: 1px solid var(--border); border-left: 3px solid var(--accent);
+  border-radius: 6px; font-size: 12px; color: var(--text2); line-height: 1.45;
+}
+.dq-guide dt { color: var(--text); font-weight: 600; }
+.dq-guide dd { margin: 0; }
+/* Data Quality - live pipeline status panel ("where am I / what next") and the badges on the workflow strips */
+.dq-pipeline { margin: 4px 0 16px; }
+.dq-pipe-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text2); margin-bottom: 6px; }
+.dq-pipe-next {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;
+  padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border); border-left-width: 4px; background: var(--bg2); margin-bottom: 10px;
+}
+.dq-pipe-nexttitle { font-size: 15px; font-weight: 700; color: var(--text); }
+.dq-pipe-why { font-size: 12px; color: var(--text2); margin-top: 3px; max-width: 900px; line-height: 1.45; }
+.dq-pipe-next.st-todo { border-left-color: var(--orange); }
+.dq-pipe-next.st-attention { border-left-color: var(--red); }
+.dq-pipe-next.st-done { border-left-color: var(--green); }
+.dq-pipe-steps { list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; }
+.dq-pstep {
+  display: flex; flex-direction: column; gap: 4px; cursor: pointer; padding: 9px 11px; border-radius: 8px;
+  background: var(--bg2); border: 1px solid var(--border); font-size: 12px; color: var(--text2); line-height: 1.4;
+}
+.dq-pstep:hover { border-color: rgba(59,130,246,0.45); }
+.dq-pstep b { color: var(--text); font-size: 13px; }
+.dq-pstep.is-next { border-color: var(--orange); box-shadow: 0 0 0 1px var(--orange) inset; }
+.dq-pstep.st-attention.is-next { border-color: var(--red); box-shadow: 0 0 0 1px var(--red) inset; }
+.dq-pstep.st-done { opacity: .85; }
+.dq-pstep-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.dq-pstep-n { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+.dq-pstep.st-done .dq-pstep-n { color: var(--green); }
+.dq-pstep.st-todo .dq-pstep-n { color: var(--orange); }
+.dq-pstep.st-attention .dq-pstep-n { color: var(--red); }
+.dq-badge {
+  font-style: normal; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
+  padding: 1px 7px; border-radius: 10px; margin-left: 6px; background: var(--bg3); color: var(--text2); white-space: nowrap;
+}
+.st-done .dq-badge { background: rgba(5,223,114,.15); color: var(--green); }
+.st-todo .dq-badge { background: rgba(255,185,0,.18); color: var(--orange); }
+.st-attention .dq-badge { background: rgba(248,113,113,.18); color: var(--red); }
+.dq-step.st-todo { border-color: var(--orange); }
+.dq-step.st-attention { border-color: var(--red); }
+.dq-tab.dq-next::after { content: " \25CF"; color: var(--orange); }
+.dq-tab.dq-next.active::after { color: #fff; }
+@media (max-width: 700px) { .dq-guide { grid-template-columns: 1fr; } .dq-guide dd { margin-bottom: 4px; } }
 
 /* Multi-Preset tab — combine 2+ saved presets with AND/OR */
 .scr-multi-wrap { padding: 16px; }
