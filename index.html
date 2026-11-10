@@ -226,6 +226,7 @@
                 <div class="scr-cb-group">
                   <label><input type="checkbox" id="scrF10_20sma" checked> 20 SMA</label>
                   <label><input type="checkbox" id="scrF10_50sma"> 50 SMA</label>
+                  <label><input type="checkbox" id="scrF10_65sma"> 65 SMA</label>
                   <label><input type="checkbox" id="scrF10_200sma"> 200 SMA</label>
                   <label><input type="checkbox" id="scrF10_200ema"> 200 EMA</label>
                 </div>
@@ -265,26 +266,6 @@
               </div>
             </div>
 
-            <!-- F41: Consolidation depth - biggest peak-to-trough decline (trough after the peak) over the last N days between a min and max %; spike tolerance forgives fake breakouts / breakdowns, a latest close outside the box always fails -->
-            <div class="scr-filter-row">
-              <input type="checkbox" id="scrF41On">
-              <span class="scr-label">Consolidating:</span>
-              <div class="scr-inputs" title="The biggest peak-to-trough decline over the last N trading days (a high, then a lower low on a later day), as a % of that high, must be at least the min (0 = no minimum) and at most the max. Ignore spikes forgives that many of the most extreme highs and lows (a fake breakout or breakdown wick). Price: where the latest close sits against the peak and trough of that deepest decline (anywhere = no restriction; the thirds are measured from the trough up to the peak). Choose "within" (or a third) to drop a stock that has closed above the peak, i.e. has broken out.">
-                <input type="number" id="scrF41Len" value="30" min="5" step="1"> <span class="scr-unit">Days depth</span>
-                <input type="number" id="scrF41Min" value="0" min="0" step="0.5"> <span class="scr-unit">to</span>
-                <input type="number" id="scrF41Max" value="10" min="0" step="0.5"> <span class="scr-unit">% &middot; ignore</span>
-                <input type="number" id="scrF41Spikes" value="0" min="0" max="5" step="1" style="width:55px;"> <span class="scr-unit">spike(s) &middot; price</span>
-                <select id="scrF41Pos" style="min-width:90px;">
-                  <option value="" selected>anywhere</option>
-                  <option value="above">above the peak</option>
-                  <option value="within">within peak-trough</option>
-                  <option value="upper">in the upper third</option>
-                  <option value="middle">in the middle third</option>
-                  <option value="lower">in the lower third</option>
-                </select>
-              </div>
-            </div>
-
             <!-- F8: Price / SMA proximity -->
             <div class="scr-filter-row">
               <input type="checkbox" id="scrF8On">
@@ -294,6 +275,20 @@
                 <input type="number" id="scrF8Min" value="0.97" step="0.01" style="width:70px;"> <span class="scr-unit">&lt;</span>
                 <input type="number" id="scrF8Len" value="50" min="5" step="1"> <span class="scr-unit">SMA &lt;</span>
                 <input type="number" id="scrF8Max" value="1.10" step="0.01" style="width:70px;"> <span class="scr-unit">× Price</span>
+              </div>
+            </div>
+
+            <!-- F42: Fast MA > Slow MA - today's fast moving average of the close is strictly above the slow one (both SMA, or both EMA) -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF42On">
+              <span class="scr-label">Fast MA &gt; Slow MA:</span>
+              <div class="scr-inputs" title="Keeps a stock only when today's fast moving average of the close is strictly above its slow one. Both averages use the chosen type (SMA or EMA). For example 20 &gt; 50 keeps the stocks whose 20 MA is above their 50 MA.">
+                <select id="scrF42Type" style="min-width:60px;">
+                  <option value="sma" selected>SMA</option>
+                  <option value="ema">EMA</option>
+                </select>
+                <input type="number" id="scrF42Fast" value="20" min="2" step="1"> <span class="scr-unit">(fast) &gt;</span>
+                <input type="number" id="scrF42Slow" value="50" min="2" step="1"> <span class="scr-unit">(slow)</span>
               </div>
             </div>
             </div>
@@ -358,15 +353,37 @@
               <div class="scr-filter-row scr-highlight">
                 <input type="checkbox" id="scrF4On">
                 <div class="scr-inputs">
-                  <span class="scr-inline-label">Day Chg &gt;</span> <input type="number" id="scrF4Val" value="2" step="0.5" style="width:55px;"> <span class="scr-unit">%</span>
+                  <span class="scr-inline-label">Day Chg &gt;</span> <input type="number" id="scrF4Val" value="2" step="0.5"> <span class="scr-unit">%</span>
                   <span class="scr-unit" style="font-weight:600;color:var(--accent);">AND</span>
-                  <span class="scr-inline-label">T/O &gt;</span> <input type="number" id="scrF4Mult" value="3" min="1" step="0.5" style="width:50px;"> <span class="scr-unit">&times;</span>
-                  <input type="number" id="scrF4SmaLen" value="50" min="5" step="1" style="width:50px;"> <span class="scr-unit">Day Avg Turnover</span>
+                  <span class="scr-inline-label">T/O &gt;</span> <input type="number" id="scrF4Mult" value="3" min="1" step="0.5"> <span class="scr-unit">&times;</span>
+                  <input type="number" id="scrF4SmaLen" value="50" min="5" step="1"> <span class="scr-unit">Day Avg Turnover</span>
                   <span class="scr-unit">&mdash; both on the same day, at least</span>
-                  <input type="number" id="scrF4MinTimes" value="1" min="1" step="1" style="width:50px;">
+                  <input type="number" id="scrF4MinTimes" value="1" min="1" step="1">
                   <span class="scr-unit">time(s) in last</span>
-                  <input type="number" id="scrF4Lookback" value="10" min="1" step="1" style="width:55px;">
+                  <input type="number" id="scrF4Lookback" value="10" min="1" step="1">
                   <span class="scr-unit">trading days</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- F41: Consolidation depth - biggest peak-to-trough decline (trough after the peak) over the last N days between a min and max %; spike tolerance forgives fake breakouts / breakdowns, a latest close outside the box always fails. One row like the F4 card above it, spanning both columns, below it (CSS: #scrPaneTechnicals .scr-filter-pair) -->
+            <div class="scr-filter-pair">
+              <div class="scr-filter-row scr-highlight">
+                <input type="checkbox" id="scrF41On">
+                <div class="scr-inputs" title="The biggest peak-to-trough decline over the last N trading days (a high, then a lower low on a later day), as a % of that high, must be at least the min (0 = no minimum) and at most the max. Ignore spikes forgives that many of the most extreme highs and lows (a fake breakout or breakdown wick). Price: where the latest close sits against the peak and trough of that deepest decline (anywhere = no restriction; the thirds are measured from the trough up to the peak). Choose &quot;within&quot; (or a third) to drop a stock that has closed above the peak, i.e. has broken out.">
+                  <span class="scr-inline-label">Consolidating:</span>
+                  <input type="number" id="scrF41Len" value="30" min="5" step="1"> <span class="scr-unit">Days depth</span>
+                  <input type="number" id="scrF41Min" value="0" min="0" step="0.5"> <span class="scr-unit">to</span>
+                  <input type="number" id="scrF41Max" value="10" min="0" step="0.5"> <span class="scr-unit">% &middot; ignore</span>
+                  <input type="number" id="scrF41Spikes" value="0" min="0" max="5" step="1"> <span class="scr-unit">spike(s) &middot; price</span>
+                  <select id="scrF41Pos" style="min-width:90px;">
+                    <option value="" selected>anywhere</option>
+                    <option value="above">above the peak</option>
+                    <option value="within">within peak-trough</option>
+                    <option value="upper">in the upper third</option>
+                    <option value="middle">in the middle third</option>
+                    <option value="lower">in the lower third</option>
+                  </select>
                 </div>
               </div>
             </div>
@@ -1528,7 +1545,7 @@
 <script src="js/cache.js?v=2"></script>
 <script src="js/data-processor.js?v=2"></script>
 <script src="js/scanner.js?v=3"></script>
-<script src="js/screener.js?v=27"></script>
+<script src="js/screener.js?v=28"></script>
 <script src="js/scanner-overview.js?v=7"></script>
 <script src="js/quarterly-results.js?v=13"></script>
 <script src="js/relative-strength.js?v=3"></script>
@@ -1548,7 +1565,7 @@
 <script src="js/data-quality.js?v=14"></script>
 <script src="js/dq-pipeline.js?v=1"></script>
 <script src="js/quarterly-results-fetch.js?v=1"></script>
-<script src="js/presets.js?v=23"></script>
+<script src="js/presets.js?v=24"></script>
 <script src="js/asof-scan.js?v=3"></script>
 <script src="js/ui.js?v=13"></script>
 <script src="js/nse-download.js?v=5"></script>

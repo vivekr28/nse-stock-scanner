@@ -333,7 +333,7 @@ test('screener.js holds none of F24 / F25: no controls, fields, columns or check
   assert.ok(!/scrF24|scrF25|rsPriceAbove|rsCloseAbove|rsHighAbove|_rsLevel|_rsHit|_rhLevel|_rhHit|RS_FIELD_LABEL/.test(scr), 'F24 / F25 live in js/relative-strength.js');
   assert.ok(/computeDynDateChange/.test(scr) && /scrF16On/.test(scr), "F16's logic did not move");
   assert.ok(!/'scrF16On'\s*,\s*'scrF18On'/.test(scr) && !/scrF15On','scrF16On/.test(scr), 'F16 is not in the Technicals badge list');
-  assert.ok(/'scrF10On','scrF18On','scrF19On'\]/.test(scr), 'neither is F15: the list is F10, F18, F19 after the Technicals-only ones');
+  assert.ok(/'scrF10On','scrF18On','scrF19On','scrF42On'\]/.test(scr), 'neither is F15: the list is F10, F18, F19, F42 after the Technicals-only ones');
   assert.ok(/computeDynPerformance/.test(scr) && /scrF15On/.test(scr), "F15's logic did not move");
   // rsApplyToStock is only reached when rsFilterState() returned a state, so it needs no guard of its own
   for (const hook of ['rsFilterState', 'rsColumns', 'rsReset', 'rsActiveCount', 'rsUpdateBadge']) {
