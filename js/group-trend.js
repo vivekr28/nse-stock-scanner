@@ -8,6 +8,8 @@
 //   F39 "Industry EW % Change" - the % change of the stock's industry's equal-weight index between two dates, each on a chosen Open / High /
 //   Low / Close, at least N% (the industry version of the % Change filter on the Relative Strength tab; a date that is not a trading day uses the
 //   nearest earlier one, a From date before the index starts uses its first bar).
+//   F43 / F44 "Sector / Industry Fast MA > Slow MA" - the same two indexes: today's fast moving average of the index close strictly above its slow one
+//   (SMA or EMA, any two lengths, like the stock-level Fast MA > Slow MA on the Technicals tab; the maths is screener.js's computeMaCross).
 // A group with no index (too little history) fails. screener.js reaches this file only through the hooks below (each call guarded by typeof,
 // like js/group-breadth.js), so the scanner holds none of these controls, fields or columns.
 
@@ -16,7 +18,12 @@ const GT_FILTERS = [
   { code: 'F37', prefix: 'scrF37', level: 'sector',   noun: 'Sector',   stateKey: 'sec', key: '_gtSec', colLabel: 'Sector EW vs SMA' },
   { code: 'F38', prefix: 'scrF38', level: 'industry', noun: 'Industry', stateKey: 'ind', key: '_gtInd', colLabel: 'Ind EW vs SMA' },
 ];
-const GT_FILTER_IDS = GT_FILTERS.map(d => d.prefix + 'On');
+// F43 / F44: Fast MA > Slow MA on the same two equal-weight indexes (type SMA / EMA, fast and slow length)
+const GT_MA_FILTERS = [
+  { code: 'F43', prefix: 'scrF43', level: 'sector',   noun: 'Sector',   stateKey: 'maSec', key: '_gtMaSec', colLabel: 'Sector EW' },
+  { code: 'F44', prefix: 'scrF44', level: 'industry', noun: 'Industry', stateKey: 'maInd', key: '_gtMaInd', colLabel: 'Ind EW' },
+];
+const GT_FILTER_IDS = GT_FILTERS.map(d => d.prefix + 'On').concat(GT_MA_FILTERS.map(d => d.prefix + 'On'));
 const GT_UNKNOWN = 'Undefined-Diversified';
 
 let _gtCache = {};   // level -> { sig, map }
@@ -81,7 +88,8 @@ function gtIsoToTs(iso) {
 
 // ── Hooks for the Stock Scanner (js/screener.js; each call guarded by typeof) ───────────────────────────────────────────────
 
-// F37 and F38 as the scanner should apply them now: { sec:{on, lens}, ind:{on, lens}, any }. A filter is on only with an SMA ticked.
+// F37 and F38 as the scanner should apply them now: { sec:{on, lens}, ind:{on, lens}, maSec / maInd:{on, type, fast, slow}, chg, any }. F37 / F38 are on
+// only with an SMA ticked.
 function gtFilterState() {
   const s = {};
   for (const def of GT_FILTERS) {
@@ -94,7 +102,12 @@ function gtFilterState() {
   const toTs = gtIsoToTs(val('ToDate'));
   s.chg = { on: !!(on39 && on39.checked), fromTs: gtIsoToTs(val('FromDate')), fromField: val('FromField') || 'close',
             toTs: isNaN(toTs) ? Infinity : toTs, toField: val('ToField') || 'close', val: parseFloat(val('Val')) || 0 };   // a blank To date = the latest bar
-  s.any = GT_FILTERS.some(def => s[def.stateKey].on) || s.chg.on;
+  for (const def of GT_MA_FILTERS) {
+    const on = gtEl(def.prefix + 'On'), type = gtEl(def.prefix + 'Type'), fast = gtEl(def.prefix + 'Fast'), slow = gtEl(def.prefix + 'Slow');
+    s[def.stateKey] = { on: !!(on && on.checked), type: type && type.value === 'ema' ? 'ema' : 'sma',
+                        fast: (fast && parseInt(fast.value)) || 20, slow: (slow && parseInt(slow.value)) || 50 };   // a blank / invalid length falls back to 20 / 50, like the Technicals filter
+  }
+  s.any = GT_FILTERS.some(def => s[def.stateKey].on) || s.chg.on || GT_MA_FILTERS.some(def => s[def.stateKey].on);
   return s;
 }
 
@@ -103,11 +116,13 @@ function gtPrepare(state) {
   const maps = {};
   for (const def of GT_FILTERS) if (state[def.stateKey].on) maps[def.stateKey] = gtGroupMap(def.level);
   if (state.chg.on) maps.chg = gtGroupMap('industry');
+  maps.maCache = {};   // F43 / F44: each group's fast / slow MA, worked out once per scan, not once per stock of the group
+  for (const def of GT_MA_FILTERS) if (state[def.stateKey].on) { maps[def.stateKey] = gtGroupMap(def.level); maps.maCache[def.stateKey] = {}; }
   return maps;
 }
 
 // Runs the filters that are on for one stock: records what the columns show (_gtSec / _gtInd: the index's % distance above the longest
-// ticked SMA) and returns the reasons it fails ([] = passes). `state` is gtFilterState()'s result and `maps` gtPrepare()'s.
+// ticked SMA; _gtMaSec / _gtMaInd: how far the fast MA of the index sits above / below the slow one, in %) and returns the reasons it fails ([] = passes). `state` is gtFilterState()'s result and `maps` gtPrepare()'s.
 function gtApplyToStock(stock, state, maps) {
   const reasons = [];
   for (const def of GT_FILTERS) {
@@ -122,6 +137,19 @@ function gtApplyToStock(stock, state, maps) {
     if (below.length) {
       reasons.push(`${def.code}: ${def.noun} '${name}' EW index ${g.close.toFixed(1)} not above ${below.map(len => len + ' SMA' + (isNaN(g.sma[len]) ? ' (n/a)' : ' ' + g.sma[len].toFixed(1))).join(', ')}`);
     }
+  }
+  for (const def of GT_MA_FILTERS) {
+    const f = state[def.stateKey];
+    if (!f.on) continue;
+    const name = stock[def.level] || GT_UNKNOWN;
+    const g = maps[def.stateKey][name];
+    if (!g) { stock[def.key] = NaN; reasons.push(`${def.code}: ${def.noun} '${name}' has no equal-weight index`); continue; }
+    const cache = maps.maCache[def.stateKey];
+    const m = cache[name] || (cache[name] = computeMaCross(g.bars, f.type, f.fast, f.slow, false));   // computeMaCross: js/screener.js, the Technicals tab's maths
+    stock[def.key] = m.gapPct;
+    const T = f.type.toUpperCase();
+    if (!m.valid) reasons.push(`${def.code}: ${def.noun} '${name}' EW index has too little history for ${f.fast} / ${f.slow} ${T}`);
+    else if (!m.ok) reasons.push(`${def.code}: ${def.noun} '${name}' EW index ${f.fast} ${T} ${m.fast.toFixed(2)} not above ${f.slow} ${T} ${m.slow.toFixed(2)}`);
   }
   if (state.chg.on) {
     const c = state.chg, name = stock.industry || GT_UNKNOWN, g = maps.chg[name];
@@ -138,10 +166,12 @@ function gtApplyToStock(stock, state, maps) {
 function gtActiveCount() {
   const sma = GT_FILTERS.filter(def => { const on = gtEl(def.prefix + 'On'); return !!(on && on.checked) && gtTicked(def).length > 0; }).length;
   const chg = gtEl(GT_CHG_PREFIX + 'On');
-  return sma + (chg && chg.checked ? 1 : 0);
+  const ma = GT_MA_FILTERS.filter(def => { const on = gtEl(def.prefix + 'On'); return !!(on && on.checked); }).length;
+  return sma + ma + (chg && chg.checked ? 1 : 0);
 }
 
-// Extra table columns for each of F37 / F38 that is on: the index's % above (green) or below (red) the longest ticked SMA
+// Extra table columns for each of F37 / F38 that is on: the index's % above (green) or below (red) the longest ticked SMA; for each of F43 / F44 that
+// is on: the fast MA's % above (green) or below (red) the slow one
 function gtColumns() {
   const s = gtFilterState();
   const cols = [];
@@ -152,6 +182,12 @@ function gtColumns() {
     cols.push({ key: def.key, label: `${def.colLabel.replace('SMA', longest + ' SMA')}`,
                 fmt: v => isNaN(v) ? '-' : (v > 0 ? '+' : '') + v.toFixed(1) + '%', cls: v => (v > 0 ? 'positive' : 'negative') });
   }
+  for (const def of GT_MA_FILTERS) {
+    const f = s[def.stateKey];
+    if (!f.on) continue;
+    cols.push({ key: def.key, label: `${def.colLabel} ${f.fast} vs ${f.slow} ${f.type.toUpperCase()}`,
+                fmt: v => isNaN(v) ? '-' : (v > 0 ? '+' : '') + v.toFixed(2) + '%', cls: v => (v > 0 ? 'positive' : 'negative') });
+  }
   if (s.chg.on) {
     cols.push({ key: '_gtChg', label: `Ind EW ${GT_FIELD_LETTER[s.chg.fromField]}→${GT_FIELD_LETTER[s.chg.toField]} %`,
                 fmt: v => isNaN(v) ? '-' : (v > 0 ? '+' : '') + v.toFixed(2) + '%', cls: v => (v >= s.chg.val ? 'positive' : 'negative') });
@@ -159,12 +195,19 @@ function gtColumns() {
   return cols;
 }
 
-// Reset All: both filters off with nothing ticked
+// Reset All: F37 / F38 off with nothing ticked, F43 / F44 off at SMA 20 / 50
 function gtReset() {
   const set = (id, v) => { const e = gtEl(id); if (e) e.checked = v; };
   for (const def of GT_FILTERS) {
     set(def.prefix + 'On', false);
     for (const len of GT_LENGTHS) set(def.prefix + 'Sma' + len, false);
+  }
+  for (const def of GT_MA_FILTERS) {
+    set(def.prefix + 'On', false);
+    const type = gtEl(def.prefix + 'Type'), fast = gtEl(def.prefix + 'Fast'), slow = gtEl(def.prefix + 'Slow');
+    if (type) type.value = 'sma';
+    if (fast) fast.value = '20';
+    if (slow) slow.value = '50';
   }
   set(GT_CHG_PREFIX + 'On', false);
   const setv = (id, v) => { const e = gtEl(GT_CHG_PREFIX + id); if (e) e.value = v; };
