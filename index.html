@@ -441,6 +441,34 @@
               </div>
             </div>
 
+            <!-- F43: Fast MA > Slow MA on the equal-weight index of the stock's own sector - today's fast moving average of the index close strictly above the slow one (js/group-trend.js) -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF43On">
+              <span class="scr-label">Sector Fast MA &gt; Slow MA:</span>
+              <div class="scr-inputs" title="Passes stocks whose SECTOR's equal-weight index (the one on the Market Overview tab) has its fast moving average strictly above its slow one today. Both averages use the chosen type (SMA or EMA). For example 20 &gt; 50 keeps the sectors whose index 20 MA is above its 50 MA. A sector whose index has fewer closes than the slow length fails.">
+                <select id="scrF43Type" style="min-width:60px;">
+                  <option value="sma" selected>SMA</option>
+                  <option value="ema">EMA</option>
+                </select>
+                <input type="number" id="scrF43Fast" value="20" min="2" step="1"> <span class="scr-unit">(fast) &gt;</span>
+                <input type="number" id="scrF43Slow" value="50" min="2" step="1"> <span class="scr-unit">(slow)</span>
+              </div>
+            </div>
+
+            <!-- F44: Fast MA > Slow MA on the equal-weight index of the stock's own industry - today's fast moving average of the index close strictly above the slow one (js/group-trend.js) -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF44On">
+              <span class="scr-label">Industry Fast MA &gt; Slow MA:</span>
+              <div class="scr-inputs" title="Passes stocks whose INDUSTRY's equal-weight index (the one on the Market Overview tab) has its fast moving average strictly above its slow one today. Both averages use the chosen type (SMA or EMA). For example 20 &gt; 50 keeps the industrys whose index 20 MA is above its 50 MA. A industry whose index has fewer closes than the slow length fails.">
+                <select id="scrF44Type" style="min-width:60px;">
+                  <option value="sma" selected>SMA</option>
+                  <option value="ema">EMA</option>
+                </select>
+                <input type="number" id="scrF44Fast" value="20" min="2" step="1"> <span class="scr-unit">(fast) &gt;</span>
+                <input type="number" id="scrF44Slow" value="50" min="2" step="1"> <span class="scr-unit">(slow)</span>
+              </div>
+            </div>
+
             <!-- F35: breadth of the stock's own sector (js/group-breadth.js) -->
             <div class="scr-filter-row">
               <input type="checkbox" id="scrF35On">
@@ -1550,7 +1578,7 @@
 <script src="js/quarterly-results.js?v=13"></script>
 <script src="js/relative-strength.js?v=3"></script>
 <script src="js/group-breadth.js?v=1"></script>
-<script src="js/group-trend.js?v=2"></script>
+<script src="js/group-trend.js?v=3"></script>
 <script src="js/group-select.js?v=4"></script>
 <script src="js/quarterly-chart-table.js?v=2"></script>
 <script src="js/breadth.js?v=19"></script>
@@ -1565,7 +1593,7 @@
 <script src="js/data-quality.js?v=14"></script>
 <script src="js/dq-pipeline.js?v=1"></script>
 <script src="js/quarterly-results-fetch.js?v=1"></script>
-<script src="js/presets.js?v=24"></script>
+<script src="js/presets.js?v=25"></script>
 <script src="js/asof-scan.js?v=3"></script>
 <script src="js/ui.js?v=13"></script>
 <script src="js/nse-download.js?v=5"></script>
