@@ -148,8 +148,8 @@ test('F42 off: nothing is filtered and no F42 reason appears; it counts as an ac
   assert.deepEqual(off.passed, ['DOWN', 'FLAT', 'NEW', 'UP']);
   assert.ok(!off.failed.some(s => (s._failReasons || []).some(x => /F42/.test(x))));
   const src = fs.readFileSync(path.join(path.dirname(__dirname), 'js', 'screener.js'), 'utf8');
-  assert.ok(/f41On, f42On\]\.filter\(Boolean\)/.test(src), 'F42 is in the active-filter count');
-  assert.ok(/'scrF19On','scrF42On'\]/.test(src), 'F42 is in the Technicals badge count');
+  assert.ok(/f41On, f42On, f45On\]\.filter\(Boolean\)/.test(src), 'F42 is in the active-filter count');
+  assert.ok(/'scrF19On','scrF42On','scrF45On'\]/.test(src), 'F42 is in the Technicals badge count');
 });
 
 test('F42 combines with another filter: both must pass', () => {

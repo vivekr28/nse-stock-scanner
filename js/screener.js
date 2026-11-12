@@ -441,6 +441,12 @@ function runScreener() {
 
   const f19On = document.getElementById('scrF19On').checked;
   const f19Date = document.getElementById('scrF19Date').value; // 'YYYY-MM-DD'; a blank date restricts nothing
+  // F45: RS rating (the Relative Strength tab's 99..1 rank, js/rs-rank.js) over a period is strictly above a number
+  const f45On = document.getElementById('scrF45On').checked;
+  const f45Period = ['1m', '3m', '6m', '1y'].includes(document.getElementById('scrF45Period').value) ? document.getElementById('scrF45Period').value : '3m';
+  const f45Raw = parseFloat(document.getElementById('scrF45Val').value);
+  const f45Val = isNaN(f45Raw) ? 0 : f45Raw;
+  const f45Label = f45Period.toUpperCase();
 
   // Quarterly Results tab (F20 - F23, js/quarterly-results.js): read here, applied per stock below
   const qr = typeof qrFilterState === 'function' ? qrFilterState() : null;
@@ -742,6 +748,19 @@ function runScreener() {
       }
     }
 
+    // F45: RS rating over the chosen period strictly above the number (rank among ALL stocks, whatever the other filters keep)
+    if (f45On) {
+      const rating = typeof rsrRankOf === 'function' ? rsrRankOf(s.isin, f45Period) : NaN;
+      s._f45Rs = rating;
+      if (typeof rsrRankOf !== 'function') {
+        failReasons.push('F45: RS ranks unavailable (js/rs-rank.js not loaded)');
+      } else if (isNaN(rating)) {
+        failReasons.push(`F45: No ${f45Label} RS rating (needs ${PERF_PERIOD_DAYS[f45Period] + 1} trading days of history)`);
+      } else if (!(rating > f45Val)) {
+        failReasons.push(`F45: ${f45Label} RS ${rating} not above ${f45Val}`);
+      }
+    }
+
     // F20 - F23: growth / turnaround of the latest declared quarter vs the same quarter last year (js/quarterly-results.js)
     if (qr && qr.any) failReasons.push(...qrApplyToStock(s, qr));
 
@@ -819,7 +838,7 @@ function runScreener() {
   scrSortCol = null;
 
   // Count active filters
-  const activeCount = [f1On, f2On, f3On, f4On, f5On, f6On, f7On, f8On, f9On, f10On, f12On, f13On, f14On, f15On, f16On, f17On, f18On, f41On, f42On].filter(Boolean).length + (typeof qrActiveCount === 'function' ? qrActiveCount() : 0) + (typeof gbActiveCount === 'function' ? gbActiveCount() : 0) + (typeof gtActiveCount === 'function' ? gtActiveCount() : 0) + (typeof gsActiveCount === 'function' ? gsActiveCount() : 0);
+  const activeCount = [f1On, f2On, f3On, f4On, f5On, f6On, f7On, f8On, f9On, f10On, f12On, f13On, f14On, f15On, f16On, f17On, f18On, f41On, f42On, f45On].filter(Boolean).length + (typeof qrActiveCount === 'function' ? qrActiveCount() : 0) + (typeof gbActiveCount === 'function' ? gbActiveCount() : 0) + (typeof gtActiveCount === 'function' ? gtActiveCount() : 0) + (typeof gsActiveCount === 'function' ? gsActiveCount() : 0);
 
   // Stats
   const advancing = passed.filter(s => s.changePct > 0).length;
@@ -900,6 +919,9 @@ function renderScreenerTable() {
   if (f8On) {
     cols.push({ key: '_dynCloseSMA', label: 'SMA Close', fmt: v => fmt2(v) });
     cols.push({ key: '_dynPriceRatio', label: 'Price/SMA', fmt: v => isNaN(v) ? '-' : v.toFixed(3), cls: v => v >= 1 ? 'positive' : 'negative' });
+  }
+  if (document.getElementById('scrF45On').checked) {
+    cols.push({ key: '_f45Rs', label: `RS (${document.getElementById('scrF45Period').value.toUpperCase()})`, fmt: v => isNaN(v) ? '-' : v });
   }
   if (f42On) {
     const T = document.getElementById('scrF42Type').value === 'ema' ? 'EMA' : 'SMA';
@@ -1085,6 +1107,9 @@ function resetScreener() {
   initF16Dates();
   document.getElementById('scrF19On').checked = false;
   document.getElementById('scrF19Date').value = '';
+  document.getElementById('scrF45On').checked = false;
+  document.getElementById('scrF45Period').value = '3m';
+  document.getElementById('scrF45Val').value = '80';
   if (typeof gbReset === 'function') gbReset(); // the Sector & Industry tab's F34 / F35 controls (js/group-breadth.js)
   if (typeof gtReset === 'function') gtReset(); // the Sector & Industry tab's F37 / F38 controls (js/group-trend.js)
   if (typeof gsReset === 'function') gsReset(); // the Sector & Industry tab's F11 / F36 pickers (js/group-select.js)
@@ -1187,14 +1212,13 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') setTvWatchlistMenuOpen(false); });
 
-// mode: 'industry' (grouped by industry, the default), 'sector' (grouped by sector) or 'flat' (one list, no headers).
-function exportTradingViewWatchlist(mode) {
-  setTvWatchlistMenuOpen(false);
-  if (screenerPassed.length === 0) { alert('No passed stocks to export. Run a scan first.'); return; }
-  const passed = screenerPassed;
-  let footer;
+// The TradingView watchlist text for a list of stocks. mode: 'industry' (grouped by industry, the default), 'sector' (grouped by
+// sector) or 'flat' (one list, no headers). Returns { text, footer }. Also used by the Stock Scanner Overview popup (js/scanner-overview.js)
+// to copy only the industries picked there.
+function tvWatchlistText(passed, mode) {
+  let text, footer;
   if (mode === 'flat') {
-    _tvWatchlistText = passed.map(s => 'NSE:' + s.symbol).join(',');
+    text = passed.map(s => 'NSE:' + s.symbol).join(',');
     footer = `${passed.length} stocks`;
   } else {
     const field = mode === 'sector' ? 'sector' : 'industry';
@@ -1215,9 +1239,18 @@ function exportTradingViewWatchlist(mode) {
       syms.forEach(sym => parts.push('NSE:' + sym));
       groupCount++;
     });
-    _tvWatchlistText = parts.join(',');
+    text = parts.join(',');
     footer = `${passed.length} stocks across ${groupCount} ${mode === 'sector' ? 'sectors' : 'industries'}`;
   }
+  return { text, footer };
+}
+
+function exportTradingViewWatchlist(mode) {
+  setTvWatchlistMenuOpen(false);
+  if (screenerPassed.length === 0) { alert('No passed stocks to export. Run a scan first.'); return; }
+  const built = tvWatchlistText(screenerPassed, mode);
+  _tvWatchlistText = built.text;
+  const footer = built.footer;
   // Show modal
   document.getElementById('tvModalContent').textContent = _tvWatchlistText;
   document.getElementById('tvModalFooter').textContent = footer;
@@ -1342,7 +1375,7 @@ function updateApplyBtn() {
 }
 
 function updateFilterBadge() {
-  const techIds = ['scrF1On','scrF2On','scrF3On','scrF4On','scrF5On','scrF6On','scrF7On','scrF8On','scrF41On','scrF10On','scrF18On','scrF19On','scrF42On'];   // F15 (Performance) and F16 (% Change) live on the Relative Strength tab now
+  const techIds = ['scrF1On','scrF2On','scrF3On','scrF4On','scrF5On','scrF6On','scrF7On','scrF8On','scrF41On','scrF10On','scrF18On','scrF19On','scrF42On','scrF45On'];   // F15 (Performance) and F16 (% Change) live on the Relative Strength tab now
   const indIds  = ['scrF9On','scrF12On','scrF13On','scrF14On','scrF17On'];
   const countChecked = ids => ids.filter(id => { const el = document.getElementById(id); return el && el.checked; }).length;
 

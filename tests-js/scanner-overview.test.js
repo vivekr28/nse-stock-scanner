@@ -76,7 +76,7 @@ test('a section lists every group with count and %, links each row to its slice,
   assert.match(sec, /By industry <span>12 industries<\/span>/);
   assert.equal(sec.split('class="ov-row"').length - 1, 12);               // every group is listed
   assert.match(sec, /<span class="ov-name" title="Oil &amp; Gas">Oil &amp; Gas<\/span><b>1<\/b><em>8\.3%<\/em>/);
-  assert.match(sec, /data-ov="industry:10"><i style="background:#64748b">/);   // groups 11 and 12 point at the Other slice (the 11th ring) and are grey
+  assert.match(sec, /data-ov="industry:10">(<input[^>]*>)?<i style="background:#64748b">/);   // groups 11 and 12 point at the Other slice (the 11th ring) and are grey
   assert.match(sec, /data-total="12"/);
   const one = run("ovSectionHtml('sector', 'By sector', __rows)");
   assert.match(one, /By sector <span>1 sector<\/span>/);
@@ -210,8 +210,8 @@ test('the header has Name / Stocks / Passing sort buttons with an arrow on the a
   assert.match(run("ovHeadHtml('sector', { col: 'share', dir: -1 })"), /class="ov-sort ov-h-share on" data-sort="share"[^>]*>Share<span>▼<\/span>/);
 });
 
-test('the lists start sorted by Passing, highest first', () => {
-  assert.deepEqual(JSON.parse(JSON.stringify(run('ovSort'))), { col: 'pass', dir: -1 });
+test('the lists start sorted by the number of stocks, highest first', () => {
+  assert.deepEqual(JSON.parse(JSON.stringify(run('ovSort'))), { col: 'share', dir: -1 });
 });
 
 test('a sort click re-sorts both lists (first click = natural direction, second reverses) and ignores unknown columns', () => {
@@ -249,4 +249,105 @@ test('opening counts the passing % against the whole market (Store) and the full
   assert.match(dom.el('scrOverviewBody').innerHTML, /75\.0%<\/em><small[^>]*>3\/4<\/small>/);
   assert.match(dom.el('scrOverviewFoot').textContent, /"Passing": passed stocks \/ all stocks in that sector or industry/);
   sb.Store.latestBySymbol = undefined;
+});
+
+// ─── ticking industries and copying them for TradingView ─────────────────────────────────────────────────────────────
+
+const tvSb = loadScripts(['js/utils.js', 'js/industry.js', 'js/breadth.js', 'js/screener.js', 'js/scanner-overview.js']);
+const tvRun = code => vm.runInContext(code, tvSb);
+const stk = (symbol, industry) => ({ symbol, isin: symbol, sector: 'S', industry });
+// Banks 3, Auto 2, Oil and Gems 1 each (one name with a comma)
+const TV_ROWS = [stk('B1', 'Banks'), stk('B2', 'Banks'), stk('B3', 'Banks'), stk('A1', 'Auto'), stk('A2', 'Auto'), stk('O1', 'Oil'), stk('G1', 'Gems, Jewellery')];
+function tvOpen() {
+  const dom = installFakeDom(tvSb);
+  tvSb.__rows = TV_ROWS;
+  tvRun('screenerResults = __rows; screenerPassed = __rows; scrShowingFailed = false; ovMinN = 2');
+  tvSb.Store.latestBySymbol = {};
+  tvSb.openScannerOverview();
+  return dom;
+}
+
+test('the industry list has a tick box per industry, the sector list none; nothing is ticked at first and there is nothing to copy', () => {
+  const dom = tvOpen();
+  const body = dom.el('scrOverviewBody').innerHTML;
+  assert.equal((body.match(/class="ov-chk"/g) || []).length, 4);          // Banks, Auto, Oil, Gems
+  assert.match(body, /<section class="ov-sec" data-kind="sector"/);       // no ov-sel on the sector section
+  assert.match(body, /<section class="ov-sec ov-sel" data-kind="industry"/);
+  assert.match(body, /class="ov-all"/);
+  assert.equal(tvRun('ovSel.size'), 0);
+  assert.equal(tvRun('ovCopyText()'), null);
+  const sectorHtml = tvRun("ovSectionHtml('sector', 'By sector', __rows)");
+  assert.ok(!/ov-chk|ov-tools/.test(sectorHtml), 'sectors are never selectable');
+});
+
+test('"Tick industries with at least N stocks" ticks exactly those, adds to what is ticked, and the counts follow', () => {
+  tvOpen();
+  tvSb.ovSelectMin(2);
+  assert.deepEqual(Array.from(tvRun('[...ovSel].sort()')), ['Auto', 'Banks']);
+  assert.equal(tvRun('ovMinN'), 2);
+  tvSb.ovSelectMin(3);                                                     // adds nothing new (only Banks has 3), keeps Auto
+  assert.deepEqual(Array.from(tvRun('[...ovSel].sort()')), ['Auto', 'Banks']);
+  assert.equal(tvRun('ovSelectedStocks().length'), 5);
+  tvSb.ovSelectMin(1);
+  assert.equal(tvRun('ovSel.size'), 4);
+  tvSb.ovSelectMin('abc');                                                 // junk counts as 1
+  assert.equal(tvRun('ovMinN'), 1);
+  tvSb.ovClearSel();
+  assert.equal(tvRun('ovSel.size'), 0);
+});
+
+test('the copy text is the scanner\'s grouped-by-industry watchlist for the ticked industries only, biggest first', () => {
+  tvOpen();
+  tvSb.ovSelectMin(2);
+  const built = tvRun('ovCopyText()');
+  assert.equal(built.text, '###Banks(3),NSE:B1,NSE:B2,NSE:B3,###Auto(2),NSE:A1,NSE:A2');
+  assert.equal(built.footer, '5 stocks across 2 industries');
+  // identical to the toolbar export for the same stocks
+  assert.equal(built.text, tvSb.tvWatchlistText(TV_ROWS.filter(r => r.industry === 'Banks' || r.industry === 'Auto'), 'industry').text);
+  tvSb.ovToggleIndustry('Gems, Jewellery', true);                          // a comma in the name becomes a space, as in the main export
+  assert.match(tvRun('ovCopyText()').text, /###Gems Jewellery\(1\),NSE:G1$/);
+  tvSb.ovToggleIndustry('Banks', false);
+  assert.ok(!/Banks/.test(tvRun('ovCopyText()').text));
+});
+
+test('the Copy button shows what it would copy, is disabled with nothing ticked, and ticks survive a re-sort', () => {
+  const dom = tvOpen();
+  const btn = dom.el('ovCopyBtn');                                         // the fake page has no real markup: this stands in for the button
+  tvSb.ovSelectMin(2);
+  assert.equal(btn.textContent, 'Copy 5 stocks (2 industries)');
+  assert.equal(btn.disabled, false);
+  tvSb.ovSetSort('name');
+  assert.match(dom.el('scrOverviewBody').innerHTML, /data-name="Banks" checked/);
+  assert.match(dom.el('scrOverviewBody').innerHTML, /data-name="Oil">/);   // unticked stays unticked
+  tvSb.ovClearSel();
+  assert.equal(btn.textContent, 'Copy 0 stocks (0 industries)');
+  assert.equal(btn.disabled, true);
+});
+
+test('copying puts the text on the clipboard; opening the Overview again clears the ticks', async () => {
+  const dom = tvOpen();
+  dom.el('ovCopyBtn');
+  tvSb.ovSelectMin(2);
+  let copied = null;
+  tvSb.setTimeout = () => 0;                                               // the sandbox has no timers (the button label flash)
+  tvSb.copyTextToClipboard = t => { copied = t; return Promise.resolve(true); };
+  assert.equal(await tvSb.ovCopySelected(), true);
+  assert.equal(copied, '###Banks(3),NSE:B1,NSE:B2,NSE:B3,###Auto(2),NSE:A1,NSE:A2');
+  tvSb.openScannerOverview();
+  assert.equal(tvRun('ovSel.size'), 0);
+});
+
+test('tick-all ticks every industry and clears them again', () => {
+  tvOpen();
+  tvSb.ovToggleAll(true);
+  assert.equal(tvRun('ovSel.size'), 4);
+  tvSb.ovToggleAll(false);
+  assert.equal(tvRun('ovSel.size'), 0);
+});
+
+test('the tvWatchlistText helper keeps the three export modes the toolbar uses', () => {
+  const rows = [stk('A', 'Banks'), stk('B', 'Banks'), stk('C', 'Auto')];
+  assert.equal(tvSb.tvWatchlistText(rows, 'flat').text, 'NSE:A,NSE:B,NSE:C');
+  assert.equal(tvSb.tvWatchlistText(rows, 'industry').text, '###Banks(2),NSE:A,NSE:B,###Auto(1),NSE:C');
+  assert.equal(tvSb.tvWatchlistText(rows, undefined).text, tvSb.tvWatchlistText(rows, 'industry').text);
 });

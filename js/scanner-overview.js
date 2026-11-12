@@ -2,7 +2,9 @@
 // STOCK SCANNER "OVERVIEW" - what the scanned stocks are made of: two donut charts (by sector, by industry) with a ranked list beside each,
 // for the stocks the results table is showing now (Passed or Failed, after the symbol search). Plain SVG, no chart library.
 // The list also gives, per sector / industry, how much of the WHOLE group passes the filters (passed stocks / every stock in the group), and
-// can be sorted by name, number of stocks or that passing %.
+// can be sorted by name, number of stocks or that passing %. Both lists start on the number of stocks, biggest first.
+// The industry list has a tick box per industry, "Select industries with at least N stocks", and a button that copies the stocks of the
+// ticked industries as a TradingView watchlist grouped by industry (the same text as the toolbar's TV Watchlist > Grouped by industry).
 // ═════════════════════════════════════════════════════════════════
 
 const OV_TOP = 10;                 // slices that get their own colour; the rest of the groups are joined into one grey "Other" slice
@@ -12,7 +14,9 @@ const OV_UNDEFINED = 'Undefined-Diversified';   // the name the rest of the app 
 const OV_R = 70;                   // donut radius and ring width in the 200 x 200 drawing
 const OV_RING = 34;
 
-let ovSort = { col: 'pass', dir: -1 };    // the lists' order: col 'name' | 'share' | 'pass', dir 1 ascending / -1 descending (both lists share it); starts on Passing, highest first
+let ovSort = { col: 'share', dir: -1 };   // the lists' order: col 'name' | 'share' | 'pass', dir 1 ascending / -1 descending (both lists share it); starts on the number of stocks, highest first
+let ovSel = new Set();                    // the industries ticked for the copy (names); emptied each time the Overview opens
+let ovMinN = 2;                           // the "at least N stocks" box next to the industry list
 let ovRows = [];                          // what the open modal shows: the table's stocks ...
 let ovCtx = null;                         // ... and { universe: every stock, passed: the stocks that pass } for the passing %
 
@@ -109,7 +113,8 @@ function ovHeadHtml(kind, sort = ovSort) {
     const arrow = `<span>${on ? (sort.dir > 0 ? '▲' : '▼') : ''}</span>`;
     return `<button type="button" class="ov-sort ${cls}${on ? ' on' : ''}" data-sort="${col}" title="${tip}">${col === 'pass' ? arrow + label : label + arrow}</button>`;
   };
-  return `<div class="ov-head"><span></span>${btn('name', kind === 'sector' ? 'Sector' : 'Industry', 'ov-h-name', 'Sort by name')}` +
+  const all = kind === 'industry' ? '<input type="checkbox" class="ov-all" title="Tick / untick every industry">' : '';
+  return `<div class="ov-head">${all}<span></span>${btn('name', kind === 'sector' ? 'Sector' : 'Industry', 'ov-h-name', 'Sort by name')}` +
     `<span class="ov-h-num" title="Number of the shown stocks in the group">Stocks</span>${btn('share', 'Share', 'ov-h-share', 'Sort by share of the stocks shown in this Overview (the same order as the number of stocks)')}` +
     `${btn('pass', 'Passing', 'ov-h-pass', 'Sort by the % of ALL stocks in the group that pass the filters (passed / stocks in the group). The bar is relative to the highest % in the list.')}` +
     `<span></span></div>`;   // the last column (passed / group size) has no header
@@ -121,10 +126,17 @@ function ovSectionHtml(kind, label, rows, ctx = null) {
   const n = g.groups.length;
   const heading = `${label} <span>${n} ${kind === 'sector' ? (n === 1 ? 'sector' : 'sectors') : (n === 1 ? 'industry' : 'industries')}</span>`;
   const maxPass = Math.max(0, ...g.groups.map(x => (x.passPct === null ? 0 : x.passPct)));
+  const chk = x => kind === 'industry'
+    ? `<input type="checkbox" class="ov-chk" data-name="${escapeHtml(x.name)}"${ovSel.has(x.name) ? ' checked' : ''}>` : '';
   const list = ovSortGroups(g.groups).map(x =>
-    `<div class="ov-row" data-ov="${kind}:${x.slice}"><i style="background:${x.rank < OV_TOP ? OV_COLORS[x.rank % OV_COLORS.length] : OV_OTHER_COLOR}"></i>` +
+    `<div class="ov-row" data-ov="${kind}:${x.slice}">${chk(x)}<i style="background:${x.rank < OV_TOP ? OV_COLORS[x.rank % OV_COLORS.length] : OV_OTHER_COLOR}"></i>` +
     `<span class="ov-name" title="${escapeHtml(x.name)}">${escapeHtml(x.name)}</span><b>${x.count}</b><em>${x.pct.toFixed(1)}%</em>${ovFmtPass(x, maxPass)}</div>`).join('');
-  return `<section class="ov-sec" data-kind="${kind}" data-total="${g.total}"><h4>${heading}</h4>` +
+  const tools = kind === 'industry'
+    ? `<div class="ov-tools">Tick industries with at least <input type="number" id="ovMinN" min="1" step="1" value="${ovMinN}"> stocks ` +
+      `<button type="button" class="btn btn-secondary" data-act="selmin">Tick</button>` +
+      `<button type="button" class="btn btn-secondary" data-act="clear">Clear</button>` +
+      `<button type="button" class="btn btn-primary" data-act="copy" id="ovCopyBtn" title="Copy the stocks of the ticked industries, grouped by industry, as a TradingView watchlist"></button></div>` : '';
+  return `<section class="ov-sec${kind === 'industry' ? ' ov-sel' : ''}" data-kind="${kind}" data-total="${g.total}"><h4>${heading}</h4>${tools}` +
     `<div class="ov-body"><div class="ov-chart">${ovDonutSvg(kind, g.slices, g.total)}<div class="ov-cap"></div></div>` +
     `<div class="ov-listbox">${ovHeadHtml(kind)}<div class="ov-list">${list}</div></div></div></section>`;
 }
@@ -134,6 +146,68 @@ function ovRender() {
   document.getElementById('scrOverviewBody').innerHTML = ovRows.length
     ? ovSectionHtml('sector', 'By sector', ovRows, ovCtx) + ovSectionHtml('industry', 'By industry', ovRows, ovCtx)
     : '<div class="ov-empty">No results - click Scan first.</div>';
+  ovUpdateSelection();
+}
+
+// ── Picking industries and copying them ──
+// The stocks of the ticked industries (from the stocks the Overview is showing), in table order.
+function ovSelectedStocks() {
+  return (ovRows || []).filter(r => ovSel.has((r && r.industry) || OV_UNDEFINED));
+}
+
+// Keeps the copy button's label, its enabled state and the "tick all" box in step with ovSel.
+function ovUpdateSelection() {
+  const btn = document.getElementById('ovCopyBtn');
+  if (btn) {
+    const n = ovSelectedStocks().length;
+    btn.textContent = `Copy ${n} stock${n === 1 ? '' : 's'} (${ovSel.size} ${ovSel.size === 1 ? 'industry' : 'industries'})`;
+    btn.disabled = n === 0;
+  }
+  const all = document.querySelector('#scrOverviewBody .ov-all');
+  if (all) {
+    const names = [...ovCountBy(ovRows, 'industry').keys()];
+    all.checked = names.length > 0 && names.every(n => ovSel.has(n));
+    all.indeterminate = !all.checked && ovSel.size > 0;
+  }
+}
+
+// Tick every industry that has at least n of the shown stocks (adds to what is ticked already).
+function ovSelectMin(n) {
+  const min = Math.max(1, Math.floor(Number(n)) || 1);
+  ovMinN = min;
+  for (const [name, count] of ovCountBy(ovRows, 'industry')) if (count >= min) ovSel.add(name);
+  ovRender();
+}
+
+function ovClearSel() { ovSel = new Set(); ovRender(); }
+
+function ovToggleIndustry(name, on) {
+  if (on) ovSel.add(name); else ovSel.delete(name);
+  ovUpdateSelection();
+}
+
+function ovToggleAll(on) {
+  ovSel = on ? new Set(ovCountBy(ovRows, 'industry').keys()) : new Set();
+  ovRender();
+}
+
+// The TradingView text for the ticked industries: "###Industry(n),NSE:A,NSE:B,..." biggest industry first (tvWatchlistText in screener.js).
+function ovCopyText() {
+  const stocks = ovSelectedStocks();
+  return stocks.length && typeof tvWatchlistText === 'function' ? tvWatchlistText(stocks, 'industry') : null;
+}
+
+function ovCopySelected() {
+  const built = ovCopyText();
+  const btn = document.getElementById('ovCopyBtn');
+  if (!built) return Promise.resolve(false);
+  const flash = text => {
+    if (!btn) return;
+    const keep = btn.textContent;
+    btn.textContent = text;
+    setTimeout(() => { if (btn.textContent === text) btn.textContent = keep; }, 1500);
+  };
+  return copyTextToClipboard(built.text).then(ok => { flash(ok ? 'Copied \u2713 ' + built.footer : 'Copy failed'); return ok; });
 }
 
 // A header click: sort by that column (its natural direction first: names A-Z, share and % biggest first), or reverse it when it is already the one.
@@ -148,6 +222,7 @@ function openScannerOverview() {
   const modal = document.getElementById('scrOverviewModal');
   if (!modal) return;
   ovRows = typeof screenerResults !== 'undefined' ? screenerResults : [];
+  ovSel = new Set();
   const failed = typeof scrShowingFailed !== 'undefined' && scrShowingFailed;
   // The passing % counts against every stock in the market the scanner looks at (Store.latestBySymbol), whichever list the table is showing.
   ovCtx = {
@@ -200,7 +275,20 @@ function ovHover(target, on) {
   body.addEventListener('mouseout', e => ovHover(e.target, false));
   body.addEventListener('click', e => {
     const b = e.target && e.target.closest ? e.target.closest('[data-sort]') : null;
-    if (b) ovSetSort(b.getAttribute('data-sort'));
+    if (b) { ovSetSort(b.getAttribute('data-sort')); return; }
+    const a = e.target && e.target.closest ? e.target.closest('[data-act]') : null;
+    if (!a) return;
+    const act = a.getAttribute('data-act');
+    if (act === 'selmin') { const box = document.getElementById('ovMinN'); ovSelectMin(box ? box.value : ovMinN); }
+    else if (act === 'clear') ovClearSel();
+    else if (act === 'copy') ovCopySelected();
+  });
+  body.addEventListener('change', e => {
+    const t = e.target;
+    if (!t || !t.classList) return;
+    if (t.classList.contains('ov-chk')) ovToggleIndustry(t.getAttribute('data-name'), t.checked);
+    else if (t.classList.contains('ov-all')) ovToggleAll(t.checked);
+    else if (t.id === 'ovMinN') ovMinN = Math.max(1, Math.floor(Number(t.value)) || 1);
   });
 })();
 
