@@ -118,6 +118,10 @@ document.querySelectorAll('.tab').forEach(tab => {
     if (tab.dataset.tab === 'overview' && typeof renderMarketOverview === 'function') {
       renderMarketOverview();
     }
+    // Relative Strength tab: ranks are computed on first view (js/rs-rank.js)
+    if (tab.dataset.tab === 'rs' && typeof rsrRender === 'function') {
+      rsrRender();
+    }
     // Same lazy-creation reasoning for the Market Breadth tab's chart.
     if (tab.dataset.tab === 'breadth' && typeof brdRenderActiveTab === 'function') {
       brdRenderActiveTab();

@@ -83,6 +83,7 @@
   <div class="tab" data-tab="overview">Market Overview</div>
   <div class="tab" data-tab="sector">Sector Analysis</div>
   <div class="tab" data-tab="industry">Industry Analysis</div>
+  <div class="tab" data-tab="rs">Relative Strength</div>
   <div class="tab" data-tab="ewindex" style="display:none;">EW Index</div>
   <div class="tab" data-tab="dataquality">Data Quality</div>
 </div>
@@ -344,6 +345,22 @@
               <div class="scr-inputs">
                 <span class="scr-unit">On or after</span>
                 <input type="date" id="scrF19Date" title="Passes stocks listed on this date or later (listing date from NSE's EQUITY_L.csv)">
+              </div>
+            </div>
+
+            <!-- F45: RS rating (99 = best performer ... 1 = worst, same ranks as the Relative Strength tab) over 1M / 3M / 6M / 1Y is above a number -->
+            <div class="scr-filter-row">
+              <input type="checkbox" id="scrF45On">
+              <span class="scr-label">RS Rating:</span>
+              <div class="scr-inputs" title="Keeps a stock only when its RS rating for the chosen period is strictly above this number. The rating is the stock's rank (99 = best price performer, 1 = worst) among all stocks over the last 1M / 3M / 6M / 1Y - the same ranks as the Relative Strength tab. A stock without a full period of history has no rating and is rejected. For example 3M &gt; 80 keeps ratings 81 to 99.">
+                <select id="scrF45Period" style="min-width:60px;">
+                  <option value="1m">1M</option>
+                  <option value="3m" selected>3M</option>
+                  <option value="6m">6M</option>
+                  <option value="1y">1Y</option>
+                </select>
+                <span class="scr-unit">RS rating &gt;</span>
+                <input type="number" id="scrF45Val" value="80" min="0" max="99" step="1">
               </div>
             </div>
             </div>
@@ -1148,6 +1165,71 @@
   </div>
 </div>
 
+<!-- Relative Strength Panel (js/rs-rank.js): RS rank 99..1 by 1M / 3M / 6M / 1Y performance; filters, sector-wise, industry-wise, stocks -->
+<div id="panel-rs" class="panel">
+  <div class="filters" style="flex-wrap:wrap;">
+    <div class="filter-group">
+      <label title="Stocks are ranked 99 (best performer) to 1 (worst) by price change over this period">Rank By</label>
+      <select id="rsrPeriod" onchange="rsrFilterChanged()">
+        <option value="1m">1 Month perf</option>
+        <option value="3m" selected>3 Month perf</option>
+        <option value="6m">6 Month perf</option>
+        <option value="1y">1 Year perf</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <label title="Show stocks whose RS rank is within this range (1-99). Leave blank for no limit">RS Rating</label>
+      <span style="display:inline-flex;align-items:center;gap:4px;">
+        <input type="number" id="rsrMinRs" min="1" max="99" placeholder="min" oninput="rsrFilterChanged()" style="width:64px;min-width:0;">
+        <span style="color:var(--text2);">to</span>
+        <input type="number" id="rsrMaxRs" min="1" max="99" placeholder="max" oninput="rsrFilterChanged()" style="width:64px;min-width:0;">
+      </span>
+    </div>
+    <div class="filter-group">
+      <label>Quick</label>
+      <span class="rsr-chips">
+        <button class="btn btn-secondary" onclick="rsrSetMinRs(90)">RS 90+</button>
+        <button class="btn btn-secondary" onclick="rsrSetMinRs(80)">RS 80+</button>
+        <button class="btn btn-secondary" onclick="rsrSetMinRs(70)">RS 70+</button>
+        <button class="btn btn-secondary" onclick="rsrSetMinRs(null)">Any</button>
+      </span>
+    </div>
+    <div class="filter-group">
+      <label>Sector</label>
+      <select id="rsrSector" onchange="rsrSectorChanged()"><option value="ALL">All Sectors</option></select>
+    </div>
+    <div class="filter-group">
+      <label>Industry</label>
+      <select id="rsrIndustry" onchange="rsrFilterChanged()"><option value="ALL">All Industries</option></select>
+    </div>
+    <div class="filter-group">
+      <label>Search</label>
+      <input type="text" id="rsrSearch" placeholder="Symbol / name" oninput="rsrFilterChanged()" style="width:130px;min-width:0;">
+    </div>
+    <div class="filter-group">
+      <label>Min Turnover (Cr)</label>
+      <input type="number" id="rsrMinTurnover" min="0" step="1" oninput="rsrFilterChanged()" style="width:90px;min-width:0;">
+    </div>
+    <div class="filter-group">
+      <button class="btn btn-secondary" onclick="rsrReset()">Reset</button>
+    </div>
+  </div>
+  <div id="rsrSummary" class="rsr-note"></div>
+  <div class="rsr-side">
+    <div class="rsr-col">
+      <h3 class="rsr-h" id="rsrSectorHead">Sector-wise</h3>
+      <div id="rsrSectorsWrap"></div>
+    </div>
+    <div class="rsr-col">
+      <h3 class="rsr-h" id="rsrIndustryHead">Industry-wise</h3>
+      <div id="rsrIndustriesWrap"></div>
+    </div>
+  </div>
+  <h3 class="rsr-h" id="rsrStocksHead">Stocks</h3>
+  <div style="margin-bottom:6px;"><button class="btn btn-secondary" onclick="rsrExportCsv()">Export CSV</button></div>
+  <div id="rsrStocksWrap"></div>
+</div>
+
 <!-- Industry Analysis Panel -->
 <div id="panel-industry" class="panel">
   <div class="filters" style="flex-wrap:wrap;">
@@ -1573,8 +1655,8 @@
 <script src="js/cache.js?v=2"></script>
 <script src="js/data-processor.js?v=2"></script>
 <script src="js/scanner.js?v=3"></script>
-<script src="js/screener.js?v=28"></script>
-<script src="js/scanner-overview.js?v=7"></script>
+<script src="js/screener.js?v=29"></script>
+<script src="js/scanner-overview.js?v=8"></script>
 <script src="js/quarterly-results.js?v=13"></script>
 <script src="js/relative-strength.js?v=3"></script>
 <script src="js/group-breadth.js?v=1"></script>
@@ -1585,6 +1667,7 @@
 <script src="js/breadth-universe.js?v=2"></script>
 <script src="js/sector.js?v=2"></script>
 <script src="js/industry.js?v=17"></script>
+<script src="js/rs-rank.js?v=1"></script>
 <script src="js/lib/lightweight-charts.standalone.production.js"></script>
 <script src="js/ew-index.js?v=6"></script>
 <script src="js/chart-tools.js?v=6"></script>
@@ -1593,9 +1676,9 @@
 <script src="js/data-quality.js?v=14"></script>
 <script src="js/dq-pipeline.js?v=1"></script>
 <script src="js/quarterly-results-fetch.js?v=1"></script>
-<script src="js/presets.js?v=25"></script>
+<script src="js/presets.js?v=26"></script>
 <script src="js/asof-scan.js?v=3"></script>
-<script src="js/ui.js?v=13"></script>
+<script src="js/ui.js?v=14"></script>
 <script src="js/nse-download.js?v=5"></script>
 
 </body>
