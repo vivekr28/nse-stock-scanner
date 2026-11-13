@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NSE EOD Dashboard</title>
-<link rel="stylesheet" href="css/styles.css?v=49">
+<link rel="stylesheet" href="css/styles.css?v=51">
 </head>
 <body>
 
@@ -1125,12 +1125,12 @@
     <span class="rsr-key"><i class="rsr-sw rsr-sw-meas"></i><b>Measured</b> (have an RS rank for the period)</span>
     <span class="rsr-key"><i class="rsr-sw rsr-sw-sel"></i><b>Selected</b> (measured and pass the filters)</span>
   </div>
-  <h3 class="rsr-h" id="rsrGroupsHead">Sector-wise</h3>
+  <h3 class="rsr-h" id="rsrGroupsHead">Industry-wise</h3>
   <div style="margin-bottom:6px;">
     <label for="rsrGroupBy" style="font-size:12px;color:var(--text2);margin-right:6px;">Show</label>
     <select id="rsrGroupBy" onchange="rsrRender()">
-      <option value="sector" selected>Sector-wise</option>
-      <option value="industry">Industry-wise</option>
+      <option value="industry" selected>Industry-wise</option>
+      <option value="sector">Sector-wise</option>
     </select>
   </div>
   <div id="rsrGroupsWrap"></div>
@@ -1491,7 +1491,7 @@
 <script src="js/breadth.js?v=19"></script>
 <script src="js/breadth-universe.js?v=2"></script>
 <script src="js/money-flow.js?v=1"></script>
-<script src="js/rs-rank.js?v=7"></script>
+<script src="js/rs-rank.js?v=8"></script>
 <script src="js/lib/lightweight-charts.standalone.production.js"></script>
 <script src="js/chart-helpers.js?v=1"></script>
 <script src="js/chart-tools.js?v=6"></script>

@@ -1060,8 +1060,10 @@ canvas { max-width: 100%; display: block; }
 .rsr-drill { color: var(--accent); text-decoration: none; }
 .rsr-drill:hover { text-decoration: underline; }
 /* The sector-wise / industry-wise table (one at a time, chosen by the Show drop-down) */
+#rsrGroupsWrap table { width: auto; min-width: 560px; }   /* columns take the room they need instead of stretching across the page (a wide gap between Industry and Sector) */
 #rsrGroupsWrap thead th { white-space: normal; padding: 6px 7px; }
 #rsrGroupsWrap tbody td { padding: 5px 7px; }
+#rsrGroupsWrap tbody td:first-child { white-space: normal; min-width: 170px; max-width: 260px; }   /* a few industry names are 70+ characters long: they wrap instead of making the whole column that wide */
 /* Overview popup: tick industries and copy them (js/scanner-overview.js) */
 .ov-sec.ov-sel { flex-basis: 100%; }   /* the industry list gets a full-width row: its names are long and the tick boxes need them readable */
 .ov-sel .ov-head, .ov-sel .ov-row { grid-template-columns: 16px 10px minmax(0, 1fr) 40px 46px 88px 54px; }
