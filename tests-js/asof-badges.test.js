@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 const { loadScripts } = require('./load');
 const { installFakeDom } = require('./fakedom');
 
-const BASE = ['js/utils.js', 'js/industry.js', 'js/breadth.js', 'js/screener.js', 'js/presets.js'];
+const BASE = ['js/utils.js', 'js/money-flow.js', 'js/breadth.js', 'js/screener.js', 'js/presets.js'];
 const sb = loadScripts([...BASE, 'js/asof-scan.js']);
 
 function fresh() {

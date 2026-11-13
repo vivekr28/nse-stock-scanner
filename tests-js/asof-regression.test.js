@@ -133,7 +133,7 @@ function runExisting(sb) {
 }
 
 test('the existing scanner gives identical results with and without the As of Date module loaded', () => {
-  const base = ['js/utils.js', 'js/industry.js', 'js/breadth.js', 'js/screener.js', 'js/presets.js'];
+  const base = ['js/utils.js', 'js/money-flow.js', 'js/breadth.js', 'js/screener.js', 'js/presets.js'];
   const without = runExisting(loadScripts(base));
   const withIt = runExisting(loadScripts([...base, 'js/asof-scan.js']));
   assert.deepEqual(withIt, without);
@@ -141,7 +141,7 @@ test('the existing scanner gives identical results with and without the As of Da
 });
 
 test('running an As of Date scan does not change what the existing scanner returns afterwards', () => {
-  const base = ['js/utils.js', 'js/industry.js', 'js/breadth.js', 'js/screener.js', 'js/presets.js'];
+  const base = ['js/utils.js', 'js/money-flow.js', 'js/breadth.js', 'js/screener.js', 'js/presets.js'];
   const sb = loadScripts([...base, 'js/asof-scan.js']);
   const before = runExisting(sb);
 
@@ -159,7 +159,7 @@ test('running an As of Date scan does not change what the existing scanner retur
 });
 
 test('the existing scanner\'s own state is untouched by merely loading the module', () => {
-  const base = ['js/utils.js', 'js/industry.js', 'js/breadth.js', 'js/screener.js', 'js/presets.js'];
+  const base = ['js/utils.js', 'js/money-flow.js', 'js/breadth.js', 'js/screener.js', 'js/presets.js'];
   const a = loadScripts(base), b = loadScripts([...base, 'js/asof-scan.js']);
   for (const v of ['screenerResults', 'screenerPassed', 'screenerFailed', 'screenerPage', 'scrSortCol', 'scrSortDir', 'scrShowingFailed']) {
     assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext(v, b))), JSON.parse(JSON.stringify(vm.runInContext(v, a))), v);

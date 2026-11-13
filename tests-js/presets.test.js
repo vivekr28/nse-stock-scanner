@@ -12,7 +12,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { loadScripts } = require('./load');
 
-const sb = loadScripts(['js/utils.js', 'js/industry.js', 'js/presets.js']);
+const sb = loadScripts(['js/utils.js', 'js/money-flow.js', 'js/presets.js']);
 const { applyPresetState, capturePresetState } = sb;
 
 function fakeF17Controls() {

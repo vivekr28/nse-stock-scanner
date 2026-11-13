@@ -8,7 +8,7 @@ const vm = require('node:vm');
 const { loadScripts } = require('./load');
 const { installFakeDom } = require('./fakedom');
 
-const sb = loadScripts(['js/utils.js', 'js/industry.js', 'js/breadth.js', 'js/screener.js', 'js/presets.js']);
+const sb = loadScripts(['js/utils.js', 'js/money-flow.js', 'js/breadth.js', 'js/screener.js', 'js/presets.js']);
 const { computeDynNewHigh, capturePresetState, applyPresetState } = sb;
 const SCR_NEW_HIGH_DAYS = vm.runInContext('SCR_NEW_HIGH_DAYS', sb);
 

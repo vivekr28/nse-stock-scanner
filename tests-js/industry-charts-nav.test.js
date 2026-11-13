@@ -19,7 +19,7 @@ sb.document = { addEventListener: (t, f) => { if (t === 'keydown') keydown.push(
 vm.createContext(sb);
 // the file wires some elements at load time (getElementById(...).addEventListener), so the first load uses a page of stand-ins
 installFakeDom(sb, {});
-for (const f of ['js/utils.js', 'js/industry.js', 'js/chart-helpers.js', 'js/chart-tools.js', 'js/industry-charts.js']) vm.runInContext(read(f), sb, { filename: f });
+for (const f of ['js/utils.js', 'js/money-flow.js', 'js/chart-helpers.js', 'js/chart-tools.js', 'js/industry-charts.js']) vm.runInContext(read(f), sb, { filename: f });
 const dom = installFakeDom(sb, {});
 const run = code => vm.runInContext(code, sb);
 
@@ -130,9 +130,9 @@ test('single-stock mode is untouched by a stale list', () => {
   run("icMode = 'industry'");
 });
 
-test('wiring: Industry Analysis passes the table\'s order (_indBreakdownNames) from its table rows and heatmap cards; index.html has the bar', () => {
-  const ind = read('js/industry.js');
-  assert.equal((ind.match(/openIndustryCharts\('\$\{ind\.name\.replace\(\/'\/g, "\\\\'"\)\}', _indBreakdownNames\)/g) || []).length, 2);
+test('wiring: the Money Flow tab passes the order of the table from its industry rows (the all-periods rows pass none); index.html has the bar', () => {
+  const mf = read('js/money-flow.js');
+  assert.match(mf, /openIndustryCharts\(row\.dataset\.name, row\.dataset\.list === 'all' \? undefined : mfList\.map\(i => i\.name\)\)/);
   const html = read('index.html');
   assert.match(html, /id="icIndNavWrap"/);
   assert.match(html, /onclick="icStepIndustry\(-1\)"/);

@@ -16,7 +16,7 @@ const root = path.dirname(__dirname);
 const read = f => fs.readFileSync(path.join(root, f), 'utf8');
 const html = read('index.html');
 
-const sb = loadScripts(['js/utils.js', 'js/chart-helpers.js', 'js/industry.js', 'js/breadth.js', 'js/screener.js', 'js/industry-charts.js', 'js/group-trend.js', 'js/presets.js']);
+const sb = loadScripts(['js/utils.js', 'js/chart-helpers.js', 'js/money-flow.js', 'js/breadth.js', 'js/screener.js', 'js/industry-charts.js', 'js/group-trend.js', 'js/presets.js']);
 const realUpdateFilterBadge = sb.updateFilterBadge;   // setup() below stubs it on the sandbox
 
 const MON = ['Jan', 'Feb', 'Mar'];

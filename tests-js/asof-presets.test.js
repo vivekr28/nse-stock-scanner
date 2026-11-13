@@ -9,7 +9,7 @@ const vm = require('node:vm');
 const { loadScripts } = require('./load');
 const { installFakeDom } = require('./fakedom');
 
-const sb = loadScripts(['js/utils.js', 'js/industry.js', 'js/breadth.js', 'js/screener.js', 'js/presets.js', 'js/asof-scan.js']);
+const sb = loadScripts(['js/utils.js', 'js/money-flow.js', 'js/breadth.js', 'js/screener.js', 'js/presets.js', 'js/asof-scan.js']);
 const html = fs.readFileSync(path.join(path.dirname(__dirname), 'index.html'), 'utf8');
 const htmlAsofIds = [...html.matchAll(/\bid="(asof[A-Za-z0-9]+)"/g)].map(m => m[1]).filter(id => !['asofDateNote', 'asofStatus'].includes(id));
 const fields = vm.runInContext('PRESET_FIELDS', sb);

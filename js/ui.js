@@ -17,7 +17,7 @@ function showDashboard() {
   if (typeof rsInitDates === 'function') rsInitDates();   // Relative Strength tab's F24 date (js/relative-strength.js)
   renderBreadth();
   if (Store.loaded.sector) {
-    renderIndustryAnalysis();
+    renderMoneyFlow();
   }
   renderDataQuality();
 
@@ -80,6 +80,10 @@ document.querySelectorAll('.tab').forEach(tab => {
     // Market Overview chart: same lazy creation (needs a visible, non-zero container).
     if (tab.dataset.tab === 'overview' && typeof renderMarketOverview === 'function') {
       renderMarketOverview();
+    }
+    // Money Flow tab: needs the daily price history, which loads in the background - draw it when the tab is opened (js/money-flow.js)
+    if (tab.dataset.tab === 'moneyflow' && typeof renderMoneyFlow === 'function') {
+      renderMoneyFlow();
     }
     // Relative Strength tab: ranks are computed on first view (js/rs-rank.js)
     if (tab.dataset.tab === 'rs' && typeof rsrRender === 'function') {

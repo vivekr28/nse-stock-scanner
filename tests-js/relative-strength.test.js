@@ -17,7 +17,7 @@ const root = path.dirname(__dirname);
 const read = f => fs.readFileSync(path.join(root, f), 'utf8');
 const html = read('index.html');
 
-const sb = loadScripts(['js/utils.js', 'js/industry.js', 'js/breadth.js', 'js/screener.js', 'js/relative-strength.js', 'js/presets.js']);
+const sb = loadScripts(['js/utils.js', 'js/money-flow.js', 'js/breadth.js', 'js/screener.js', 'js/relative-strength.js', 'js/presets.js']);
 const ts = iso => sb.scrIsoToTs(iso);
 const realUpdateFilterBadge = sb.updateFilterBadge;   // runWith() below stubs it on the sandbox
 

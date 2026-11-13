@@ -7,7 +7,7 @@
 // document/Store/window are stubbed as harmless empty-ish objects: none of the PURE
 // computational functions these tests target (computeDynSMA, checkCoOccurrence, etc.)
 // touch them, and function BODIES aren't executed at load time regardless - only actual
-// top-level statements are. js/industry.js is the one file so far that genuinely has
+// top-level statements are. js/money-flow.js is the one file so far that genuinely has
 // some: a top-level IIFE registers real event listeners immediately on load (confirmed
 // live - it crashed with "document.addEventListener is not a function" until the stub
 // below grew that method), so document needs a no-op addEventListener/removeEventListener,

@@ -15,7 +15,7 @@ const root = path.dirname(__dirname);
 const read = f => fs.readFileSync(path.join(root, f), 'utf8');
 const html = read('index.html');
 
-const sb = loadScripts(['js/utils.js', 'js/industry.js', 'js/breadth.js', 'js/screener.js', 'js/group-breadth.js', 'js/group-select.js', 'js/presets.js']);
+const sb = loadScripts(['js/utils.js', 'js/money-flow.js', 'js/breadth.js', 'js/screener.js', 'js/group-breadth.js', 'js/group-select.js', 'js/presets.js']);
 const realUpdateFilterBadge = sb.updateFilterBadge;   // setup() below stubs it on the sandbox
 const plain = x => JSON.parse(JSON.stringify(x));
 

@@ -13,7 +13,7 @@ const { installFakeDom } = require('./fakedom');
 
 const read = f => fs.readFileSync(path.join(path.dirname(__dirname), f), 'utf8');
 const html = read('index.html');
-const sb = loadScripts(['js/utils.js', 'js/industry.js', 'js/breadth.js', 'js/screener.js', 'js/rs-rank.js', 'js/presets.js']);
+const sb = loadScripts(['js/utils.js', 'js/money-flow.js', 'js/breadth.js', 'js/screener.js', 'js/rs-rank.js', 'js/presets.js']);
 
 // 10 stocks with 80 bars each: flat at 100 and a last close of 100, 110, ... 190 -> the same performance in every period, so
 // P9 (+90%) is rank 99 and P0 (0%) rank 1. NEW has 30 bars: enough for a 1M rating, not for a 3M one.
@@ -105,7 +105,7 @@ test('F45 combines with another filter: both must pass', () => {
 });
 
 test('without js/rs-rank.js the filter says so instead of silently passing everything', () => {
-  const bare = loadScripts(['js/utils.js', 'js/industry.js', 'js/breadth.js', 'js/screener.js', 'js/presets.js']);
+  const bare = loadScripts(['js/utils.js', 'js/money-flow.js', 'js/breadth.js', 'js/screener.js', 'js/presets.js']);
   const dom = installFakeDom(bare, { scrF17Period: '3m', scrF17Lag: '3m', scrF15Period: '1m', scrF16FromField: 'close', scrF16ToField: 'close', scrF12Period: '6m', scrF11Sector: '', scrF45Period: '3m', scrF45Val: '80' });
   dom.el('scrF45On').checked = true;
   bare.renderScreenerTable = () => {}; bare.updateToggleButton = () => {}; bare.updateFilterBadge = () => {};
