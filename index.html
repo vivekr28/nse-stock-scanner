@@ -82,7 +82,6 @@
   <div class="tab" data-tab="overview">Market Overview</div>
   <div class="tab" data-tab="industry">Industry Analysis</div>
   <div class="tab" data-tab="rs">Relative Strength</div>
-  <div class="tab" data-tab="ewindex" style="display:none;">EW Index</div>
   <div class="tab" data-tab="dataquality">Data Quality</div>
 </div>
 
@@ -1276,23 +1275,6 @@
   </div>
 </div>
 
-<!-- Equal-Weight MidSmallcap 400 Index Panel -->
-<div id="panel-ewindex" class="panel">
-  <div class="ew-controls">
-    <span class="ew-title">Nifty MidSmallcap 400 — Equal Weight Index</span>
-    <label><input type="checkbox" id="ewMA20"> 20 SMA</label>
-    <label><input type="checkbox" id="ewMA50"> 50 SMA</label>
-    <label><input type="checkbox" id="ewMA200"> 200 SMA</label>
-    <span class="ew-title">Draw:</span>
-    <button class="btn btn-secondary ic-layout-btn" id="ewToolMeasure" title="Click a start point, then an end point, to measure % change, price change and bars between them (one use per click on this button)">Measure</button>
-    <button class="btn btn-secondary ic-layout-btn" id="ewToolTrend" title="Click two points to draw a trend line (one use per click on this button)">Trend Line</button>
-    <button class="btn btn-secondary ic-layout-btn" id="ewToolDelete" title="Delete the selected drawing (click a drawing to select it; Delete key also works)" disabled>Delete</button>
-    <button class="btn btn-secondary ic-layout-btn" id="ewToolClear" title="Remove all drawings">Clear</button>
-    <span id="ewConstituentInfo" class="ew-info"></span>
-  </div>
-  <div id="ewChartContainer"></div>
-</div>
-
 <!-- Market Overview Panel -->
 <div id="panel-overview" class="panel">
   <div class="ew-controls">
@@ -1556,7 +1538,7 @@
 </div>
 
 <!-- JS Modules (dependency order matters for const/let declarations) -->
-<script src="js/store.js?v=4"></script>
+<script src="js/store.js?v=5"></script>
 <script src="js/utils.js?v=4"></script>
 <script src="js/cache.js?v=2"></script>
 <script src="js/data-processor.js?v=2"></script>
@@ -1573,7 +1555,7 @@
 <script src="js/industry.js?v=17"></script>
 <script src="js/rs-rank.js?v=1"></script>
 <script src="js/lib/lightweight-charts.standalone.production.js"></script>
-<script src="js/ew-index.js?v=6"></script>
+<script src="js/chart-helpers.js?v=1"></script>
 <script src="js/chart-tools.js?v=6"></script>
 <script src="js/market-overview.js?v=8"></script>
 <script src="js/industry-charts.js?v=33"></script>
@@ -1582,8 +1564,8 @@
 <script src="js/quarterly-results-fetch.js?v=1"></script>
 <script src="js/presets.js?v=26"></script>
 <script src="js/asof-scan.js?v=3"></script>
-<script src="js/ui.js?v=15"></script>
-<script src="js/nse-download.js?v=6"></script>
+<script src="js/ui.js?v=16"></script>
+<script src="js/nse-download.js?v=7"></script>
 
 </body>
 </html>

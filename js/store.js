@@ -19,7 +19,6 @@ const Store = {
   excludedTrusts: [],   // [{symbol, name, type: 'REIT'|'InvIT', series, tradeDate, close, marketCap}] - REIT/InvIT units (series RR/IV) kept out of the stock data; from NSE's market-cap file, server only; see Data Quality tab
   excludedEtfs: [],     // [{symbol, name, isin, series, lastTradeDate, close, turnover}] - ETFs/funds (ISIN INF...) left out of the stock data; see Data Quality tab
   symbolToISIN: {},     // normalizedSymbol -> ISIN
-  ewIndex: null,        // {cols, bars: [[date,open,high,low,close,turnover,count],...], constituentCount} or null
   unadjustedCorpActions: [], // [{isin, symbol, exDate, subject, close}] - recognized corp actions (demergers, etc.) NOT price-adjusted; see Data Quality tab
   adjustedCorpActions: [],   // [{isin, symbol, exDate, kind: 'split-bonus'|'rights'|'tv-correction', detail, factor}] - every price adjustment applied (factor = what pre-ex-date prices were multiplied by); see Data Quality tab
   quarterly: null,      // {bySymbol: {normalizedSymbol: {q, b, cmp, s, sp, e, ep, sg, eg, st, et, h}}, latestQuarter} from /api/quarterly-growth, or null; see js/quarterly-results.js

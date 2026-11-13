@@ -12,7 +12,7 @@ const vm = require('node:vm');
 const { loadScripts } = require('./load');
 const { makeFakeChart } = require('./fakechart');
 
-const sb = loadScripts(['js/utils.js', 'js/industry.js', 'js/ew-index.js', 'js/chart-tools.js', 'js/industry-charts.js']);
+const sb = loadScripts(['js/utils.js', 'js/industry.js', 'js/chart-helpers.js', 'js/chart-tools.js', 'js/industry-charts.js']);
 const run = code => vm.runInContext(code, sb);
 
 // A grid chart instance as icRenderPage builds one: a fake chart plus the bars / legend the sync reads and drives.

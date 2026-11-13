@@ -16,7 +16,7 @@ const read = f => fs.readFileSync(path.join(root, f), 'utf8');
 const html = read('index.html');
 const css = read('css/styles.css');
 
-const sb = loadScripts(['js/utils.js', 'js/ew-index.js', 'js/industry.js', 'js/breadth.js', 'js/screener.js', 'js/industry-charts.js', 'js/group-trend.js', 'js/presets.js']);
+const sb = loadScripts(['js/utils.js', 'js/chart-helpers.js', 'js/industry.js', 'js/breadth.js', 'js/screener.js', 'js/industry-charts.js', 'js/group-trend.js', 'js/presets.js']);
 const realUpdateFilterBadge = sb.updateFilterBadge;   // setup() below stubs it on the sandbox
 
 // 60 trading days, written the way the data files write them

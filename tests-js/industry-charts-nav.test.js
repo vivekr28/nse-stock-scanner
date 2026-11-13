@@ -19,7 +19,7 @@ sb.document = { addEventListener: (t, f) => { if (t === 'keydown') keydown.push(
 vm.createContext(sb);
 // the file wires some elements at load time (getElementById(...).addEventListener), so the first load uses a page of stand-ins
 installFakeDom(sb, {});
-for (const f of ['js/utils.js', 'js/industry.js', 'js/ew-index.js', 'js/chart-tools.js', 'js/industry-charts.js']) vm.runInContext(read(f), sb, { filename: f });
+for (const f of ['js/utils.js', 'js/industry.js', 'js/chart-helpers.js', 'js/chart-tools.js', 'js/industry-charts.js']) vm.runInContext(read(f), sb, { filename: f });
 const dom = installFakeDom(sb, {});
 const run = code => vm.runInContext(code, sb);
 

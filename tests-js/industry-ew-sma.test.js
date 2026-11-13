@@ -12,7 +12,7 @@ const { installFakeDom } = require('./fakedom');
 
 const root = path.dirname(__dirname);
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
-const sb = loadScripts(['js/utils.js', 'js/ew-index.js', 'js/industry.js', 'js/industry-charts.js', 'js/group-trend.js']);
+const sb = loadScripts(['js/utils.js', 'js/chart-helpers.js', 'js/industry.js', 'js/industry-charts.js', 'js/group-trend.js']);
 const run = code => vm.runInContext(code, sb);
 
 const MON = ['Jan', 'Feb', 'Mar'];
