@@ -135,11 +135,15 @@ function rsrFilterStocks(rows, f) {
 }
 
 // Summarise the PASSING stocks by 'sector' or 'industry'. One entry per group with at least one passing stock:
-// { name, sector (industries only: the sector most of its passing stocks belong to), passing, ranked (all ranked stocks of the group
-// for this period, passing or not), pct (passing / ranked), avgRs, avgPerf, top (the passing stock with the highest RS, then perf) }.
+// { name, sector (industries only: the sector most of its passing stocks belong to), total (every stock of the group, ranked or not),
+// ranked (the group's stocks that have a rank for this period, passing or not), passing (the ranked ones that pass the filters),
+// pct (passing / ranked), avgRs, avgPerf, top (the passing stock with the highest RS, then perf) }.
 function rsrSummarize(allRows, passing, kind, period) {
-  const rankedBy = {};
-  for (const r of allRows) if (Number.isFinite(r.rs[period])) rankedBy[r[kind]] = (rankedBy[r[kind]] || 0) + 1;
+  const rankedBy = {}, totalBy = {};
+  for (const r of allRows) {
+    totalBy[r[kind]] = (totalBy[r[kind]] || 0) + 1;
+    if (Number.isFinite(r.rs[period])) rankedBy[r[kind]] = (rankedBy[r[kind]] || 0) + 1;
+  }
   const byName = new Map();
   for (const r of passing) {
     if (!byName.has(r[kind])) byName.set(r[kind], []);
@@ -147,7 +151,7 @@ function rsrSummarize(allRows, passing, kind, period) {
   }
   const out = [];
   for (const [name, list] of byName) {
-    const g = { kind, name, sector: '', passing: list.length, ranked: rankedBy[name] || list.length };
+    const g = { kind, name, sector: '', passing: list.length, ranked: rankedBy[name] || list.length, total: totalBy[name] || list.length };
     g.pct = g.passing / g.ranked * 100;
     g.avgRs = rsrMean(list.map(r => r.rs[period]));
     g.avgPerf = rsrMean(list.map(r => r.perf[period]));
@@ -198,6 +202,7 @@ function rsrNum(id) {
   return t === '' ? NaN : Number(t);
 }
 function rsrPeriod() { const el = rsrEl('rsrPeriod'); return el && el.value ? el.value : '3m'; }
+function rsrGroupBy() { const el = rsrEl('rsrGroupBy'); return el && el.value === 'industry' ? 'industry' : 'sector'; }
 function rsrPeriodLabel(k) { const p = RSR_PERIODS.find(x => x.key === k); return p ? p.label : k; }
 // What the value being ranked is called in column headings: "3M Perf %" or "% from 3M High"
 function rsrPerfLabel(k) { const p = RSR_PERIODS.find(x => x.key === k); return p && p.kind === 'high' ? `% from ${p.label}` : `${rsrPeriodLabel(k)} Perf %`; }
@@ -222,6 +227,17 @@ function rsrPerfCell(v) { return Number.isFinite(v) ? `<span class="${v >= 0 ? '
 
 function rsrSymbolLink(r) { return `<a href="#" class="stock-link" data-isin="${escapeHtml(r.isin)}" title="${escapeHtml(r.companyName)}">${escapeHtml(r.symbol)}</a>`; }
 function rsrDrill(kind, name) { return `<a href="#" class="rsr-drill" data-kind="${kind}" data-name="${escapeHtml(name)}" title="Show only these stocks below">${escapeHtml(name)}</a>`; }
+
+// One bar per group showing three nested amounts of its stocks: ALL (the full track, drawn to the scale of the biggest group), MEASURED
+// (the ones with an RS rank for the chosen period) and SELECTED (the measured ones that pass the filters), with the three counts beside it.
+function rsrStockBar(g, maxTotal) {
+  const w = n => (g.total > 0 ? Math.min(100, n / g.total * 100) : 0).toFixed(1);
+  const tip = `${g.passing} selected of ${g.ranked} measured (${Math.round(g.pct)}%), out of ${g.total} stocks in the group`
+    + (g.total > g.ranked ? ` (${g.total - g.ranked} too new to be measured)` : '');
+  return `<div class="rsr-bar" title="${tip}"><span class="rsr-bar-cell"><span class="rsr-bar-all" style="width:${(g.total / maxTotal * 100).toFixed(1)}%">`
+    + `<i class="rsr-bar-meas" style="width:${w(g.ranked)}%"></i><i class="rsr-bar-sel" style="width:${w(g.passing)}%"></i></span></span>`
+    + `<span class="rsr-bar-nums"><b class="rsr-n-sel">${g.passing}</b> / <span class="rsr-n-meas">${g.ranked}</span> / <span class="rsr-n-all">${g.total}</span></span></div>`;
+}
 
 function rsrPopulateSelectors() {
   const rows = rsrCache ? rsrCache.rows : [];
@@ -268,10 +284,9 @@ function rsrGroupSpec(kind, groups, f) {
     { key: 'name', label: isInd ? 'Industry' : 'Sector', val: g => g.name, html: g => rsrDrill(kind, g.name), str: true },
   ];
   if (isInd) cols.push({ key: 'sector', label: 'Sector', val: g => g.sector, html: g => escapeHtml(g.sector), str: true });
+  const maxTotal = Math.max(1, ...groups.map(g => g.total));      // bars are drawn to one scale, so a bigger group has a longer bar
   cols.push(
-    { key: 'passing', label: 'Stocks Passing', val: g => g.passing, html: g => `<b>${g.passing}</b>` },
-    { key: 'ranked', label: 'Ranked in Group', val: g => g.ranked, html: g => String(g.ranked) },
-    { key: 'pct', label: '% Passing', val: g => g.pct, html: g => g.pct.toFixed(0) + '%' },
+    { key: 'passing', label: 'Stocks: Selected / Measured / All', val: g => g.passing, html: g => rsrStockBar(g, maxTotal), csv: g => g.passing },
     { key: 'avgRs', label: `Avg RS (${rsrPeriodLabel(k)})`, val: g => g.avgRs, html: g => rsrBadge(g.avgRs) },
     { key: 'avgPerf', label: `Avg ${rsrPerfLabel(k)}`, val: g => g.avgPerf, html: g => rsrPerfCell(g.avgPerf), csv: g => g.avgPerf },
     { key: 'top', label: 'Top Stock', val: g => g.top ? g.top.rs[k] : NaN,
@@ -334,8 +349,9 @@ function rsrRender() {
   const forGroups = rsrFilterStocks(rows, { ...f, sector: 'ALL', industry: 'ALL' });
   const passing = rsrFilterStocks(rows, f);
 
-  rsrRenderTable(rsrGroupSpec('sector', rsrSummarize(rows, forGroups, 'sector', k), f), 'rsrSectorsWrap');
-  rsrRenderTable(rsrGroupSpec('industry', rsrSummarize(rows, forGroups, 'industry', k), f), 'rsrIndustriesWrap');
+  // one table, either sector-wise or industry-wise (the "Show" drop-down above it)
+  const by = rsrGroupBy();
+  rsrRenderTable(rsrGroupSpec(by, rsrSummarize(rows, forGroups, by, k), f), 'rsrGroupsWrap');
   rsrStockPage = Math.min(rsrStockPage, Math.max(0, Math.ceil(passing.length / RSR_PAGE_SIZE) - 1));
   rsrStocksSpec = rsrStockSpec(passing, f);
   rsrRenderTable(rsrStocksSpec, 'rsrStocksWrap', rsrStockPage);
@@ -344,8 +360,7 @@ function rsrRender() {
   rsrEl('rsrSummary').innerHTML = `<b>${passing.length.toLocaleString()}</b> of ${ranked.toLocaleString()} ranked stocks pass (${label} RS ${lo}-${hi}).`
     + ` ${(rows.length - ranked).toLocaleString()} stocks have no ${label} rank (less than ${rsrNeedBars(k)} trading days of history) and are not counted.`
     + ' Ranks are computed over all stocks; filters only hide rows.';
-  rsrEl('rsrSectorHead').textContent = `Sector-wise (${forGroups.length.toLocaleString()} stocks)`;
-  rsrEl('rsrIndustryHead').textContent = `Industry-wise (${forGroups.length.toLocaleString()} stocks)`;
+  rsrEl('rsrGroupsHead').textContent = `${by === 'industry' ? 'Industry-wise' : 'Sector-wise'} (${forGroups.length.toLocaleString()} stocks)`;
   rsrEl('rsrStocksHead').textContent = `Stocks (${passing.length.toLocaleString()})`;
 }
 
