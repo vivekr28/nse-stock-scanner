@@ -448,12 +448,13 @@ test('the page has a legend naming the three bar layers, and the bar styles exis
   for (const c of ['.rsr-bar-all', '.rsr-bar-meas', '.rsr-bar-sel', '.rsr-sw-sel']) assert.ok(css.includes(c), c);
 });
 
-test('one table with a Show drop-down (Sector-wise default, Industry-wise); the industry view keeps its Sector column', () => {
+test('one table with a Show drop-down (Industry-wise default, Sector-wise); the industry view keeps its Sector column', () => {
   const html = read('index.html');
   const start = html.indexOf('<select id="rsrGroupBy"');
   const sel = html.slice(start, html.indexOf('</select>', start));
-  assert.deepEqual([...sel.matchAll(/<option value="([^"]+)"/g)].map(m => m[1]), ['sector', 'industry']);
-  assert.match(sel, /<option value="sector" selected>/);
+  assert.deepEqual([...sel.matchAll(/<option value="([^"]+)"/g)].map(m => m[1]), ['industry', 'sector']);
+  assert.match(sel, /<option value="industry" selected>/);
+  assert.match(html, /id="rsrGroupsHead">Industry-wise</);
   assert.ok(!html.includes('rsrSectorsWrap') && !html.includes('rsrIndustriesWrap') && !html.includes('rsr-side'));
   const rows = sb.rsrBuildRows(universe().stocks, universe().daily);
   const f = { period: '3m', sector: 'ALL', industry: 'ALL' };
@@ -462,4 +463,10 @@ test('one table with a Show drop-down (Sector-wise default, Industry-wise); the 
   assert.equal(labels('sector')[0], 'Sector');
   assert.ok(!labels('sector').includes('Industry'));
   assert.deepEqual(labels('industry').slice(0, 2), ['Industry', 'Sector']);
+});
+
+test('the group table is only as wide as its columns need and long names wrap, so there is no wide gap between Industry and Sector', () => {
+  const css = read('css/styles.css');
+  assert.match(css, /#rsrGroupsWrap table \{ width: auto;/);
+  assert.match(css, /#rsrGroupsWrap tbody td:first-child \{ white-space: normal;[^}]*max-width: \d+px;/);
 });
