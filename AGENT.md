@@ -108,9 +108,9 @@ NSE-StockScanner/
 │   ├── breadth.js                # Market breadth bars + canvas history charts
 │   ├── breadth-universe.js       # Market Breadth tab's Universe selector (all stocks / sector / industry), "vs all stocks" line, 5-day smoothing; reached from breadth.js only through typeof-guarded bru* hooks
 │   ├── industry.js               # Industry RS scoring, heatmap, table, the Sort By metric note, Money Flow (incl. all-periods table)
-│   ├── ew-index.js               # Equal-Weight MidSmallcap 400 candlestick chart (EW Index tab)
+│   ├── chart-helpers.js          # Small shared chart helpers (ewToBusinessDay, ewFitWithRightPad, ewComputeSMA, ewHexToRgba, EW_MA_LENGTHS / EW_MA_COLORS) used by Market Overview, Market Breadth and the chart popup. Formerly ew-index.js, the code of the removed EW Index tab (2026-11-13)
 │   ├── market-overview.js        # Market Overview tab: index/sector candlestick (NSE_Indices_Combined.csv, fetched directly) + bottom pane of % stocks making 1M/3M/52Wk/ATH highs (from breadth.js _brdHistory); also an "Industries (Equal-Weight)" dropdown group (option value `ew-ind:<industry>`) charting icComputeIndustryIndex() of that industry's stocks; display only
-│   ├── chart-tools.js            # One-shot Measure + Trend Line drawing tools (series primitive) shared by the Market Overview, EW Index, Breadth and Industry/Stock Charts popup charts
+│   ├── chart-tools.js            # One-shot Measure + Trend Line drawing tools (series primitive) shared by the Market Overview, Breadth and Industry/Stock Charts popup charts
 │   ├── industry-charts.js        # Shared full-screen chart popup (Stock Scanner + Industry Analysis): 1x1/2x2/3x3/3x4/4x4 grid, crosshair legend, ADR/Avg MF stats, one-shot Measure/Trend Line tools, stock selection/watchlist
 │   ├── data-quality.js           # Cross-file matching/mismatch report
 │   ├── presets.js                # Screener filter preset save/load/export/import via IndexedDB
@@ -142,7 +142,7 @@ NSE-StockScanner/
     ├── TradingViewFullVerification.json  # Latest full "verify all stocks" run — results + resume checkpoint (.prev.json = the last complete run before it) — see "Full Price Verification Against TradingView"
     ├── verification-reports/     # The Markdown + CSV report written at the end of each full run (TradingView-Verification_<date>_<HHMM>[_partial].md/.csv)
     ├── TradingViewVerification.json  # Last "Verify against TradingView" result (per-stock grades, summary, calendar differences) so flags survive reloads/restarts — see "Verifying Adjusted Prices Against TradingView"
-    ├── processed_data.json       # Server-side pre-processed cache (includes ewIndex). Starts with "schemaVersion" — see PROCESSED_SCHEMA
+    ├── processed_data.json       # Server-side pre-processed cache (includes ewIndex, which no client code reads any more - the EW Index tab was removed 2026-11-13; the server still computes it). Starts with "schemaVersion" — see PROCESSED_SCHEMA
     └── Sector-Stock-Mapping.csv  # Copied from parent if present
 ```
 
@@ -158,7 +158,7 @@ The scripts use global scope (no ES modules or bundler). They must load in this 
 7. `breadth.js` — uses `Store`, canvas rendering
 9. `industry.js` — uses `Store`, formatters, canvas rendering
 10. `lib/lightweight-charts.standalone.production.js` — third-party vendored library, defines global `LightweightCharts` (no dependency on `Store` or app code)
-11. `ew-index.js` — uses `Store.ewIndex`, `LightweightCharts`
+11. `chart-helpers.js` — pure helpers shared by several charts (no dependencies; formerly `ew-index.js`, the removed EW Index tab)
 12. `industry-charts.js` — uses `Store`, `LightweightCharts`, `computeDynADR`/`computeDynSMA` (from screener.js), `escapeHtml`/`fmtCr`/`fmtTurnoverCr`/`fmtPct`/`fmt2`; defines the shared chart popup opened from both `screener.js` (industry/symbol links) and `industry.js` (industry table/heatmap/chart-bar clicks)
 13. `data-quality.js` — uses `Store`, formatters
 14. `presets.js` — uses `DB_NAME`, `DB_STORE`, IndexedDB, screener field IDs
@@ -979,6 +979,8 @@ Also: F7 (circuit exclusion) needs historical band data per day, which today onl
 ---
 
 ## Completed: Equal-Weight Nifty MidSmallcap 400 Chart
+
+> **REMOVED 2026-11-13 (client side) at the user's request - the EW Index tab was rarely used.** Deleted: the tab button, `panel-ewindex`, the chart code (`ewEnsureChart`, `renderEWIndexChart`, `updateEWIndexTabVisibility`), the `Store.ewIndex` field and its assignment in `nse-download.js`, the `ui.js` hooks and the `#ewChartContainer` CSS. `js/ew-index.js` became `js/chart-helpers.js`, keeping only the pure helpers the Market Overview, Market Breadth and chart popup charts share (their old `ew...` names stayed so no other file changed). **Left alone on purpose:** the server still computes `ewIndex` (`compute_equal_weight_index()` in `src/nse_server.py`, in the processed JSON and the lite payload), downloads `MidSmallcap400_Constituents.csv`, and `tests/test_data_accuracy_smoke.py` still checks it - removing those is a separate, optional step (needs a server restart and a data reprocess). The sector / industry equal-weight indexes used by F37 / F38 and the chart popup are computed from the stocks in the browser (`gtGroupMap`) and never used this series. The text below is the history of how the tab was built.
 
 **Goal:** Show an equal-weight index chart for Nifty MidSmallcap 400, giving a better read on market breadth than the cap-weighted official index.
 

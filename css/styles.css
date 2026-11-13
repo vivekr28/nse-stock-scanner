@@ -79,7 +79,7 @@ body {
 .panel { display: none; padding: 16px 20px; }
 .panel.active { display: block; }
 
-/* Equal-Weight Index panel */
+/* Chart control bar (.ew-controls): the name is historical (the EW Index tab it came from was removed); Market Breadth and Market Overview use it */
 .ew-controls {
   display: flex;
   align-items: center;
@@ -90,7 +90,6 @@ body {
 .ew-controls .ew-title { font-weight: 600; color: var(--text); font-size: 14px; }
 .ew-controls label { display: flex; align-items: center; gap: 6px; color: var(--text2); font-size: 13px; cursor: pointer; }
 .ew-controls .ew-info { margin-left: auto; color: var(--text2); font-size: 13px; }
-#ewChartContainer { width: 100%; height: calc(100vh - 190px); min-height: 400px; }
 
 /* File loader */
 .loader-bar {

@@ -15,7 +15,7 @@ const { installFakeDom } = require('./fakedom');
 const root = path.dirname(__dirname);
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 
-const sb = loadScripts(['js/utils.js', 'js/industry.js', 'js/ew-index.js', 'js/chart-tools.js', 'js/industry-charts.js']);
+const sb = loadScripts(['js/utils.js', 'js/industry.js', 'js/chart-helpers.js', 'js/chart-tools.js', 'js/industry-charts.js']);
 
 // A fresh fake page for each test: menu hidden (as in index.html), SMA 20 ticked, Purple Dots off unless asked.
 function page({ checked = ['icSMA20'] } = {}) {

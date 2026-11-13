@@ -58,7 +58,7 @@ test('blank lines and a header-only file are handled', () => {
 });
 
 // ── Industries as equal-weight indices in the same dropdown ──
-const sbInd = loadScripts(['js/ew-index.js', 'js/market-overview.js', 'js/industry-charts.js']);
+const sbInd = loadScripts(['js/chart-helpers.js', 'js/market-overview.js', 'js/industry-charts.js']);
 const stock = (isin, industry) => ({ isin, industry });
 const day = (date, o, h, l, c) => ({ date, open: o, high: h, low: l, close: c, turnover: 10 });
 

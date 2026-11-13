@@ -25,7 +25,6 @@ async function tryAutoFetchJSON() {
     Store.latestBySymbol = data.latestBySymbol || {};
     Store.bandBySymbol = data.bandBySymbol || {};
     Store.sectorMap = data.sectorMap || {};
-    Store.ewIndex = data.ewIndex || null;
     Store.unadjustedCorpActions = data.unadjustedCorpActions || [];
     Store.adjustedCorpActions = data.adjustedCorpActions || [];
 

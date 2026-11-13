@@ -10,7 +10,7 @@ const vm = require('node:vm');
 const { loadScripts } = require('./load');
 
 const html = fs.readFileSync(path.join(path.dirname(__dirname), 'index.html'), 'utf8');
-const sb = loadScripts(['js/utils.js', 'js/industry.js', 'js/ew-index.js', 'js/chart-tools.js', 'js/industry-charts.js']);
+const sb = loadScripts(['js/utils.js', 'js/industry.js', 'js/chart-helpers.js', 'js/chart-tools.js', 'js/industry-charts.js']);
 const run = code => vm.runInContext(code, sb);
 
 // Daily bars as icBuildBarsFromDays makes them. Each entry: [year, month, day, open, high, low, close, turnover].

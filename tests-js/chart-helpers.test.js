@@ -1,10 +1,10 @@
 'use strict';
-// Shared chart helpers in js/ew-index.js that the EW Index, Market Breadth and Market Overview charts all use.
+// Shared chart helpers in js/chart-helpers.js (formerly js/ew-index.js, the EW Index tab, removed 2026-11-13) that the Market Breadth, Market Overview and chart popup charts use.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { loadScripts } = require('./load');
 
-const sb = loadScripts(['js/ew-index.js']);
+const sb = loadScripts(['js/chart-helpers.js']);
 const { ewFitWithRightPad, ewToBusinessDay, ewComputeSMA } = sb;
 
 test('ewFitWithRightPad: sets the 10-bar right offset BEFORE fitting (fitContent fits to last bar + rightOffset)', () => {

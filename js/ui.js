@@ -20,7 +20,6 @@ function showDashboard() {
     renderIndustryAnalysis();
   }
   renderDataQuality();
-  if (typeof updateEWIndexTabVisibility === 'function') updateEWIndexTabVisibility();
 
   // Auto-run screener since Stock Scanner is the default tab
   if (typeof runScreener === 'function') runScreener();
@@ -77,11 +76,6 @@ document.querySelectorAll('.tab').forEach(tab => {
     if (tab.dataset.tab === 'screener') {
       if (typeof rerunScreenerRespectingMultiPreset === 'function') rerunScreenerRespectingMultiPreset();
       else if (typeof runScreener === 'function') runScreener();
-    }
-    // Lazily create/refresh the EW index chart only once its panel is visible,
-    // so Lightweight Charts measures a real (non-zero) container size.
-    if (tab.dataset.tab === 'ewindex' && typeof renderEWIndexChart === 'function') {
-      renderEWIndexChart();
     }
     // Market Overview chart: same lazy creation (needs a visible, non-zero container).
     if (tab.dataset.tab === 'overview' && typeof renderMarketOverview === 'function') {
