@@ -1033,11 +1033,12 @@ canvas { max-width: 100%; display: block; }
 
 /* Relative Strength tab (js/rs-rank.js) */
 .rsr-chips { display: inline-flex; gap: 4px; }
-.rsr-chips .btn { padding: 5px 10px; font-size: 12px; }
+.rsr-chips .btn { padding: 5px 12px; font-size: 12px; }
+.rsr-chips .btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 .rsr-note { font-size: 12px; color: var(--text2); margin-bottom: 6px; }
 .rsr-h { font-size: 14px; margin: 18px 0 6px; }
 .rsr-count { font-size: 12px; color: var(--text2); margin-bottom: 6px; }
-.rsr-short { max-height: 340px; }
+.rsr-short { max-height: min(720px, 78vh); }   /* the sector-wise and industry-wise tables: tall enough to read many rows without scrolling */
 .rsr-badge { display: inline-block; min-width: 26px; text-align: center; padding: 1px 6px; border: 1px solid; border-radius: 10px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .rsr-table td { font-variant-numeric: tabular-nums; }
 .rsr-drill { color: var(--accent); text-decoration: none; }

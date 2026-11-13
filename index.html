@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NSE EOD Dashboard</title>
-<link rel="stylesheet" href="css/styles.css?v=45">
+<link rel="stylesheet" href="css/styles.css?v=46">
 </head>
 <body>
 
@@ -1074,29 +1074,25 @@
 <div id="panel-rs" class="panel">
   <div class="filters" style="flex-wrap:wrap;">
     <div class="filter-group">
-      <label title="Stocks are ranked 99 (best performer) to 1 (worst) by price change over this period">Rank By</label>
+      <label title="Stocks are ranked 99 (best) to 1 (worst). Performance options rank by price change over the period; the High options rank by how close the stock is to its highest high of the period (99 = at or nearest its high).">Rank By</label>
       <select id="rsrPeriod" onchange="rsrFilterChanged()">
         <option value="1m">1 Month perf</option>
         <option value="3m" selected>3 Month perf</option>
         <option value="6m">6 Month perf</option>
         <option value="1y">1 Year perf</option>
+        <option value="h1m">1 Month high</option>
+        <option value="h3m">3 Month high</option>
+        <option value="h6m">6 Month high</option>
+        <option value="h1y">1 Year high</option>
       </select>
     </div>
     <div class="filter-group">
-      <label title="Show stocks whose RS rank is within this range (1-99). Leave blank for no limit">RS Rating</label>
-      <span style="display:inline-flex;align-items:center;gap:4px;">
-        <input type="number" id="rsrMinRs" min="1" max="99" placeholder="min" oninput="rsrFilterChanged()" style="width:64px;min-width:0;">
-        <span style="color:var(--text2);">to</span>
-        <input type="number" id="rsrMaxRs" min="1" max="99" placeholder="max" oninput="rsrFilterChanged()" style="width:64px;min-width:0;">
-      </span>
-    </div>
-    <div class="filter-group">
-      <label>Quick</label>
-      <span class="rsr-chips">
-        <button class="btn btn-secondary" onclick="rsrSetMinRs(90)">RS 90+</button>
-        <button class="btn btn-secondary" onclick="rsrSetMinRs(80)">RS 80+</button>
-        <button class="btn btn-secondary" onclick="rsrSetMinRs(70)">RS 70+</button>
-        <button class="btn btn-secondary" onclick="rsrSetMinRs(null)">Any</button>
+      <label title="Show only stocks whose RS rating is at least this number (99 = best, 1 = worst). Any = no limit.">RS Rating</label>
+      <span class="rsr-chips" id="rsrChips">
+        <button type="button" class="btn btn-secondary rsr-chip" data-min="90" onclick="rsrSetMinRs(90)">90+</button>
+        <button type="button" class="btn btn-secondary rsr-chip" data-min="80" onclick="rsrSetMinRs(80)">80+</button>
+        <button type="button" class="btn btn-secondary rsr-chip" data-min="70" onclick="rsrSetMinRs(70)">70+</button>
+        <button type="button" class="btn btn-secondary rsr-chip active" data-min="" onclick="rsrSetMinRs(null)">Any</button>
       </span>
     </div>
     <div class="filter-group">
@@ -1112,8 +1108,12 @@
       <input type="text" id="rsrSearch" placeholder="Symbol / name" oninput="rsrFilterChanged()" style="width:130px;min-width:0;">
     </div>
     <div class="filter-group">
-      <label>Min Turnover (Cr)</label>
-      <input type="number" id="rsrMinTurnover" min="0" step="1" oninput="rsrFilterChanged()" style="width:90px;min-width:0;">
+      <label title="Keeps only stocks whose market cap is at least this many crores (a stock with no market cap on record is hidden while this is set). Ranks are not affected.">Min Market Cap (Cr)</label>
+      <input type="number" id="rsrMinMcap" min="0" step="100" oninput="rsrFilterChanged()" style="width:100px;min-width:0;">
+    </div>
+    <div class="filter-group">
+      <label title="Keeps only stocks whose AVERAGE daily turnover (money traded per day) over the last 50 trading days is at least this many crores. A stock with fewer than 50 trading days has no average and is hidden while this is set. Ranks are not affected.">Min Avg Turnover 50D (Cr)</label>
+      <input type="number" id="rsrMinAvgTurnover" min="0" step="1" oninput="rsrFilterChanged()" style="width:90px;min-width:0;">
     </div>
     <div class="filter-group">
       <button class="btn btn-secondary" onclick="rsrReset()">Reset</button>
@@ -1487,7 +1487,7 @@
 <script src="js/breadth.js?v=19"></script>
 <script src="js/breadth-universe.js?v=2"></script>
 <script src="js/money-flow.js?v=1"></script>
-<script src="js/rs-rank.js?v=1"></script>
+<script src="js/rs-rank.js?v=5"></script>
 <script src="js/lib/lightweight-charts.standalone.production.js"></script>
 <script src="js/chart-helpers.js?v=1"></script>
 <script src="js/chart-tools.js?v=6"></script>

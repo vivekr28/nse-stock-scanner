@@ -9,6 +9,12 @@
 // ranked on a shorter window), because a 3-month-old listing would otherwise be compared with 1-year movers.
 // Ranks are always computed over the WHOLE universe: filters only hide rows, they never change a rank.
 //
+// Besides performance, a stock can be ranked by HOW CLOSE IT IS TO ITS HIGH over the last 1M / 3M / 6M / 1Y ("1M High" ... "1Y High"
+// in the Rank By list; the same 21 / 63 / 126 / 250 trading days): the value is (latest close / highest HIGH of those days - 1) * 100, so
+// 0 = closing at the period high and more negative = further below it. 99 = the stock closest to its high, 1 = the furthest below.
+// Stocks sitting exactly at their high tie and share a rank. A high needs a full window of bars (N bars, one fewer than a performance
+// period needs); a stock with less has no rank for that period.
+//
 // The sector and industry tables summarise the stocks that PASS the filters: how many pass, out of how many ranked stocks the
 // group has, their average RS / performance and the best one.
 //
@@ -16,13 +22,19 @@
 // popup). All names here start with rsr / RSR_. Loaded after screener.js (computeDynPerformance, PERF_PERIOD_DAYS).
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// kind 'perf': % price change over the last `days` trading days; kind 'high': % below the highest high of the last `days` trading days.
 const RSR_PERIODS = [
-  { key: '1m', label: '1M' },
-  { key: '3m', label: '3M' },
-  { key: '6m', label: '6M' },
-  { key: '1y', label: '1Y' },
+  { key: '1m', label: '1M', kind: 'perf', days: PERF_PERIOD_DAYS['1m'] },
+  { key: '3m', label: '3M', kind: 'perf', days: PERF_PERIOD_DAYS['3m'] },
+  { key: '6m', label: '6M', kind: 'perf', days: PERF_PERIOD_DAYS['6m'] },
+  { key: '1y', label: '1Y', kind: 'perf', days: PERF_PERIOD_DAYS['1y'] },
+  { key: 'h1m', label: '1M High', kind: 'high', days: PERF_PERIOD_DAYS['1m'] },
+  { key: 'h3m', label: '3M High', kind: 'high', days: PERF_PERIOD_DAYS['3m'] },
+  { key: 'h6m', label: '6M High', kind: 'high', days: PERF_PERIOD_DAYS['6m'] },
+  { key: 'h1y', label: '1Y High', kind: 'high', days: PERF_PERIOD_DAYS['1y'] },
 ];
 const RSR_PAGE_SIZE = 100;
+const RSR_TURNOVER_DAYS = 50;      // the liquidity filter and column use the AVERAGE daily turnover of the last 50 trading days
 
 // ── Pure helpers ──────────────────────────────────────────────────────────────
 
@@ -49,6 +61,31 @@ function rsrRankValues(values) {
   return out;
 }
 
+// How far the latest close is below the highest HIGH of the last n bars, in % (0 = at the high, -10 = 10% below it); NaN when the stock has
+// fewer than n bars or no usable high. The window includes the latest bar, so a stock making a new high reads exactly 0.
+function rsrDistFromHigh(days, n) {
+  if (!days || days.length < n || n < 1) return NaN;
+  let hi = 0;
+  for (let i = days.length - n; i < days.length; i++) if (days[i].high > hi) hi = days[i].high;
+  const close = days[days.length - 1].close;
+  return hi > 0 && Number.isFinite(close) ? (close / hi - 1) * 100 : NaN;
+}
+
+// Bars a stock needs before it can be ranked for a period (a performance period needs one more bar than its length: a start and an end).
+function rsrNeedBars(key) {
+  const p = RSR_PERIODS.find(x => x.key === key);
+  return !p ? 0 : p.kind === 'high' ? p.days : p.days + 1;
+}
+
+// Average daily turnover (money traded per day, in lakhs like every turnover in the app) over the last n trading days. NaN when the stock has
+// fewer than n bars: a newly listed stock's first few busy days must not pass a liquidity test, so it has no average until it has a full n.
+function rsrAvgTurnover(days, n) {
+  if (!days || n < 1 || days.length < n) return NaN;
+  let sum = 0;
+  for (let i = days.length - n; i < days.length; i++) sum += days[i].turnover || 0;
+  return sum / n;
+}
+
 function rsrMean(arr) { return arr.length ? arr.reduce((s, v) => s + v, 0) / arr.length : NaN; }
 
 // One row per stock: its performance and RS rank for every period. `stocks` = Store.latestBySymbol, `daily` = Store.dailyBySymbol.
@@ -59,12 +96,12 @@ function rsrBuildRows(stocks, daily) {
     const days = daily[isin] || [];
     const perf = {};
     for (const p of RSR_PERIODS) {
-      const v = computeDynPerformance(days, PERF_PERIOD_DAYS[p.key]);
+      const v = p.kind === 'high' ? rsrDistFromHigh(days, p.days) : computeDynPerformance(days, p.days);
       perf[p.key] = Number.isFinite(v) ? v : NaN;
     }
     rows.push({
       isin, symbol: s.symbol, companyName: s.companyName || '', sector: s.sector || 'Undefined-Diversified',
-      industry: s.industry || 'Undefined-Diversified', close: s.close, turnover: s.turnover, marketCap: s.marketCap || 0,
+      industry: s.industry || 'Undefined-Diversified', close: s.close, avgTurnover: rsrAvgTurnover(days, RSR_TURNOVER_DAYS), marketCap: s.marketCap || 0,
       tradingDays: days.length, perf, rs: {},
     });
   }
@@ -75,7 +112,7 @@ function rsrBuildRows(stocks, daily) {
   return rows;
 }
 
-// Which stock rows pass the filters. f = { period, minRs, maxRs, sector, industry, search, minTurnoverCr }. Blank / NaN numbers =
+// Which stock rows pass the filters. f = { period, minRs, maxRs, sector, industry, search, minAvgTurnoverCr, minMcapCr }. Blank / NaN numbers =
 // no limit. A stock with no rank for the period never passes (it has no RS to compare).
 function rsrFilterStocks(rows, f) {
   const k = f.period;
@@ -89,7 +126,10 @@ function rsrFilterStocks(rows, f) {
     if (f.sector && f.sector !== 'ALL' && r.sector !== f.sector) return false;
     if (f.industry && f.industry !== 'ALL' && r.industry !== f.industry) return false;
     if (search && !(r.symbol || '').toUpperCase().includes(search) && !(r.companyName || '').toUpperCase().includes(search)) return false;
-    if (has(f.minTurnoverCr) && f.minTurnoverCr > 0 && !(r.turnover >= f.minTurnoverCr * 100)) return false;   // turnover is stored in lakhs
+    // minimum market cap (Cr, as in Store.latestBySymbol); a stock with no market cap on record (0) fails it
+    if (has(f.minMcapCr) && f.minMcapCr > 0 && !(r.marketCap >= f.minMcapCr)) return false;
+    // minimum AVERAGE daily turnover of the last 50 trading days (Cr); a stock with fewer than 50 bars has no average and fails it
+    if (has(f.minAvgTurnoverCr) && f.minAvgTurnoverCr > 0 && !(r.avgTurnover >= f.minAvgTurnoverCr * 100)) return false;   // turnover is stored in lakhs
     return true;
   });
 }
@@ -125,6 +165,7 @@ function rsrSummarize(allRows, passing, kind, period) {
 // ── State ─────────────────────────────────────────────────────────────────────
 
 let rsrCache = null;                            // { key, rows } - rebuilt only when the loaded data changes
+let rsrMinRs = NaN;                             // the RS Rating quick button chosen: show stocks with an RS of at least this (NaN = Any)
 const rsrSortState = { stocks: { col: 'rs', dir: -1 }, sectors: { col: 'passing', dir: -1 }, industries: { col: 'passing', dir: -1 } };
 let rsrStockPage = 0;
 let rsrStocksSpec = null;                       // the stocks table last rendered (for CSV export and the chart popup's Up / Down list)
@@ -158,12 +199,14 @@ function rsrNum(id) {
 }
 function rsrPeriod() { const el = rsrEl('rsrPeriod'); return el && el.value ? el.value : '3m'; }
 function rsrPeriodLabel(k) { const p = RSR_PERIODS.find(x => x.key === k); return p ? p.label : k; }
+// What the value being ranked is called in column headings: "3M Perf %" or "% from 3M High"
+function rsrPerfLabel(k) { const p = RSR_PERIODS.find(x => x.key === k); return p && p.kind === 'high' ? `% from ${p.label}` : `${rsrPeriodLabel(k)} Perf %`; }
 
 function rsrFilters() {
   return {
-    period: rsrPeriod(), minRs: rsrNum('rsrMinRs'), maxRs: rsrNum('rsrMaxRs'),
+    period: rsrPeriod(), minRs: rsrMinRs, maxRs: NaN,
     sector: rsrEl('rsrSector').value, industry: rsrEl('rsrIndustry').value,
-    search: rsrEl('rsrSearch').value, minTurnoverCr: rsrNum('rsrMinTurnover'),
+    search: rsrEl('rsrSearch').value, minAvgTurnoverCr: rsrNum('rsrMinAvgTurnover'), minMcapCr: rsrNum('rsrMinMcap'),
   };
 }
 
@@ -209,11 +252,11 @@ function rsrStockSpec(rows, f) {
     { key: 'industry', label: 'Industry', val: r => r.industry, str: true,
       html: r => `<a href="#" class="industry-link" data-industry="${escapeHtml(r.industry)}">${escapeHtml(r.industry)}</a>` },
     { key: 'close', label: 'Close', val: r => r.close, html: r => fmt2(r.close) },
-    { key: 'perf', label: `${rsrPeriodLabel(k)} Perf %`, val: r => r.perf[k], html: r => rsrPerfCell(r.perf[k]), csv: r => r.perf[k] },
+    { key: 'perf', label: rsrPerfLabel(k), val: r => r.perf[k], html: r => rsrPerfCell(r.perf[k]), csv: r => r.perf[k] },
   ];
   for (const p of RSR_PERIODS) cols.push({ key: 'rs_' + p.key, label: `RS ${p.label}`, val: r => r.rs[p.key], html: r => rsrBadge(r.rs[p.key]) });
   cols.push(
-    { key: 'turnover', label: 'Turnover (Cr)', val: r => r.turnover, html: r => fmtTurnoverCr(r.turnover), csv: r => r.turnover / 100 },
+    { key: 'avgTurnover', label: `Avg Turnover ${RSR_TURNOVER_DAYS}D (Cr)`, val: r => r.avgTurnover, html: r => fmtTurnoverCr(r.avgTurnover), csv: r => r.avgTurnover / 100 },
     { key: 'marketCap', label: 'Mkt Cap (Cr)', val: r => r.marketCap, html: r => fmtCr(r.marketCap) },
   );
   return { view: 'stocks', cols, rows, name: 'rs_stocks' };
@@ -230,7 +273,7 @@ function rsrGroupSpec(kind, groups, f) {
     { key: 'ranked', label: 'Ranked in Group', val: g => g.ranked, html: g => String(g.ranked) },
     { key: 'pct', label: '% Passing', val: g => g.pct, html: g => g.pct.toFixed(0) + '%' },
     { key: 'avgRs', label: `Avg RS (${rsrPeriodLabel(k)})`, val: g => g.avgRs, html: g => rsrBadge(g.avgRs) },
-    { key: 'avgPerf', label: `Avg ${rsrPeriodLabel(k)} Perf %`, val: g => g.avgPerf, html: g => rsrPerfCell(g.avgPerf), csv: g => g.avgPerf },
+    { key: 'avgPerf', label: `Avg ${rsrPerfLabel(k)}`, val: g => g.avgPerf, html: g => rsrPerfCell(g.avgPerf), csv: g => g.avgPerf },
     { key: 'top', label: 'Top Stock', val: g => g.top ? g.top.rs[k] : NaN,
       html: g => g.top ? `${rsrSymbolLink(g.top)} <span class="neutral">(${g.top.rs[k]})</span>` : '-', csv: g => g.top ? g.top.symbol : '' },
   );
@@ -297,9 +340,9 @@ function rsrRender() {
   rsrStocksSpec = rsrStockSpec(passing, f);
   rsrRenderTable(rsrStocksSpec, 'rsrStocksWrap', rsrStockPage);
 
-  const lo = Number.isFinite(f.minRs) ? f.minRs : 1, hi = Number.isFinite(f.maxRs) ? f.maxRs : 99;
+  const lo = Number.isFinite(f.minRs) ? f.minRs : 1, hi = 99;
   rsrEl('rsrSummary').innerHTML = `<b>${passing.length.toLocaleString()}</b> of ${ranked.toLocaleString()} ranked stocks pass (${label} RS ${lo}-${hi}).`
-    + ` ${(rows.length - ranked).toLocaleString()} stocks have no ${label} rank (less than ${PERF_PERIOD_DAYS[k] + 1} trading days of history) and are not counted.`
+    + ` ${(rows.length - ranked).toLocaleString()} stocks have no ${label} rank (less than ${rsrNeedBars(k)} trading days of history) and are not counted.`
     + ' Ranks are computed over all stocks; filters only hide rows.';
   rsrEl('rsrSectorHead').textContent = `Sector-wise (${forGroups.length.toLocaleString()} stocks)`;
   rsrEl('rsrIndustryHead').textContent = `Industry-wise (${forGroups.length.toLocaleString()} stocks)`;
@@ -316,10 +359,20 @@ function rsrSortBy(view, col) {
 function rsrGoPage(p) { rsrStockPage = Math.max(0, p); rsrRender(); }
 function rsrFilterChanged() { rsrStockPage = 0; rsrRender(); }
 function rsrSectorChanged() { rsrPopulateIndustries(); rsrFilterChanged(); }
-function rsrSetMinRs(n) { rsrEl('rsrMinRs').value = n === null ? '' : n; rsrEl('rsrMaxRs').value = ''; rsrFilterChanged(); }
+
+// The RS Rating quick buttons: 90+ / 80+ / 70+ keep stocks with at least that rating, Any (null) keeps all. The chosen one is highlighted.
+function rsrSyncChips() {
+  document.querySelectorAll('#rsrChips .rsr-chip').forEach(b => {
+    const want = b.getAttribute('data-min');
+    b.classList.toggle('active', want === '' ? !Number.isFinite(rsrMinRs) : Number(want) === rsrMinRs);
+  });
+}
+function rsrSetMinRs(n) { rsrMinRs = n === null ? NaN : n; rsrSyncChips(); rsrFilterChanged(); }
 
 function rsrReset() {
-  for (const id of ['rsrMinRs', 'rsrMaxRs', 'rsrSearch', 'rsrMinTurnover']) rsrEl(id).value = '';
+  for (const id of ['rsrSearch', 'rsrMinMcap', 'rsrMinAvgTurnover']) rsrEl(id).value = '';
+  rsrMinRs = NaN;
+  rsrSyncChips();
   rsrEl('rsrSector').value = 'ALL';
   rsrPopulateIndustries();
   rsrEl('rsrIndustry').value = 'ALL';
