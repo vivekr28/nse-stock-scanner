@@ -12,7 +12,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { loadScripts } = require('./load');
 
-const sb = loadScripts(['js/utils.js', 'js/industry.js', 'js/chart-helpers.js', 'js/industry-charts.js']);
+const sb = loadScripts(['js/utils.js', 'js/money-flow.js', 'js/chart-helpers.js', 'js/industry-charts.js']);
 const { icComputeIndustryMoneyFlowSeries, icComputeMoneyFlowRocSeries, Store } = sb;
 
 function resetStore() {

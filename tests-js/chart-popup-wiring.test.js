@@ -11,7 +11,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const ROOT = path.dirname(__dirname);
-const SCRIPTS = ['js/utils.js', 'js/industry.js', 'js/chart-helpers.js', 'js/chart-tools.js', 'js/industry-charts.js'];
+const SCRIPTS = ['js/utils.js', 'js/money-flow.js', 'js/chart-helpers.js', 'js/chart-tools.js', 'js/industry-charts.js'];
 
 function loadPopup() {
   const els = {};

@@ -266,7 +266,7 @@ function computeIndustryRS(minStocks, minMcap) {
   indList = indList.filter(i => i.stockCount >= minStocks);
   if (minMcap > 0) indList = indList.filter(i => i.totalMcap >= minMcap);
 
-  computeRSScores(indList); // shared with industry.js — see utils.js
+  computeRSScores(indList); // shared with the (removed) Industry Analysis tab — see utils.js
 
   const rsMap = {};
   indList.forEach(ind => { rsMap[ind.name] = ind.rsScore; });
@@ -493,7 +493,7 @@ function runScreener() {
   }
 
   // Pre-compute industry money-flow rate-of-change map if needed (F17) - see
-  // computeIndustryMoneyFlowRocMap in industry.js.
+  // computeIndustryMoneyFlowRocMap in money-flow.js.
   const indMFRocMap = f17On ? computeIndustryMoneyFlowRocMap(f17Period, f17Lag) : {};
 
   // Pre-compute industry aggregates for F13/F14 standalone filters

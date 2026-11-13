@@ -253,7 +253,7 @@ test('opening counts the passing % against the whole market (Store) and the full
 
 // ─── ticking industries and copying them for TradingView ─────────────────────────────────────────────────────────────
 
-const tvSb = loadScripts(['js/utils.js', 'js/industry.js', 'js/breadth.js', 'js/screener.js', 'js/scanner-overview.js']);
+const tvSb = loadScripts(['js/utils.js', 'js/money-flow.js', 'js/breadth.js', 'js/screener.js', 'js/scanner-overview.js']);
 const tvRun = code => vm.runInContext(code, tvSb);
 const stk = (symbol, industry) => ({ symbol, isin: symbol, sector: 'S', industry });
 // Banks 3, Auto 2, Oil and Gems 1 each (one name with a comma)

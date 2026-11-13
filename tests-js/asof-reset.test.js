@@ -10,7 +10,7 @@ const { loadScripts } = require('./load');
 const { installFakeDom } = require('./fakedom');
 
 const html = fs.readFileSync(path.join(path.dirname(__dirname), 'index.html'), 'utf8');
-const sb = loadScripts(['js/utils.js', 'js/industry.js', 'js/breadth.js', 'js/screener.js', 'js/presets.js', 'js/asof-scan.js']);
+const sb = loadScripts(['js/utils.js', 'js/money-flow.js', 'js/breadth.js', 'js/screener.js', 'js/presets.js', 'js/asof-scan.js']);
 
 function setup() {
   const dom = installFakeDom(sb, { scrF17Period: '3m', scrF17Lag: '3m' });
@@ -64,7 +64,7 @@ test('the other tabs\' filters are reset as before (regression)', () => {
 });
 
 test('without the As of Date module loaded, Reset All behaves exactly as before (regression)', () => {
-  const plain = loadScripts(['js/utils.js', 'js/industry.js', 'js/breadth.js', 'js/screener.js', 'js/presets.js']);
+  const plain = loadScripts(['js/utils.js', 'js/money-flow.js', 'js/breadth.js', 'js/screener.js', 'js/presets.js']);
   const dom = installFakeDom(plain, { scrF17Period: '3m', scrF17Lag: '3m' });
   plain.document.querySelectorAll = () => [];
   plain.Store.dates = ['01-Jan-2025'];
@@ -80,7 +80,7 @@ test('without the As of Date module loaded, Reset All behaves exactly as before 
 const mkDates = n => Array.from({ length: n }, (_, i) => { const d = new Date(2025, 0, 1 + i); return d.getDate() + '-' + ['Jan', 'Feb', 'Mar'][d.getMonth()] + '-2025'; });
 
 function realScanSetup() {
-  const real = loadScripts(['js/utils.js', 'js/industry.js', 'js/breadth.js', 'js/screener.js', 'js/presets.js', 'js/asof-scan.js']);
+  const real = loadScripts(['js/utils.js', 'js/money-flow.js', 'js/breadth.js', 'js/screener.js', 'js/presets.js', 'js/asof-scan.js']);
   const dom = installFakeDom(real, { scrSearch: '', scrF17Period: '3m', scrF17Lag: '3m', scrF15Period: '1m', scrF16FromField: 'close', scrF16ToField: 'close', scrF12Period: '6m', scrF11Sector: '', asofHPeriod: '21' });
   real.document.querySelectorAll = () => [];
   real.renderScreenerTable = () => {}; real.updateToggleButton = () => {}; real.closeScreenerFilters = () => {};

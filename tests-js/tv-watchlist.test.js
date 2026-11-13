@@ -7,7 +7,7 @@ const vm = require('node:vm');
 const { loadScripts } = require('./load');
 const { installFakeDom } = require('./fakedom');
 
-const sb = loadScripts(['js/utils.js', 'js/industry.js', 'js/breadth.js', 'js/screener.js', 'js/industry-charts.js']);
+const sb = loadScripts(['js/utils.js', 'js/money-flow.js', 'js/breadth.js', 'js/screener.js', 'js/industry-charts.js']);
 const stock = (symbol, industry) => ({ symbol, isin: symbol, industry });
 
 // `let screenerPassed` is not a property of the sandbox global, so set it from inside the sandbox

@@ -7,7 +7,7 @@ const vm = require('node:vm');
 const { loadScripts } = require('./load');
 const { installFakeDom } = require('./fakedom');
 
-const sb = loadScripts(['js/utils.js', 'js/industry.js', 'js/breadth.js', 'js/screener.js', 'js/asof-scan.js']);
+const sb = loadScripts(['js/utils.js', 'js/money-flow.js', 'js/breadth.js', 'js/screener.js', 'js/asof-scan.js']);
 sb.renderScreenerTable = () => {}; sb.updateToggleButton = () => {}; sb.closeScreenerFilters = () => {};
 const dateOf = i => { const d = new Date(2025, 0, 1 + i); return d.getDate() + '-' + ['Jan','Feb','Mar'][d.getMonth()] + '-2025'; };
 const N = 70;

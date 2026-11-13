@@ -12,7 +12,7 @@ const { installFakeDom } = require('./fakedom');
 
 const html = fs.readFileSync(path.join(path.dirname(__dirname), 'index.html'), 'utf8');
 const css = fs.readFileSync(path.join(path.dirname(__dirname), 'css', 'styles.css'), 'utf8');
-const sb = loadScripts(['js/utils.js', 'js/industry.js', 'js/chart-helpers.js', 'js/chart-tools.js', 'js/industry-charts.js']);
+const sb = loadScripts(['js/utils.js', 'js/money-flow.js', 'js/chart-helpers.js', 'js/chart-tools.js', 'js/industry-charts.js']);
 const run = code => vm.runInContext(code, sb);
 
 // Stocks: [isin, symbol, company name, market cap, has bars]

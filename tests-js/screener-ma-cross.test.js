@@ -12,7 +12,7 @@ const { loadScripts } = require('./load');
 const { installFakeDom } = require('./fakedom');
 
 const html = fs.readFileSync(path.join(path.dirname(__dirname), 'index.html'), 'utf8');
-const sb = loadScripts(['js/utils.js', 'js/industry.js', 'js/breadth.js', 'js/screener.js', 'js/presets.js']);
+const sb = loadScripts(['js/utils.js', 'js/money-flow.js', 'js/breadth.js', 'js/screener.js', 'js/presets.js']);
 const { computeMaCross, computeDynSMA, computeDynEMA, capturePresetState, applyPresetState } = sb;
 
 // daily bars from a list of closes

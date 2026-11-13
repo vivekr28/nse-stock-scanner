@@ -80,7 +80,7 @@
   <div class="tab active" data-tab="screener">Stock Scanner</div>
   <div class="tab" data-tab="breadth">Market Breadth</div>
   <div class="tab" data-tab="overview">Market Overview</div>
-  <div class="tab" data-tab="industry">Industry Analysis</div>
+  <div class="tab" data-tab="moneyflow">Money Flow</div>
   <div class="tab" data-tab="rs">Relative Strength</div>
   <div class="tab" data-tab="dataquality">Data Quality</div>
 </div>
@@ -1135,52 +1135,20 @@
   <div id="rsrStocksWrap"></div>
 </div>
 
-<!-- Industry Analysis Panel -->
-<div id="panel-industry" class="panel">
+<!-- Money Flow Panel (js/money-flow.js): turnover flowing into each industry, and whether it is speeding up or fading -->
+<div id="panel-moneyflow" class="panel">
   <div class="filters" style="flex-wrap:wrap;">
     <div class="filter-group">
       <label>Min Stocks</label>
-      <input type="number" id="indMinStocks" oninput="renderIndustryAnalysis()" value="3" style="width:70px;">
+      <input type="number" id="mfMinStocks" oninput="renderMoneyFlow()" value="3" style="width:70px;">
     </div>
     <div class="filter-group">
       <label>Min Market Cap (Cr)</label>
-      <input type="number" id="indMinMcap" oninput="renderIndustryAnalysis()" value="0" style="width:110px;">
+      <input type="number" id="mfMinMcap" oninput="renderMoneyFlow()" value="0" style="width:110px;">
     </div>
     <div class="filter-group">
-      <label>Sort By</label>
-      <select id="industrySort" onchange="renderIndustryAnalysis()">
-        <option value="rs_score">Relative Strength Score</option>
-        <option value="avg_change">Avg Monthly Change %</option>
-        <option value="breadth">Breadth (% above 20 SMA)</option>
-        <option value="mcap">Market Cap</option>
-        <option value="turnover">Total Turnover</option>
-        <option value="avg_dist52h">Avg Dist from 52W High</option>
-        <option value="stocks">Stock Count</option>
-        <option value="money_flow">Money Flow</option>
-        <option value="money_flow_roc">Money Flow Rate of Change</option>
-        <option value="ipo">IPOs Listed</option>
-        <option value="ew_sma">EW Chart Above SMA</option>
-      </select>
-    </div>
-    <div class="filter-group" id="ewSmaGroup" style="display:none;">
-      <label title="Lists the industries whose equal-weight index (the Industry Chart / Market Overview index) closes above the ticked SMA. Tick both to need both.">EW Chart Above</label>
-      <div class="filter-ticks">
-        <label><input type="checkbox" id="ewSma20" checked onchange="renderIndustryAnalysis()"> 20 SMA</label>
-        <label><input type="checkbox" id="ewSma50" onchange="renderIndustryAnalysis()"> 50 SMA</label>
-      </div>
-    </div>
-    <div class="filter-group" id="ipoPeriodGroup" style="display:none;">
-      <label title="Stocks whose NSE listing date falls in this window, counted per industry.">IPO Period</label>
-      <select id="ipoPeriod" onchange="renderIndustryAnalysis()">
-        <option value="1m">Last 1 Month</option>
-        <option value="3m" selected>Last 3 Months</option>
-        <option value="6m">Last 6 Months</option>
-        <option value="1y">Last 1 Year</option>
-      </select>
-    </div>
-    <div class="filter-group" id="mfPeriodGroup" style="display:none;">
-      <label>Money Flow Period</label>
-      <select id="moneyFlowPeriod" onchange="renderIndustryAnalysis()">
+      <label title="The window the money flow is measured over: the turnover of the last N trading days, compared with the N days before.">Money Flow Period</label>
+      <select id="moneyFlowPeriod" onchange="renderMoneyFlow()">
         <option value="1w">Last 1 Week</option>
         <option value="1m">Last 1 Month</option>
         <option value="3m">Last 3 Months</option>
@@ -1188,60 +1156,49 @@
         <option value="1y">Last 1 Year</option>
       </select>
     </div>
-    <div id="mfAllPeriodsGroup" style="display:none;align-self:center;">
+    <div class="filter-group">
+      <label title="Compares today's Money Flow Chg% reading to the same reading this long ago, so a still-negative industry that's improving scores positive, and a still-positive one that's fading scores negative. Can be the period itself or any shorter timeframe.">Rate of Change vs</label>
+      <select id="mfRocLag" onchange="renderMoneyFlow()">
+        <option value="1w">1 Week ago</option>
+        <option value="1m">1 Month ago</option>
+        <option value="3m" selected>3 Months ago</option>
+        <option value="6m">6 Months ago</option>
+        <option value="1y">1 Year ago</option>
+      </select>
+    </div>
+    <div style="align-self:center;">
       <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);font-weight:400;cursor:pointer;white-space:nowrap;">
-        <input type="checkbox" id="mfAllPeriodsToggle" onchange="renderIndustryAnalysis()"> All-periods table
+        <input type="checkbox" id="mfAllPeriodsToggle" checked onchange="renderMoneyFlow()"> All-periods table
       </label>
     </div>
-    <div class="filter-group" id="mfRocPeriodGroup" style="display:none;">
-      <label title="The window the Money Flow Chg% reading is measured over.">Money Flow Window</label>
-      <select id="mfRocPeriod" onchange="renderIndustryAnalysis()">
-        <option value="3m" selected>Last 3 Months</option>
-        <option value="6m">Last 6 Months</option>
-        <option value="1y">Last 1 Year</option>
-      </select>
-    </div>
-    <div class="filter-group" id="mfRocLagGroup" style="display:none;">
-      <label title="Compares today's Money Flow Chg% reading to the same reading this long ago, so a still-negative industry that's improving scores positive, and a still-positive industry that's fading scores negative. Can be the window itself or any shorter timeframe.">ROC Timeframe</label>
-      <select id="mfRocLag" onchange="renderIndustryAnalysis()">
-        <option value="1w">1 Week</option>
-        <option value="1m">1 Month</option>
-        <option value="3m" selected>3 Months</option>
-        <option value="6m">6 Months</option>
-        <option value="1y">1 Year</option>
-      </select>
+    <div class="filter-group">
+      <button id="mfCopyBtn" class="btn btn-secondary" onclick="copyMoneyFlowIndustries()" title="Copy the names of the industries listed below (one comma-separated line, like the scanner's watchlist copy). In the Stock Scanner, paste them into the Sector &amp; Industry tab's Industry picker to select them.">Copy industries</button>
     </div>
   </div>
 
-  <!-- Selected-stocks toolbar (picks made from the chart popups opened via industry/heatmap clicks below) -->
-  <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+  <!-- Selected-stocks toolbar (picks made from the chart popups opened by clicking an industry below) -->
+  <div style="display:flex;align-items:center;gap:12px;margin:12px 0 0;">
     <button class="btn btn-secondary export-btn sel-action-btn" onclick="copySelectedStocksWatchlist()" title="Copy stocks picked in chart popups, grouped by industry" disabled>Copy Selected</button>
     <button class="btn btn-secondary sel-action-btn" onclick="clearSelectedStocks()" disabled>Clear Selected</button>
     <span id="selCountLabelIndustry" style="font-size:12px;color:var(--text2);">0 stocks selected</span>
   </div>
 
-  <!-- RS Summary Cards -->
-  <div class="stats-row" id="industryStats" style="margin-top:12px;">
-    <div class="stat-card">
-      <div class="stat-label">INDUSTRIES SHOWN</div>
-      <div class="stat-val" id="indCount">0</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">TOTAL STOCKS</div>
-      <div class="stat-val" id="indStockCount">0</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">TOTAL MARKET CAP</div>
-      <div class="stat-val" id="indTotalMcap">0</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">AVG BREADTH</div>
-      <div class="stat-val" id="indAvgBreadth">0%</div>
-    </div>
+  <div class="stats-row" style="margin-top:12px;">
+    <div class="stat-card"><div class="label">Industries</div><div class="value" id="mfCount">0</div></div>
+    <div class="stat-card"><div class="label">Stocks</div><div class="value" id="mfStockCount">0</div></div>
+    <div class="stat-card"><div class="label">Market Cap (Cr)</div><div class="value" id="mfTotalMcap">0</div></div>
+    <div class="stat-card"><div class="label" id="mfTotalFlowLabel">Money Flow</div><div class="value" id="mfTotalFlow">0</div><div class="sub" id="mfTotalChg"></div></div>
   </div>
 
-  <!-- Money Flow — All Periods (shown when the "All-periods table" box is ticked) -->
-  <div id="mfAllPeriodsSection" style="display:none;margin-top:16px;">
+  <p id="mfNote" style="font-size:11px;color:var(--text2);margin:0 0 10px 0;"></p>
+  <div class="table-wrap">
+    <table id="mfTable">
+      <thead><tr id="mfHead"></tr></thead>
+      <tbody id="mfBody"></tbody>
+    </table>
+  </div>
+
+  <div id="mfAllPeriodsSection" style="margin-top:16px;">
     <h3 style="font-size:14px; margin-bottom:10px;">Money Flow — All Periods (Cr)</h3>
     <div class="table-wrap">
       <table id="mfAllPeriodsTable">
@@ -1249,29 +1206,6 @@
         <tbody id="mfAllPeriodsBody"></tbody>
       </table>
     </div>
-  </div>
-
-  <!-- Industry Table -->
-  <div style="margin-top:16px;">
-    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px;">
-      <h3 style="font-size:14px;">Industry Breakdown</h3>
-      <span id="indBreakdownNote" style="font-size:11px;color:var(--text2);"></span>
-      <button id="indBreakdownReset" class="btn btn-secondary" style="display:none;padding:3px 10px;font-size:11px;" onclick="resetIndustryBreakdownSort()">Reset to filter order</button>
-      <button id="indBreakdownCopy" class="btn btn-secondary" style="padding:3px 10px;font-size:11px;" onclick="copyBreakdownIndustries()" title="Copy the names of the industries listed below (one comma-separated line, like the scanner's watchlist copy). In the Stock Scanner, paste them into the Sector & Industry tab's Industry picker to select them.">Copy industries</button>
-    </div>
-    <p id="indMetricNote" style="font-size:11px;color:var(--text2);margin:0 0 10px 0;"></p>
-    <div class="table-wrap">
-      <table id="industryTable">
-        <thead><tr id="industryHead"></tr></thead>
-        <tbody id="industryBody"></tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- Industry Heatmap -->
-  <div style="margin-top:16px;">
-    <h3 style="font-size:14px; margin-bottom:12px;">Industry Heatmap (by RS Score)</h3>
-    <div class="sector-grid" id="industryGrid"></div>
   </div>
 </div>
 
@@ -1539,10 +1473,10 @@
 
 <!-- JS Modules (dependency order matters for const/let declarations) -->
 <script src="js/store.js?v=5"></script>
-<script src="js/utils.js?v=4"></script>
+<script src="js/utils.js?v=5"></script>
 <script src="js/cache.js?v=2"></script>
 <script src="js/data-processor.js?v=2"></script>
-<script src="js/screener.js?v=29"></script>
+<script src="js/screener.js?v=30"></script>
 <script src="js/scanner-overview.js?v=8"></script>
 <script src="js/quarterly-results.js?v=13"></script>
 <script src="js/relative-strength.js?v=3"></script>
@@ -1552,20 +1486,20 @@
 <script src="js/quarterly-chart-table.js?v=2"></script>
 <script src="js/breadth.js?v=19"></script>
 <script src="js/breadth-universe.js?v=2"></script>
-<script src="js/industry.js?v=17"></script>
+<script src="js/money-flow.js?v=1"></script>
 <script src="js/rs-rank.js?v=1"></script>
 <script src="js/lib/lightweight-charts.standalone.production.js"></script>
 <script src="js/chart-helpers.js?v=1"></script>
 <script src="js/chart-tools.js?v=6"></script>
 <script src="js/market-overview.js?v=8"></script>
-<script src="js/industry-charts.js?v=33"></script>
+<script src="js/industry-charts.js?v=34"></script>
 <script src="js/data-quality.js?v=14"></script>
 <script src="js/dq-pipeline.js?v=1"></script>
 <script src="js/quarterly-results-fetch.js?v=1"></script>
 <script src="js/presets.js?v=26"></script>
 <script src="js/asof-scan.js?v=3"></script>
-<script src="js/ui.js?v=16"></script>
-<script src="js/nse-download.js?v=7"></script>
+<script src="js/ui.js?v=17"></script>
+<script src="js/nse-download.js?v=8"></script>
 
 </body>
 </html>

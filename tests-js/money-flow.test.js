@@ -1,5 +1,5 @@
 'use strict';
-// Phase 8: tests for js/industry.js's RS scoring and money-flow computation, plus the
+// Phase 8: tests for js/money-flow.js's RS scoring and money-flow computation, plus the
 // shared computeRSScores() in js/utils.js (the same function screener.js's F9 filter also
 // calls - see AGENT.md's "RS-score formula de-duplicated" note - so this also guards that
 // other call site). Same JS track as Phase 7 (Node's built-in test runner).
@@ -12,7 +12,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { loadScripts } = require('./load');
 
-const sb = loadScripts(['js/utils.js', 'js/industry.js']);
+const sb = loadScripts(['js/utils.js', 'js/money-flow.js']);
 const { computeRSScores, computeIndustryMoneyFlow, computeAllPeriodsMoneyFlow, mfPctChange, Store } = sb;
 
 function resetStore() {

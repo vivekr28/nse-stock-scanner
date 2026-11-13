@@ -16,7 +16,7 @@ const root = path.dirname(__dirname);
 const read = f => fs.readFileSync(path.join(root, f), 'utf8');
 const html = read('index.html');
 
-const sb = loadScripts(['js/utils.js', 'js/industry.js', 'js/breadth.js', 'js/screener.js', 'js/group-breadth.js', 'js/presets.js']);
+const sb = loadScripts(['js/utils.js', 'js/money-flow.js', 'js/breadth.js', 'js/screener.js', 'js/group-breadth.js', 'js/presets.js']);
 const realUpdateFilterBadge = sb.updateFilterBadge;   // runWith() below stubs it on the sandbox
 
 // A stock: industry, sector, whether it is above its 20 SMA

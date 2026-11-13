@@ -7,7 +7,7 @@ const vm = require('node:vm');
 const { loadScripts } = require('./load');
 const { installFakeDom } = require('./fakedom');
 
-const sb = loadScripts(['js/utils.js', 'js/industry.js', 'js/breadth.js', 'js/screener.js', 'js/asof-scan.js']);
+const sb = loadScripts(['js/utils.js', 'js/money-flow.js', 'js/breadth.js', 'js/screener.js', 'js/asof-scan.js']);
 let closed = 0, rendered = 0;
 const stubUi = () => { closed = 0; rendered = 0; sb.closeScreenerFilters = () => { closed++; }; sb.renderScreenerTable = () => { rendered++; }; sb.updateToggleButton = () => {}; };
 

@@ -511,27 +511,6 @@ canvas { max-width: 100%; display: block; }
 .breadth-legend .leg-above::before { background: var(--green); }
 .breadth-legend .leg-below::before { background: var(--red); }
 
-/* Sector/Industry cards */
-.sector-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 12px;
-}
-.sector-card {
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 14px;
-}
-.sector-card h4 {
-  font-size: 13px;
-  margin-bottom: 8px;
-  display: flex;
-  justify-content: space-between;
-}
-.sector-card .mini-table { width: 100%; font-size: 11px; }
-.sector-card .mini-table td { padding: 3px 0; }
-
 /* Canvas */
 
 

@@ -994,7 +994,7 @@ function icComputeIndustryMoneyFlowSeries(stocks, numDays) {
 // of icComputeIndustryMoneyFlowSeries's line, so a still-negative reading that's
 // climbing shows positive here, and a still-positive reading that's fading shows
 // negative. lagDays can be any shorter timeframe than the window. Mirrors the
-// Industry Analysis tab's Money Flow Rate of Change filter (js/industry.js).
+// Stock Scanner's Money Flow Rate of Change filter (F17, js/money-flow.js).
 function icComputeMoneyFlowRocSeries(stocks, numDays, lagDays = numDays) {
   const { data, dateByTime } = icComputeIndustryMoneyFlowSeries(stocks, numDays);
   const rocData = [];

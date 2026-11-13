@@ -163,7 +163,7 @@ function fmtCr(v) {
 }
 
 // ── Industry Relative Strength Score ─────────────────────────────────────────
-// Shared by industry.js (Industry Analysis tab) and screener.js (F9 filter) so
+// Used by screener.js (F9 filter; also by the Industry Analysis tab, removed 2026-11-13) so
 // the same industry can't silently show a different RS score in the two tabs.
 // Composite score (0-100): breadth rank (40%) + avg monthly change rank (30%)
 // + proximity-to-52W-high rank (30%), each percentile-ranked within indList.

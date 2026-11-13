@@ -12,7 +12,7 @@ const { loadScripts } = require('./load');
 const { installFakeDom } = require('./fakedom');
 const { makeFakeChart } = require('./fakechart');
 
-const sb = loadScripts(['js/utils.js', 'js/industry.js', 'js/chart-helpers.js', 'js/chart-tools.js', 'js/industry-charts.js']);
+const sb = loadScripts(['js/utils.js', 'js/money-flow.js', 'js/chart-helpers.js', 'js/chart-tools.js', 'js/industry-charts.js']);
 
 // The numbers from the TradingView screenshot this feature copies: K.M. Sugar Mills, O27.29 H27.90 L27.01 C27.31,
 // previous close 26.69 -> +0.62 (+2.32%).

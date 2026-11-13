@@ -13,7 +13,7 @@ const ROOT = path.join(__dirname, '..');
 
 // ─── the results table ──────────────────────────────────────────────────────────
 
-const sb = loadScripts(['js/utils.js', 'js/industry.js', 'js/breadth.js', 'js/screener.js', 'js/presets.js']);
+const sb = loadScripts(['js/utils.js', 'js/money-flow.js', 'js/breadth.js', 'js/screener.js', 'js/presets.js']);
 const realUpdateFilterBadge = sb.updateFilterBadge;   // later tests stub the global; this one needs the real thing
 
 function header({ on, date }) {
