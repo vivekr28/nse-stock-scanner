@@ -1429,12 +1429,6 @@ document.getElementById('screenerBody').addEventListener('click', e => {
   if (stockLink) { e.preventDefault(); openStockChart(stockLink.dataset.isin); }
 });
 
-// The Stocks tab's Symbol column opens the same chart, and Up / Down in it walk that tab's own (filtered, sorted) list.
-document.getElementById('scannerBody').addEventListener('click', e => {
-  const stockLink = e.target.closest('.stock-link');
-  if (stockLink) { e.preventDefault(); openStockChart(stockLink.dataset.isin, typeof scannerResults !== 'undefined' ? scannerResults : undefined); }
-});
-
 // Alt+X selects / Alt+R deselects the stock you are looking at: the single-stock chart, or in the Stock Charts
 // grid the active chart (the first one, or the one last clicked). Returns true when the key was used. (Plain X / R used to do this; they now
 // start the type-to-jump stock search below, since stock names start with any letter.)

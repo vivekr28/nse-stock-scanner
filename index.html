@@ -78,78 +78,12 @@
 <!-- Tab bar (hidden until data loaded) -->
 <div id="tabBar" class="tabs hidden">
   <div class="tab active" data-tab="screener">Stock Scanner</div>
-  <div class="tab" data-tab="scanner">Stocks</div>
   <div class="tab" data-tab="breadth">Market Breadth</div>
   <div class="tab" data-tab="overview">Market Overview</div>
-  <div class="tab" data-tab="sector">Sector Analysis</div>
   <div class="tab" data-tab="industry">Industry Analysis</div>
   <div class="tab" data-tab="rs">Relative Strength</div>
   <div class="tab" data-tab="ewindex" style="display:none;">EW Index</div>
   <div class="tab" data-tab="dataquality">Data Quality</div>
-</div>
-
-<!-- Scanner Panel -->
-<div id="panel-scanner" class="panel">
-  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;margin-bottom:10px;overflow:hidden;" id="scannerFiltersWrap">
-    <div style="padding:8px 14px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none;" onclick="toggleScannerFilters()">
-      <h3 style="font-size:13px;color:var(--accent);margin:0;" id="scannerFilterTitle">Filters</h3>
-      <span style="font-size:18px;color:var(--text2);transition:transform .2s;" id="scannerFilterArrow">&#9650;</span>
-    </div>
-    <div id="scannerFiltersBody" style="padding:0 14px 10px 14px;">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;margin-bottom:10px;">
-        <div class="filter-group">
-          <label>Search Symbol</label>
-          <input type="text" class="search-box" id="searchSymbol" placeholder="e.g. RELIANCE" oninput="runScanner()" style="width:100%;box-sizing:border-box;">
-        </div>
-        <div class="filter-group">
-          <label>Scan Type</label>
-          <select id="scanType" onchange="runScanner()" style="width:100%;">
-            <option value="all">All Stocks (Latest)</option>
-            <option value="uc_hit">Upper Circuit Hitters</option>
-            <option value="lc_hit">Lower Circuit Hitters</option>
-            <option value="high_turnover">High Turnover (Top 50)</option>
-            <option value="high_adr">High ADR % (Top 50)</option>
-            <option value="near_52w_high">Near 52W High (&lt;5%)</option>
-            <option value="near_52w_low">Near 52W Low (&lt;5%)</option>
-            <option value="above_20sma">Above 20 SMA</option>
-            <option value="below_20sma">Below 20 SMA</option>
-            <option value="near_20sma">Near 20 SMA (±2%)</option>
-          </select>
-        </div>
-        <div class="filter-group">
-          <label>Sector</label>
-          <select id="filterSector" onchange="populateIndustryFilter(); runScanner()" style="width:100%;">
-            <option value="ALL">All Sectors</option>
-          </select>
-        </div>
-        <div class="filter-group">
-          <label>Industry</label>
-          <select id="filterIndustry" onchange="runScanner()" style="width:100%;">
-            <option value="ALL">All Industries</option>
-          </select>
-        </div>
-        <div class="filter-group">
-          <label>Min Turnover (Cr)</label>
-          <input type="number" id="minTurnover" value="0" min="0" step="1" oninput="runScanner()" style="width:100%;box-sizing:border-box;">
-        </div>
-      </div>
-      <div style="display:flex;gap:8px;">
-        <button class="btn btn-primary" onclick="runScanner()">Scan</button>
-        <button class="btn btn-secondary" onclick="resetFilters()">Reset</button>
-        <button class="btn btn-secondary export-btn" onclick="exportCSV()">Export CSV</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="stats-row" id="scannerStats"></div>
-  <div id="scannerResultCount" style="font-size:12px; color:var(--text2); margin-bottom:8px;"></div>
-  <div class="table-wrap">
-    <table id="scannerTable">
-      <thead><tr id="scannerHead"></tr></thead>
-      <tbody id="scannerBody"></tbody>
-    </table>
-  </div>
-  <div class="pagination" id="scannerPagination"></div>
 </div>
 
 <!-- Stock Scanner Panel (Advanced Filters) -->
@@ -1137,34 +1071,6 @@
   </div>
 </div>
 
-<!-- Sector Panel -->
-<div id="panel-sector" class="panel">
-  <div class="filters">
-    <div class="filter-group">
-      <label>Sort By</label>
-      <select id="sectorSort" onchange="renderSectorAnalysis()">
-        <option value="avg_change">Avg % Change</option>
-        <option value="breadth">Breadth (% above 20 SMA)</option>
-        <option value="turnover">Total Turnover</option>
-        <option value="stocks">Stock Count</option>
-      </select>
-    </div>
-    <button class="btn btn-primary" onclick="renderSectorAnalysis()">Apply</button>
-  </div>
-  <div style="margin-top:14px;">
-    <div class="table-wrap">
-      <table id="sectorTable">
-        <thead><tr id="sectorHead"></tr></thead>
-        <tbody id="sectorBody"></tbody>
-      </table>
-    </div>
-  </div>
-  <div style="margin-top:16px;">
-    <h3 style="font-size:14px; margin-bottom:12px;">Sector Heatmap</h3>
-    <div class="sector-grid" id="sectorGrid"></div>
-  </div>
-</div>
-
 <!-- Relative Strength Panel (js/rs-rank.js): RS rank 99..1 by 1M / 3M / 6M / 1Y performance; filters, sector-wise, industry-wise, stocks -->
 <div id="panel-rs" class="panel">
   <div class="filters" style="flex-wrap:wrap;">
@@ -1654,7 +1560,6 @@
 <script src="js/utils.js?v=4"></script>
 <script src="js/cache.js?v=2"></script>
 <script src="js/data-processor.js?v=2"></script>
-<script src="js/scanner.js?v=3"></script>
 <script src="js/screener.js?v=29"></script>
 <script src="js/scanner-overview.js?v=8"></script>
 <script src="js/quarterly-results.js?v=13"></script>
@@ -1665,21 +1570,20 @@
 <script src="js/quarterly-chart-table.js?v=2"></script>
 <script src="js/breadth.js?v=19"></script>
 <script src="js/breadth-universe.js?v=2"></script>
-<script src="js/sector.js?v=2"></script>
 <script src="js/industry.js?v=17"></script>
 <script src="js/rs-rank.js?v=1"></script>
 <script src="js/lib/lightweight-charts.standalone.production.js"></script>
 <script src="js/ew-index.js?v=6"></script>
 <script src="js/chart-tools.js?v=6"></script>
 <script src="js/market-overview.js?v=8"></script>
-<script src="js/industry-charts.js?v=32"></script>
+<script src="js/industry-charts.js?v=33"></script>
 <script src="js/data-quality.js?v=14"></script>
 <script src="js/dq-pipeline.js?v=1"></script>
 <script src="js/quarterly-results-fetch.js?v=1"></script>
 <script src="js/presets.js?v=26"></script>
 <script src="js/asof-scan.js?v=3"></script>
-<script src="js/ui.js?v=14"></script>
-<script src="js/nse-download.js?v=5"></script>
+<script src="js/ui.js?v=15"></script>
+<script src="js/nse-download.js?v=6"></script>
 
 </body>
 </html>

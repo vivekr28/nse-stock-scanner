@@ -112,7 +112,6 @@ async function loadDailyDataInBackground() {
     // Re-render views that depend on daily data
     if (Store.dashboardVisible) {
       if (typeof renderBreadth === 'function') renderBreadth();
-      if (typeof runScanner === 'function') runScanner();
       if (typeof runScreener === 'function') runScreener();
     }
   } catch (e) {

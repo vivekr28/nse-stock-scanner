@@ -1,7 +1,7 @@
 'use strict';
 // Helper for tests/test_processing_realdata_smoke.py (not a test itself): feeds the REAL processed data
-// (NSE_DATA/processed_data.json) to the dashboard's own sector and industry aggregation code (js/sector.js,
-// js/industry.js) and prints what those tabs would show, as JSON, so Python can recompute the same numbers
+// (NSE_DATA/processed_data.json) to the dashboard's own sector and industry aggregation code (the Sector Analysis tab was removed; this is now
+// js/industry.js) and prints what the Industry tab would show, as JSON, so Python can recompute the same numbers
 // independently and compare.
 //
 //   node tests-js/realdata-groups.js <path to processed_data.json>
@@ -12,9 +12,9 @@ const { installFakeDom } = require('./fakedom');
 
 const processed = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 
-const sb = loadScripts(['js/utils.js', 'js/industry.js', 'js/sector.js']);
+const sb = loadScripts(['js/utils.js', 'js/industry.js']);
 const dom = installFakeDom(sb, {
-  sectorSort: 'avg_change', industrySort: 'rs_score', indMinStocks: '1', indMinMcap: '0',
+  industrySort: 'rs_score', indMinStocks: '1', indMinMcap: '0',
   moneyFlowPeriod: '1m', mfRocPeriod: '1m', mfRocLag: '1m',
 });
 // big tables are not what is being checked
@@ -24,12 +24,6 @@ sb.renderMoneyFlowAllPeriodsTable = () => {};
 sb.Store.latestBySymbol = processed.latestBySymbol;
 sb.Store.dailyBySymbol = {};      // money flow (needs price history) is not part of the grouping being checked
 sb.Store.dates = processed.dates;
-
-sb.renderSectorAnalysis();
-const rows = [...dom.el('sectorBody').innerHTML.matchAll(/<tr>([\s\S]*?)<\/tr>/g)].map(m =>
-  [...m[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map(c => c[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()));
-const sectors = {};
-for (const r of rows) sectors[r[0]] = { stocks: Number(r[1]), avgChange: r[2], breadth: r[3] };
 
 let industries = {};
 try {
@@ -44,4 +38,4 @@ try {
   industries = { error: String(e && e.stack || e) };
 }
 
-process.stdout.write(JSON.stringify({ sectors, industries }));
+process.stdout.write(JSON.stringify({ industries }));

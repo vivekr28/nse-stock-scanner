@@ -5,7 +5,7 @@ derives from the prices correct? Everything is recomputed independently here and
     distances from the 52-week high/low and the SMA, above-SMA) against a fresh calculation from each stock's own stored
     price history - all ~2,500 stocks;
   * every stock's sector and industry against the Sector-Stock-Mapping.csv it came from;
-  * the Sector Analysis and Industry Analysis tabs: the dashboard's own grouping code (js/sector.js, js/industry.js) is run
+  * the Industry Analysis tab: the dashboard's own grouping code (js/industry.js) is run
     under Node on the REAL data and its group sizes, averages, breadth and market-cap totals are compared with a separate
     Python grouping. (Needs `node` on the PATH; skips without it.)
 
@@ -107,7 +107,7 @@ def test_each_industry_belongs_to_exactly_one_sector(data):
     assert not multi, f'industries spread over several sectors (the Industry tab would show only the first): {dict(list(multi.items())[:5])}'
 
 
-# ─── Sector and Industry Analysis tabs (the dashboard's own JS, on the real data) ─
+# ─── Industry Analysis tab (the dashboard's own JS, on the real data) ─
 
 @pytest.fixture(scope='module')
 def tabs(data):
@@ -127,21 +127,6 @@ def group(snaps, key):
     for s in snaps:
         g[s[key]].append(s)
     return g
-
-
-def test_sector_tab_matches_an_independent_grouping(data, tabs):
-    snaps = list(data['latestBySymbol'].values())
-    expected = group(snaps, 'sector')
-    shown = tabs['sectors']
-    assert set(shown) == set(expected), f'sectors differ: {set(shown) ^ set(expected)}'
-    assert sum(v['stocks'] for v in shown.values()) == len(snaps)
-    for name, members in expected.items():
-        n = len(members)
-        avg = sum(s['changePct'] or 0 for s in members) / n
-        breadth = sum(1 for s in members if s['aboveSMA']) / n * 100
-        assert shown[name]['stocks'] == n, name
-        assert abs(float(shown[name]['avgChange'].rstrip('%')) - avg) <= 0.0101, (name, shown[name]['avgChange'], avg)
-        assert abs(float(shown[name]['breadth'].rstrip('%')) - breadth) <= 0.51, (name, shown[name]['breadth'], breadth)
 
 
 def test_industry_tab_matches_an_independent_grouping(data, tabs):
