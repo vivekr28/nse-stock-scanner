@@ -3,7 +3,7 @@
 // persistent stand-in element (so the code can set .innerHTML / .textContent / .style and read .value / .checked
 // back), pre-seeded from `values`. The tests then read what the code wrote, e.g. dom.el('sectorBody').innerHTML.
 //
-//   const dom = installFakeDom(sandbox, { sectorSort: 'avg_change', 'indMinStocks': '1' });
+//   const dom = installFakeDom(sandbox, { 'indMinStocks': '1' });
 //   dom.el('someToggle').checked = true;
 function installFakeDom(sandbox, values = {}) {
   const els = {};

@@ -169,27 +169,22 @@ test('the search box input is wired: keydown, input and blur listeners', () => {
   for (const type of ['keydown', 'input', 'blur']) assert.ok((l[type] || []).length >= 1, type);
 });
 
-// --- the Stocks tab's Symbol column opens the chart ---------------------------------------------------
+// --- the Stock Scanner table's Symbol column opens the chart ---------------------------------------------------
 
-test('a click on a Symbol link in the Stocks tab opens the chart with the Stocks tab list; the Stock Scanner table keeps its own list', () => {
+test('a click on a Symbol link in the Stock Scanner table opens the chart (no list passed: it uses its own results); a click elsewhere does nothing', () => {
   const p = openPopup();
   const calls = [];
   p.sandbox.openStockChart = (isin, list) => calls.push([isin, list]);
-  p.run("var scannerResults = [{ isin: 'A' }, { isin: 'B' }, { isin: 'C' }]");
   const link = { dataset: { isin: 'B' } };
   const evt = { prevented: 0, preventDefault() { this.prevented++; }, target: { closest: sel => (sel === '.stock-link' ? link : null) } };
-  p.el('scannerBody').listeners.click.forEach(fn => fn(evt));
+  p.el('screenerBody').listeners.click.forEach(fn => fn(evt));
   assert.equal(calls.length, 1);
   assert.equal(calls[0][0], 'B');
-  assert.deepEqual(Array.from(calls[0][1]).map(s => s.isin), ['A', 'B', 'C']);   // the list the Stocks tab is showing
+  assert.equal(calls[0][1], undefined);                                          // the Stock Scanner table passes none: it uses its own results
   assert.equal(evt.prevented, 1);                                                // the link's href="#" is not followed
-  p.el('screenerBody').listeners.click.forEach(fn => fn(evt));
-  assert.equal(calls.length, 2);
-  assert.equal(calls[1][0], 'B');
-  assert.equal(calls[1][1], undefined);                                          // the Stock Scanner table passes none: it uses its own results
   const other = { prevented: 0, preventDefault() { this.prevented++; }, target: { closest: () => null } };   // a click elsewhere in the table
-  p.el('scannerBody').listeners.click.forEach(fn => fn(other));
-  assert.equal(calls.length, 2);
+  p.el('screenerBody').listeners.click.forEach(fn => fn(other));
+  assert.equal(calls.length, 1);
   assert.equal(other.prevented, 0);
 });
 

@@ -15,10 +15,8 @@ function showDashboard() {
   if (typeof initF16Dates === 'function') initF16Dates();
   if (typeof gtInitDates === 'function') gtInitDates();   // Sector & Industry tab's F39 dates (js/group-trend.js)
   if (typeof rsInitDates === 'function') rsInitDates();   // Relative Strength tab's F24 date (js/relative-strength.js)
-  runScanner();
   renderBreadth();
   if (Store.loaded.sector) {
-    renderSectorAnalysis();
     renderIndustryAnalysis();
   }
   renderDataQuality();
@@ -54,38 +52,9 @@ function reopenSavedTab() {
   } catch (e) { /* sessionStorage unavailable - stay on the default tab */ }
 }
 
+// Refresh the Stock Scanner's Sector (F11) and Industry (F36) pickers for the newly loaded data (js/group-select.js).
 function populateFilters() {
-  const sectors = new Set();
-  for (const key in Store.latestBySymbol) {
-    const s = Store.latestBySymbol[key].sector;
-    if (s && s !== '-') sectors.add(s);
-  }
-  const sel = document.getElementById('filterSector');
-  sel.innerHTML = '<option value="ALL">All Sectors</option>';
-  const sortedSectors = [...sectors].sort();
-  sortedSectors.forEach(s => {
-    sel.innerHTML += `<option value="${s}">${s}</option>`;
-  });
-  populateIndustryFilter();
-
-  // Screener's Sector (F11) and Industry (F36) pickers: rebuild their lists for the new data (js/group-select.js)
   if (typeof gsSync === 'function') gsSync();
-}
-
-function populateIndustryFilter() {
-  const sector = document.getElementById('filterSector').value;
-  const industries = new Set();
-  for (const key in Store.latestBySymbol) {
-    const s = Store.latestBySymbol[key];
-    if (sector !== 'ALL' && s.sector !== sector) continue;
-    const ind = s.industry;
-    if (ind && ind !== '-') industries.add(ind);
-  }
-  const sel = document.getElementById('filterIndustry');
-  sel.innerHTML = '<option value="ALL">All Industries</option>';
-  [...industries].sort().forEach(ind => {
-    sel.innerHTML += `<option value="${ind}">${ind}</option>`;
-  });
 }
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
