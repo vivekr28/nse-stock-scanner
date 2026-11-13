@@ -131,6 +131,7 @@ test('summary with no RS limit lists every group that has a ranked stock; unrank
   assert.equal(pub.passing, 1);                                              // F; NEW has no 3M rank
   assert.equal(pub.ranked, 1);
   assert.equal(pub.top.symbol, 'FFF');
+  assert.equal(pub.total, 2);                                                // F and NEW: every stock of the group counts in "total", ranked or not
 });
 
 // ── filters ───────────────────────────────────────────────────────────────────
@@ -178,12 +179,12 @@ test('the tab, its single page and the lazy render are wired in; the old sub-tab
   assert.match(html, /<div id="panel-rs" class="panel">/);
   assert.match(html, /<script src="js\/rs-rank\.js\?v=\d+"><\/script>/);
   assert.ok(html.indexOf('<script src="js/screener.js') < html.indexOf('<script src="js/rs-rank.js'));    // it uses computeDynPerformance / PERF_PERIOD_DAYS
-  for (const id of ['rsrPeriod', 'rsrChips', 'rsrSector', 'rsrIndustry', 'rsrSummary', 'rsrSectorsWrap', 'rsrIndustriesWrap', 'rsrStocksWrap']) {
+  for (const id of ['rsrPeriod', 'rsrChips', 'rsrSector', 'rsrIndustry', 'rsrSummary', 'rsrGroupBy', 'rsrGroupsWrap', 'rsrStocksWrap']) {
     assert.ok(html.includes(`id="${id}"`), id);
   }
   // page order: sector-wise, then industry-wise, then stocks
   const at = id => html.indexOf(`id="${id}"`);
-  assert.ok(at('rsrSectorsWrap') < at('rsrIndustriesWrap') && at('rsrIndustriesWrap') < at('rsrStocksWrap'));
+  assert.ok(at('rsrGroupsWrap') < at('rsrStocksWrap'));
   for (const gone of ['rsrTab-', 'rsrPane-', 'rsrSectorRsMin', 'rsrIndustryRsMin', 'rsrMinStocks']) assert.ok(!html.includes(gone), gone);
   assert.match(ui, /dataset\.tab === 'rs'[\s\S]{0,80}rsrRender/);
 });
@@ -411,4 +412,54 @@ test('the markup has the two liquidity filters (Min Market Cap, Min Avg Turnover
   const js = read('js/rs-rank.js');
   assert.match(js, /minMcapCr: rsrNum\('rsrMinMcap'\)/);
   assert.ok(!/minTurnoverCr|rsrMinTurnover/.test(js));
+});
+
+// ── the Stocks bar (all / measured / selected) that replaced Stocks Passing, Ranked in Group and % Passing ───────────────
+
+test('the group tables have one Stocks bar column in place of Stocks Passing / Ranked in Group / % Passing', () => {
+  const rows = sb.rsrBuildRows(universe().stocks, universe().daily);
+  const f = { period: '3m', sector: 'ALL', industry: 'ALL', minRs: 70 };
+  const groups = sb.rsrSummarize(rows, sb.rsrFilterStocks(rows, f), 'sector', '3m');
+  const labels = Array.from(sb.rsrGroupSpec('sector', groups, f).cols, c => c.label);
+  assert.ok(labels.includes('Stocks: Selected / Measured / All'));
+  assert.ok(!labels.some(l => /Stocks Passing|Ranked in Group|% Passing/.test(l)));
+  const col = sb.rsrGroupSpec('sector', groups, f).cols.find(c => c.key === 'passing');
+  assert.equal(col.val(groups[0]), groups[0].passing);                      // still sorts by the selected count
+});
+
+test('rsrStockBar: track = all stocks (to the scale of the biggest group), measured and selected layers are shares of it, three counts beside it', () => {
+  const g = { name: 'X', passing: 5, ranked: 20, total: 25, pct: 25 };
+  const html = sb.rsrStockBar(g, 50);                                         // the biggest group has 50 stocks, so this track is half as long
+  assert.match(html, /class="rsr-bar-all" style="width:50\.0%"/);
+  assert.match(html, /class="rsr-bar-meas" style="width:80\.0%"/);           // 20 of 25
+  assert.match(html, /class="rsr-bar-sel" style="width:20\.0%"/);            // 5 of 25
+  assert.match(html, /<b class="rsr-n-sel">5<\/b> \/ <span class="rsr-n-meas">20<\/span> \/ <span class="rsr-n-all">25<\/span>/);
+  assert.match(html, /title="5 selected of 20 measured \(25%\), out of 25 stocks in the group \(5 too new to be measured\)"/);
+  const full = sb.rsrStockBar({ name: 'Y', passing: 4, ranked: 4, total: 4, pct: 100 }, 4);
+  assert.match(full, /rsr-bar-all" style="width:100\.0%"/);
+  assert.ok(!/too new/.test(full));
+});
+
+test('the page has a legend naming the three bar layers, and the bar styles exist', () => {
+  const html = read('index.html');
+  const panel = html.slice(html.indexOf('<div id="panel-rs"'), html.indexOf('<!-- Money Flow Panel'));
+  assert.match(panel, /<div class="rsr-legend" id="rsrLegend">[\s\S]*rsr-sw-all[\s\S]*<b>Measured<\/b>[\s\S]*rsr-sw-sel[\s\S]*<b>Selected<\/b>/);
+  const css = read('css/styles.css');
+  for (const c of ['.rsr-bar-all', '.rsr-bar-meas', '.rsr-bar-sel', '.rsr-sw-sel']) assert.ok(css.includes(c), c);
+});
+
+test('one table with a Show drop-down (Sector-wise default, Industry-wise); the industry view keeps its Sector column', () => {
+  const html = read('index.html');
+  const start = html.indexOf('<select id="rsrGroupBy"');
+  const sel = html.slice(start, html.indexOf('</select>', start));
+  assert.deepEqual([...sel.matchAll(/<option value="([^"]+)"/g)].map(m => m[1]), ['sector', 'industry']);
+  assert.match(sel, /<option value="sector" selected>/);
+  assert.ok(!html.includes('rsrSectorsWrap') && !html.includes('rsrIndustriesWrap') && !html.includes('rsr-side'));
+  const rows = sb.rsrBuildRows(universe().stocks, universe().daily);
+  const f = { period: '3m', sector: 'ALL', industry: 'ALL' };
+  const passing = sb.rsrFilterStocks(rows, f);
+  const labels = kind => Array.from(sb.rsrGroupSpec(kind, sb.rsrSummarize(rows, passing, kind, '3m'), f).cols, c => c.label);
+  assert.equal(labels('sector')[0], 'Sector');
+  assert.ok(!labels('sector').includes('Industry'));
+  assert.deepEqual(labels('industry').slice(0, 2), ['Industry', 'Sector']);
 });

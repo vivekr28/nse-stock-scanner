@@ -1041,14 +1041,27 @@ canvas { max-width: 100%; display: block; }
 .rsr-short { max-height: min(720px, 78vh); }   /* the sector-wise and industry-wise tables: tall enough to read many rows without scrolling */
 .rsr-badge { display: inline-block; min-width: 26px; text-align: center; padding: 1px 6px; border: 1px solid; border-radius: 10px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .rsr-table td { font-variant-numeric: tabular-nums; }
+/* Stocks bar of the sector / industry tables: all (track) > measured > selected */
+.rsr-legend { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 12px; color: var(--text2); margin: 0 0 6px; }
+.rsr-key { display: inline-flex; align-items: center; gap: 6px; }
+.rsr-key b { color: var(--text); }
+.rsr-sw { display: inline-block; width: 22px; height: 9px; border-radius: 2px; }
+.rsr-sw-all, .rsr-bar-all { background: var(--border); }
+.rsr-sw-meas, .rsr-bar-meas { background: #5b8def; }
+.rsr-sw-sel, .rsr-bar-sel { background: var(--green); }
+.rsr-bar { display: flex; align-items: center; gap: 6px; min-width: 150px; }
+.rsr-bar-cell { flex: 1 1 auto; min-width: 50px; }
+.rsr-bar-all { position: relative; display: block; height: 12px; border-radius: 3px; overflow: hidden; }
+.rsr-bar-meas, .rsr-bar-sel { position: absolute; left: 0; top: 0; bottom: 0; }
+.rsr-bar-sel { top: 2px; bottom: 2px; border-radius: 0 2px 2px 0; }
+.rsr-bar-nums { flex: 0 0 auto; min-width: 72px; text-align: right; white-space: nowrap; color: var(--text2); }
+.rsr-n-sel { color: var(--green); }
+.rsr-n-meas { color: #5b8def; }
 .rsr-drill { color: var(--accent); text-decoration: none; }
 .rsr-drill:hover { text-decoration: underline; }
-/* Sector-wise and industry-wise tables side by side; stacked on a narrow window */
-.rsr-side { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 16px; align-items: start; }
-.rsr-col { min-width: 0; }
-@media (max-width: 1100px) { .rsr-side { grid-template-columns: minmax(0, 1fr); } }
-.rsr-side thead th { white-space: normal; padding: 6px 7px; }
-.rsr-side tbody td { padding: 5px 7px; }
+/* The sector-wise / industry-wise table (one at a time, chosen by the Show drop-down) */
+#rsrGroupsWrap thead th { white-space: normal; padding: 6px 7px; }
+#rsrGroupsWrap tbody td { padding: 5px 7px; }
 /* Overview popup: tick industries and copy them (js/scanner-overview.js) */
 .ov-sec.ov-sel { flex-basis: 100%; }   /* the industry list gets a full-width row: its names are long and the tick boxes need them readable */
 .ov-sel .ov-head, .ov-sel .ov-row { grid-template-columns: 16px 10px minmax(0, 1fr) 40px 46px 88px 54px; }
