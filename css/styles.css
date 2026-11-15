@@ -698,6 +698,9 @@ canvas { max-width: 100%; display: block; }
 .ic-pagination .btn { padding: 5px 12px; font-size: 12px; }
 .ic-pagination .ic-nav-btn { min-width: 34px; padding: 5px 0; font-size: 14px; font-weight: 600; line-height: 1; }
 
+/* RS period drop-down in the chart popup header (drives the RS part of the chart legend) */
+.ic-rs-wrap select { padding: 4px 6px; font-size: 12px; }
+
 /* "Indicators" dropdown in the chart popup header: a button that opens a small checklist (10 / 20 / 50 SMA). */
 .ic-dropdown { position: relative; }
 .ic-dd-btn { padding: 5px 10px; font-size: 12px; white-space: nowrap; }

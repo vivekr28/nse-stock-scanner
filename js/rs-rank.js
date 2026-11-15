@@ -112,6 +112,103 @@ function rsrBuildRows(stocks, daily) {
   return rows;
 }
 
+// ── RS rating HISTORY (the stock chart's crosshair legend, js/industry-charts.js) ─────────────────────────────
+// The tab above ranks every stock as of the LATEST day. The chart legend needs the rating AS OF ANY CANDLE, so this ranks all stocks on every
+// trading date, with the same value per stock (perf over n bars / distance below the n-bar high), the same 99..1 scale and the same tie rule
+// as rsrRankValues. Two figures per stock per bar:
+//   rs     the 99..1 rank among every stock that has a value that day (what the tab calls RS)
+//   rank / count   its position among its INDUSTRY peers that day: rank 2 of count 10 = the 2nd best of the 10 peers that were rankable
+//                  that day (1 = best; ties share the better position). Peers are the stocks of the same industry that have a value on that
+//                  date, so a stock without a full lookback yet is not one of the peers. The industry of a stock is today's (there is no
+//                  point-in-time industry history).
+// A bar with no value (not enough history for the period) has 0 in all three arrays. Arrays are aligned to the stock's own daily bars.
+
+// Per-bar value of one stock for one period (Float64Array, NaN = none): perf kind -> % change vs the close n bars earlier (needs n + 1 bars),
+// high kind -> % of the close below the highest high of the last n bars, this one included (needs n bars). Equal to computeDynPerformance /
+// rsrDistFromHigh evaluated on the history up to that bar.
+function rsrBarValues(days, period) {
+  const n = period.days, out = new Float64Array(days.length).fill(NaN);
+  if (period.kind === 'perf') {
+    for (let i = n; i < days.length; i++) {
+      const ref = days[i - n].close;
+      if (ref > 0) out[i] = (days[i].close - ref) / ref * 100;
+    }
+    return out;
+  }
+  const dq = [];                                         // indexes with falling highs: the front is the window's highest high
+  const hiOf = k => (days[k].high > 0 ? days[k].high : 0);
+  for (let i = 0; i < days.length; i++) {
+    while (dq.length && hiOf(dq[dq.length - 1]) <= hiOf(i)) dq.pop();
+    dq.push(i);
+    if (dq[0] <= i - n) dq.shift();
+    if (i < n - 1) continue;
+    const hi = hiOf(dq[0]), close = days[i].close;
+    if (hi > 0 && Number.isFinite(close)) out[i] = (close / hi - 1) * 100;
+  }
+  return out;
+}
+
+// Map isin -> { rs, rank, count } (Int16Array each, aligned to daily[isin]) for one period key ('1m' ... 'h1y').
+function rsrHistoryBuild(stocks, daily, periodKey) {
+  const period = RSR_PERIODS.find(p => p.key === periodKey);
+  const out = new Map();
+  if (!period) return out;
+  const names = [], industries = [], vals = [], byDate = new Map();
+  for (const isin in stocks) {
+    const days = daily[isin];
+    if (!days || !days.length) continue;
+    const s = names.length;
+    names.push(isin);
+    industries.push(stocks[isin].industry || 'Undefined-Diversified');
+    const v = rsrBarValues(days, period);
+    vals.push(v);
+    for (let i = 0; i < v.length; i++) {
+      if (!Number.isFinite(v[i])) continue;
+      let list = byDate.get(days[i].date);
+      if (!list) byDate.set(days[i].date, list = { s: [], i: [] });
+      list.s.push(s); list.i.push(i);
+    }
+  }
+  names.forEach((isin, s) => {
+    const len = daily[isin].length;
+    out.set(isin, { rs: new Int16Array(len), rank: new Int16Array(len), count: new Int16Array(len) });
+  });
+  for (const list of byDate.values()) {
+    const v = list.s.map((s, k) => vals[s][list.i[k]]);
+    const ranks = rsrRankValues(v);
+    const groups = new Map();                            // industry -> positions in this date's list
+    list.s.forEach((s, k) => {
+      const o = out.get(names[s]);
+      o.rs[list.i[k]] = ranks[k];
+      let g = groups.get(industries[s]);
+      if (!g) groups.set(industries[s], g = []);
+      g.push(k);
+    });
+    for (const g of groups.values()) {
+      const sorted = g.map(k => v[k]).sort((a, b) => b - a);
+      for (const k of g) {
+        let pos = 0;                                     // 1 + how many peers are strictly better: ties share the better position
+        while (pos < sorted.length && sorted[pos] > v[k]) pos++;
+        const o = out.get(names[list.s[k]]);
+        o.rank[list.i[k]] = pos + 1;
+        o.count[list.i[k]] = g.length;
+      }
+    }
+  }
+  return out;
+}
+
+const rsrHistCache = new Map();                         // period key -> { key, series }
+// The history for a period over the loaded data, built on first use and kept until the data changes.
+function rsrHistory(periodKey) {
+  const key = (Store.latestDate || '') + '|' + Object.keys(Store.latestBySymbol).length;
+  const hit = rsrHistCache.get(periodKey);
+  if (hit && hit.key === key) return hit.series;
+  const series = rsrHistoryBuild(Store.latestBySymbol, Store.dailyBySymbol, periodKey);
+  rsrHistCache.set(periodKey, { key, series });
+  return series;
+}
+
 // Which stock rows pass the filters. f = { period, minRs, maxRs, sector, industry, search, minAvgTurnoverCr, minMcapCr }. Blank / NaN numbers =
 // no limit. A stock with no rank for the period never passes (it has no RS to compare).
 function rsrFilterStocks(rows, f) {
