@@ -290,8 +290,9 @@ function icRenderSingleStock() {
   const days = Store.dailyBySymbol[stock.isin] || [];
   document.getElementById('icSingleStats').textContent = icStatsLine(days);
   if (!container || days.length === 0 || typeof LightweightCharts === 'undefined') return;
-  const { candleData, volumeData, closes } = icApplyTimeframe(icBuildBarsFromDays(days));
+  const { candleData, volumeData, closes, dayIdx } = icApplyTimeframe(icBuildBarsFromDays(days));
   icIndustryChartInst = icCreateChart(container, 'icVolumeSingle', icLegendStock(stock));
+  icAttachRs(icIndustryChartInst, stock, dayIdx);
   icIndustryChartInst.weekly = icTimeframe === 'w';
   icWatchManualRange(icIndustryChartInst, container);
   icSetChartData(icIndustryChartInst, candleData, volumeData, closes, icVisibleCandles(), icRightOffset);
@@ -364,6 +365,13 @@ function icUpdateControlVisibility() {
     indNav.style.display = icMode !== 'single' && icIndList.length > 1 ? '' : 'none';
     const info = document.getElementById('icIndNavInfo');
     if (info) info.textContent = `${icIndIndex + 1} of ${icIndList.length} industries`;
+  }
+  // The RS drop-down feeds the per-stock legends: the single stock chart and the Stock Charts grid (not the industry index / money flow tabs)
+  const rsWrap = document.getElementById('icRsWrap');
+  if (rsWrap) {
+    rsWrap.style.display = icMode === 'single' || icActiveTab === 'stocks' ? '' : 'none';
+    const rsSel = document.getElementById('icRsPeriod');
+    if (rsSel) rsSel.value = icRsPeriodKey();
   }
   // Crosshair sync links the grid's charts, so it only means something with several on screen
   if (syncWrap) syncWrap.style.display = icMode !== 'single' && icActiveTab === 'stocks' && icLayout !== '1x1' ? '' : 'none';
@@ -478,8 +486,9 @@ function icRenderPage() {
     const days = Store.dailyBySymbol[s.isin] || [];
     if (!container || days.length === 0) return;
 
-    const { candleData, volumeData, closes } = icApplyTimeframe(icBuildBarsFromDays(days));
+    const { candleData, volumeData, closes, dayIdx } = icApplyTimeframe(icBuildBarsFromDays(days));
     const inst = icCreateChart(container, 'icVolume' + i, icLegendStock(s));
+    icAttachRs(inst, s, dayIdx);
     inst.weekly = icTimeframe === 'w';
     icChartInstances.push(inst);
     icWatchManualRange(inst, container);
@@ -528,7 +537,62 @@ function icWireStockCrosshairSync() {
 // ── On-chart legend text (pure - see tests-js/chart-legend.test.js) ──────────────────────────
 // {symbol} for a Stock Scanner / grid stock record.
 function icLegendStock(s) {
-  return s ? { symbol: s.symbol || '' } : null;
+  if (!s) return null;
+  const out = { symbol: s.symbol || '' };
+  if (s.isin) out.isin = s.isin;                      // the RS history is looked up by it
+  return out;
+}
+
+// ── RS rating on the legend ──────────────────────────────────────────────────────────────────
+// Shown after the money flow: `RS 3M 87   Ind 2/10` = the stock's RS rating (99..1 among all stocks that day) and its position among its
+// industry peers that day, for the candle under the crosshair. The period is the header's RS drop-down (same list as the Relative Strength
+// tab's Rank By); the numbers come from rsrHistory() in js/rs-rank.js.
+let icRsPeriod = null;                                // chosen RS period key; null until first needed (then the Relative Strength tab's, else 3M)
+
+function icRsPeriodKey() {
+  if (!icRsPeriod) {
+    const el = document.getElementById('rsrPeriod');
+    icRsPeriod = el && el.value ? el.value : '3m';
+  }
+  return icRsPeriod;
+}
+function icRsLabel() {
+  const k = icRsPeriodKey();
+  return typeof rsrPeriodLabel === 'function' ? rsrPeriodLabel(k) : k.toUpperCase();
+}
+// The history series of one stock for the chosen period, or null (module absent / stock unknown).
+function icRsSeriesFor(isin) {
+  if (!isin || typeof rsrHistory !== 'function') return null;
+  return rsrHistory(icRsPeriodKey()).get(isin) || null;
+}
+// What the legend shows for the daily bar `di` of a series: { label, rs, rank, count } with NaN where the bar has no rating (not enough history).
+function icRsInfo(series, di, label) {
+  const rs = series && series.rs[di] ? series.rs[di] : NaN;
+  const ok = Number.isFinite(rs);
+  return { label, rs, rank: ok ? series.rank[di] : NaN, count: ok ? series.count[di] : NaN };
+}
+function icRsLegendHtml(info) {
+  if (!info) return '';
+  const col = Number.isFinite(info.rs) && typeof rsrColor === 'function' ? ` style="color:${rsrColor(info.rs)}"` : '';
+  const rs = Number.isFinite(info.rs) ? info.rs : '-';
+  const ind = Number.isFinite(info.rank) ? `<b>${info.rank}</b>/${info.count}` : '<b>-</b>';
+  return `<span title="RS rating (${escapeHtml(info.label)}): 99 = best of all stocks that day, 1 = worst">RS ${escapeHtml(info.label)} <b${col}>${rs}</b></span>` +
+    `<span title="Position among the stocks of its industry that day (1 = best), out of how many were rated">Ind ${ind}</span>`;
+}
+
+// RS drop-down in the header: re-reads the RS of every chart on screen (the candles are untouched, so zoom and drawings stay).
+function icSetRsPeriod(key) {
+  icRsPeriod = key;
+  const sel = document.getElementById('icRsPeriod');
+  if (sel && sel.value !== key) sel.value = key;
+  const insts = icMode === 'single' && icIndustryChartInst ? [icIndustryChartInst] : icChartInstances;
+  insts.forEach(inst => { if (inst && inst.isin) { inst.rsSeries = icRsSeriesFor(inst.isin); inst.updateLegend(); } });
+}
+// A fresh per-stock chart gets what its legend needs for RS: the stock, the bar -> daily index map and the series.
+function icAttachRs(inst, stock, dayIdx) {
+  inst.isin = stock ? stock.isin : null;
+  inst.dayIdx = dayIdx || null;
+  inst.rsSeries = inst.isin ? icRsSeriesFor(inst.isin) : null;
 }
 
 // Identity part of the legend: the bold ticker, nothing else. '' without a stock.
@@ -539,7 +603,7 @@ function icLegendTitle(stock) {
 
 // The whole legend for one bar: title, O H L C, change as `+0.62 (+2.32%)` (absolute and percent vs the
 // previous close, coloured by direction) and the day's money flow. `prevClose` null/0 (first bar) shows '-'.
-function icLegendHtml(stock, bar, prevClose, mfValue) {
+function icLegendHtml(stock, bar, prevClose, mfValue, rsInfo) {
   const chg = prevClose ? bar.close - prevClose : NaN;
   const pct = prevClose ? chg / prevClose * 100 : NaN;
   const cls = isNaN(pct) ? '' : (pct >= 0 ? 'positive' : 'negative');
@@ -550,7 +614,8 @@ function icLegendHtml(stock, bar, prevClose, mfValue) {
     `<span>L <b>${bar.low.toFixed(2)}</b></span>` +
     `<span>C <b>${bar.close.toFixed(2)}</b></span>` +
     `<span class="${cls}">${change}</span>` +
-    `<span>MF <b>${fmtTurnoverCr(mfValue || 0)}</b></span>`;
+    `<span>MF <b>${fmtTurnoverCr(mfValue || 0)}</b></span>` +
+    icRsLegendHtml(rsInfo);
 }
 
 // ── Shared chart plumbing (used by both the per-stock grid and the industry chart) ──
@@ -646,7 +711,8 @@ function icCreateChart(container, volumeScaleId, stock) {
     const bar = bars[i];
     const vol = inst.volumeData[i];
     const prevClose = i > 0 ? bars[i - 1].close : null;
-    legendEl.innerHTML = icLegendHtml(stock, bar, prevClose, vol ? vol.value : 0);
+    const rsInfo = inst.rsSeries ? icRsInfo(inst.rsSeries, inst.dayIdx ? inst.dayIdx[i] : i, icRsLabel()) : null;
+    legendEl.innerHTML = icLegendHtml(stock, bar, prevClose, vol ? vol.value : 0, rsInfo);
   };
 
   chart.subscribeCrosshairMove(param => {
@@ -738,8 +804,8 @@ function icWeekStart(t) {
 
 // Weekly candles from daily ones (the output of icBuildBarsFromDays / icComputeIndustryIndex): open = the week's first open, high / low = the
 // extremes, close = its last close, turnover summed, dated on the week's FIRST trading day (Monday, or Tuesday when Monday was a holiday, and so on; the latest week is the week so far).
-function icWeeklyFromDaily({ candleData, volumeData }) {
-  const wc = [], wv = [], closes = [];
+function icWeeklyFromDaily({ candleData, volumeData, dayIdx }) {
+  const wc = [], wv = [], closes = [], wIdx = [];   // wIdx: for a weekly bar, the daily index of the week's LAST day (its close: where RS is read)
   let key = NaN;
   candleData.forEach((c, i) => {
     const start = icWeekStart(c.time);
@@ -751,9 +817,11 @@ function icWeeklyFromDaily({ candleData, volumeData }) {
       if (c.low < w.low) w.low = c.low;
       w.close = c.close;
       wv[wv.length - 1].value += turnover;
+      if (dayIdx) wIdx[wIdx.length - 1] = dayIdx[i];
     } else {
       wc.push({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close });
       wv.push({ time: c.time, value: turnover });
+      if (dayIdx) wIdx.push(dayIdx[i]);
       key = k;
     }
   });
@@ -761,7 +829,9 @@ function icWeeklyFromDaily({ candleData, volumeData }) {
     wv[i].color = w.close >= w.open ? ewHexToRgba(IC_UP_COLOR, 0.5) : ewHexToRgba(IC_DOWN_COLOR, 0.5);
     closes.push(w.close);
   });
-  return { candleData: wc, volumeData: wv, closes };
+  const weekly = { candleData: wc, volumeData: wv, closes };
+  if (dayIdx) weekly.dayIdx = wIdx;
+  return weekly;
 }
 
 // The bars every chart is drawn from: the daily ones as built, or weekly ones on the Weekly chart.
@@ -856,10 +926,11 @@ function icNoteManualRange(inst, range) {
 }
 
 function icBuildBarsFromDays(days) {
-  const candleData = [], volumeData = [], closes = [];
-  days.forEach(d => {
+  const candleData = [], volumeData = [], closes = [], dayIdx = [];   // dayIdx: each bar's index in `days` (the RS history is aligned to it)
+  days.forEach((d, di) => {
     const time = ewToBusinessDay(d.date);
     if (!time) return;
+    dayIdx.push(di);
     candleData.push({ time, open: d.open, high: d.high, low: d.low, close: d.close });
     volumeData.push({
       time,
@@ -868,7 +939,7 @@ function icBuildBarsFromDays(days) {
     });
     closes.push(d.close);
   });
-  return { candleData, volumeData, closes };
+  return { candleData, volumeData, closes, dayIdx };
 }
 
 function icDisposeCharts() {
