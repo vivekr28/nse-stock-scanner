@@ -15,7 +15,7 @@ const root = path.dirname(__dirname);
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const screenerSrc = fs.readFileSync(path.join(root, 'js', 'screener.js'), 'utf8');
 const sb = loadScripts(['js/utils.js', 'js/money-flow.js', 'js/breadth.js', 'js/screener.js', 'js/presets.js']);
-const { supertrendSeries, computeSupertrend, capturePresetState, applyPresetState } = sb;
+const { supertrendSeries, computeSupertrend, weeklyBarsFromDaily, capturePresetState, applyPresetState } = sb;
 
 const bar = (high, low, close) => ({ date: 'D', open: close, high, low, close, turnover: 10 });
 // daily bars around a list of closes, each with a +/- half range
@@ -154,6 +154,69 @@ test('too little history is not valid: fewer than ATR length + 1 daily bars, an 
   assert.ok(isNaN(bad.line) && isNaN(bad.pct) && !bad.above && !bad.below);
 });
 
+// ─── the Weekly timeframe ──────────────────────────────────────────────────────
+
+// real trading dates (Mon-Fri from Monday 2024-01-01) on a list of bars; `skip` drops those trading-day numbers (holidays)
+function dated(bars, skip = []) {
+  const out = []; let day = 0, d = new Date(2024, 0, 1);
+  for (const b of bars) {
+    while (d.getDay() === 0 || d.getDay() === 6 || skip.includes(day)) { if (d.getDay() !== 0 && d.getDay() !== 6) day++; d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1); }
+    out.push({ ...b, date: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` });
+    d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1); day++;
+  }
+  return out;
+}
+
+test('weekly candles: open = the first day\'s open, high / low = the extremes, close = the last day\'s close, dated on the first trading day; the last week is the week so far', () => {
+  const days = dated([
+    { open: 10, high: 12, low: 9, close: 11 }, { open: 11, high: 15, low: 10, close: 14 }, { open: 14, high: 14, low: 8, close: 9 }, { open: 9, high: 10, low: 7, close: 8 }, { open: 8, high: 9, low: 6, close: 7 },   // Mon 2024-01-01 .. Fri 2024-01-05
+    { open: 7, high: 9, low: 6.5, close: 8 }, { open: 8, high: 11, low: 7.5, close: 10 },                                                                                                                                  // Mon 01-08, Tue 01-09: a week so far
+  ]);
+  const w = Array.from(weeklyBarsFromDaily(days), b => ({ ...b }));
+  assert.deepEqual(w, [
+    { date: '2024-01-01', open: 10, high: 15, low: 6, close: 7 },
+    { date: '2024-01-08', open: 7, high: 11, low: 6.5, close: 10 },
+  ]);
+});
+
+test('a holiday Monday leaves the week to start on Tuesday, and a week is never merged with the next one', () => {
+  const days = dated(around(rising(12)), [0]);                    // trading day 0 (Mon 01-01) is a holiday: the first bar is Tue 01-02
+  assert.equal(days[0].date, '2024-01-02');
+  const w = weeklyBarsFromDaily(days);
+  assert.deepEqual(Array.from(w, b => b.date), ['2024-01-02', '2024-01-08', '2024-01-15']);   // 4 days, 5 days, 3 days
+  assert.equal(w[0].close, days[3].close);
+  assert.equal(w[1].open, days[4].open);
+});
+
+test('computeSupertrend(..., "w") is the Supertrend of the weekly candles, and "d" (or nothing) is the daily one', () => {
+  const days = dated(around([...falling(60, 200, 1), ...rising(100, 140, 0.8)]));
+  const weekly = supertrendSeries(weeklyBarsFromDaily(days), 5, 2);
+  const m = computeSupertrend(days, 5, 2, 'w');
+  assert.equal(m.valid, true);
+  assert.equal(m.line, weekly[weekly.length - 1].st);
+  assert.equal(m.dir, weekly[weekly.length - 1].dir);
+  const d = computeSupertrend(days, 5, 2, 'd');
+  assert.equal(d.line, computeSupertrend(days, 5, 2).line);
+  assert.equal(d.line, supertrendSeries(days, 5, 2)[days.length - 1].st);
+  assert.notEqual(d.line, m.line);
+});
+
+test('the weekly Supertrend needs ATR length + 1 WEEKLY candles: 40 trading days (8 weeks) are enough for a daily length of 10, not a weekly one', () => {
+  const days = dated(around(rising(40)));
+  assert.equal(computeSupertrend(days, 10, 3, 'd').valid, true);
+  assert.equal(computeSupertrend(days, 10, 3, 'w').valid, false);
+  assert.equal(computeSupertrend(days, 7, 3, 'w').valid, true);        // 8 weekly candles = 7 + 1
+  assert.equal(computeSupertrend(days, 8, 3, 'w').valid, false);
+});
+
+// a stock that fell for 30 weeks and then rallied for 8 days (+2 a day): the daily Supertrend has turned up long ago, the weekly one has not yet
+const TURNING = dated(around([...falling(150, 300, 1), ...rising(8, 152, 2)]));
+
+test('the same stock can be an uptrend on the Daily timeframe and still a downtrend on the Weekly one', () => {
+  assert.equal(computeSupertrend(TURNING, 10, 3, 'd').dir, 'up');
+  assert.equal(computeSupertrend(TURNING, 10, 3, 'w').dir, 'down');
+});
+
 // ─── through runScreener() ─────────────────────────────────────────────────────
 
 function runWith(over, stocks, partial = false) {
@@ -181,7 +244,7 @@ function runWith(over, stocks, partial = false) {
   return { passed: passed.map(s => s.symbol).sort(), failed, byName: Object.fromEntries(passed.concat(failed).map(s => [s.symbol, s])) };
 }
 
-const F46 = (len, factor, pos = 'above') => ({ scrF46On: true, scrF46Len: len, scrF46Factor: factor, scrF46Pos: pos });
+const F46 = (len, factor, pos = 'above', tf = 'd') => ({ scrF46On: true, scrF46Len: len, scrF46Factor: factor, scrF46Pos: pos, scrF46Tf: tf });
 const FIXTURE = {
   UP: around(rising(80)),                                                   // steady climb: uptrend
   DOWN: around(falling(80)),                                                // steady fall: downtrend
@@ -247,6 +310,20 @@ test('blank or invalid length / factor / position fall back to 10, 3 and "above"
   assert.deepEqual(runWith({ scrF46On: true, scrF46Pos: 'sideways' }, FIXTURE).passed, ['RECOVER', 'UP']);
 });
 
+test('F46 on the Weekly timeframe judges the weekly candles: the reason says Weekly, the stored line is the weekly one, and short weekly history is rejected', () => {
+  const stocks = { TURNING, FLAT: dated(around(Array(40).fill(100))), WUP: dated(around(rising(150))) };
+  const daily = runWith(F46(10, 3, 'above', 'd'), stocks);
+  assert.deepEqual(daily.passed, ['TURNING', 'WUP']);
+  const weekly = runWith(F46(10, 3, 'above', 'w'), stocks);
+  assert.deepEqual(weekly.passed, ['WUP']);                                         // TURNING is still a weekly downtrend
+  assert.match(weekly.byName.TURNING._failReasons.join(' | '), /F46: Close \d+\.\d\d not above Weekly Supertrend\(10, 3\) \d+\.\d\d \(downtrend\)/);
+  assert.match(weekly.byName.FLAT._failReasons.join(' | '), /F46: Insufficient data for Weekly Supertrend\(10, 3\)/);   // 8 weekly candles
+  assert.equal(weekly.byName.TURNING._f46Line, computeSupertrend(TURNING, 10, 3, 'w').line);
+  assert.equal(weekly.byName.WUP._f46Dir, 'up');
+  assert.deepEqual(runWith(F46(10, 3, 'below', 'w'), stocks).passed, ['TURNING']);
+  assert.deepEqual(runWith({ ...F46(10, 3, 'above'), scrF46Tf: 'monthly' }, stocks).passed, ['TURNING', 'WUP']);   // anything but "w" is Daily
+});
+
 test('F46 off: nothing is filtered and no F46 reason appears', () => {
   const off = runWith({}, FIXTURE);
   assert.deepEqual(off.passed, ['CRASH', 'DOWN', 'NEW', 'RECOVER', 'UP']);
@@ -275,14 +352,14 @@ test('F46 is counted as an active filter and in the Technicals tab badge', () =>
 test('presets capture and restore F46 (on, length, factor, position); "— Select preset —" resets it', () => {
   const dom = installFakeDom(sb, {});
   const el = dom.el;
-  el('scrF46On').checked = true; el('scrF46Len').value = '14'; el('scrF46Factor').value = '2.5'; el('scrF46Pos').value = 'below';
+  el('scrF46On').checked = true; el('scrF46Len').value = '14'; el('scrF46Factor').value = '2.5'; el('scrF46Pos').value = 'below'; el('scrF46Tf').value = 'w';
   const state = capturePresetState();
-  assert.deepEqual([state.scrF46On, state.scrF46Len, state.scrF46Factor, state.scrF46Pos], [true, '14', '2.5', 'below']);
-  el('scrF46On').checked = false; el('scrF46Len').value = '10'; el('scrF46Factor').value = '3'; el('scrF46Pos').value = 'above';
+  assert.deepEqual([state.scrF46On, state.scrF46Len, state.scrF46Factor, state.scrF46Pos, state.scrF46Tf], [true, '14', '2.5', 'below', 'w']);
+  el('scrF46On').checked = false; el('scrF46Len').value = '10'; el('scrF46Factor').value = '3'; el('scrF46Pos').value = 'above'; el('scrF46Tf').value = 'd';
   applyPresetState(state);
-  assert.deepEqual([el('scrF46On').checked, el('scrF46Len').value, el('scrF46Factor').value, el('scrF46Pos').value], [true, '14', '2.5', 'below']);
+  assert.deepEqual([el('scrF46On').checked, el('scrF46Len').value, el('scrF46Factor').value, el('scrF46Pos').value, el('scrF46Tf').value], [true, '14', '2.5', 'below', 'w']);
   applyPresetState(vm.runInContext('DEFAULT_FILTER_STATE', sb));
-  assert.deepEqual([el('scrF46On').checked, el('scrF46Len').value, el('scrF46Factor').value, el('scrF46Pos').value], [false, '10', '3', 'above']);
+  assert.deepEqual([el('scrF46On').checked, el('scrF46Len').value, el('scrF46Factor').value, el('scrF46Pos').value, el('scrF46Tf').value], [false, '10', '3', 'above', 'd']);
 });
 
 test('presets saved before F46 existed load fine and leave its controls alone', () => {
@@ -292,13 +369,13 @@ test('presets saved before F46 existed load fine and leave its controls alone', 
   assert.deepEqual([dom.el('scrF46On').checked, dom.el('scrF46Len').value], [true, '9']);
 });
 
-test('Reset puts F46 back to off, 10, 3 and "above"', () => {
+test('Reset puts F46 back to off, 10, 3, "above" and Daily', () => {
   const dom = installFakeDom(sb, {});
   const el = dom.el;
-  el('scrF46On').checked = true; el('scrF46Len').value = '5'; el('scrF46Factor').value = '1.2'; el('scrF46Pos').value = 'below';
+  el('scrF46On').checked = true; el('scrF46Len').value = '5'; el('scrF46Factor').value = '1.2'; el('scrF46Pos').value = 'below'; el('scrF46Tf').value = 'w';
   sb.runScreener = () => {}; sb.updateFilterBadge = () => {};
   sb.resetScreener();
-  assert.deepEqual([el('scrF46On').checked, el('scrF46Len').value, el('scrF46Factor').value, el('scrF46Pos').value], [false, '10', '3', 'above']);
+  assert.deepEqual([el('scrF46On').checked, el('scrF46Len').value, el('scrF46Factor').value, el('scrF46Pos').value, el('scrF46Tf').value], [false, '10', '3', 'above', 'd']);
 });
 
 test('the As of Date tab keeps its own filter set: it has no Supertrend control and js/asof-scan.js does not touch scrF46', () => {
@@ -307,10 +384,11 @@ test('the As of Date tab keeps its own filter set: it has no Supertrend control 
   assert.ok(![...html.matchAll(/\bid="(asof[^"]*)"/g)].some(m => /supertrend/i.test(m[1])));
 });
 
-test('index.html: the F46 row sits in the Technicals left column under Fast MA > Slow MA, ATR length 10, factor 3, "above" by default', () => {
+test('index.html: the F46 card sits in the Technicals tab below the F41 card, ATR length 10, factor 3, "above" by default', () => {
   const pane = html.slice(html.indexOf('id="scrPaneTechnicals"'));
-  assert.ok(pane.indexOf('id="scrF42On"') < pane.indexOf('id="scrF46On"') && pane.indexOf('id="scrF46On"') < pane.indexOf('id="scrF1On"'), 'after F42, before the right column starts (F1)');
+  assert.ok(pane.indexOf('id="scrF41On"') < pane.indexOf('id="scrF46On"'), 'after the F41 card');
   assert.match(html, /id="scrF46Len" value="10"/);
   assert.match(html, /id="scrF46Factor" value="3"/);
+  assert.match(html, /<select id="scrF46Tf"[^>]*>\s*<option value="d" selected>Daily<\/option>\s*<option value="w">Weekly<\/option>/);
   assert.match(html, /<select id="scrF46Pos"[^>]*>\s*<option value="above" selected>[^<]*<\/option>\s*<option value="below">/);
 });

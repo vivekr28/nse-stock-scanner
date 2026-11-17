@@ -105,9 +105,34 @@ function supertrendSeries(days, atrPeriod, factor) {
   return out;
 }
 
-// F46: where does the latest close sit against the Supertrend line? `valid` needs atrPeriod + 1 daily bars (the first bar with an ATR only
+// Weekly candles from daily bars (Monday-to-Friday weeks, like TradingView's 1W chart): open = the week's first open, high / low = the extremes,
+// close = the week's last close, dated on its first trading day. The latest week is the week so far. A bar whose date can't be read is skipped.
+function weeklyBarsFromDaily(days) {
+  const out = [];
+  let key = NaN;
+  for (const d of days || []) {
+    const t = parseDate(d.date);
+    if (!t) continue;
+    const dt = new Date(t);
+    const k = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate() - ((dt.getDay() + 6) % 7)).getTime();   // the Monday of that week
+    if (out.length && k === key) {
+      const w = out[out.length - 1];
+      if (d.high > w.high) w.high = d.high;
+      if (d.low < w.low) w.low = d.low;
+      w.close = d.close;
+    } else {
+      out.push({ date: d.date, open: d.open, high: d.high, low: d.low, close: d.close });
+      key = k;
+    }
+  }
+  return out;
+}
+
+// F46: where does the latest close sit against the Supertrend line? `timeframe` is 'd' (daily, default) or 'w' (weekly candles built from the
+// dailies, the latest one being the week so far). `valid` needs atrPeriod + 1 candles of that timeframe (the first bar with an ATR only
 // seeds the line); 'above' = close strictly over the line, 'below' = strictly under it. `pct` is the close's distance from the line, in % of the line.
-function computeSupertrend(days, atrPeriod, factor) {
+function computeSupertrend(days, atrPeriod, factor, timeframe) {
+  if (timeframe === 'w') days = weeklyBarsFromDaily(days);
   const none = { valid: false, line: NaN, dir: '', close: NaN, pct: NaN, above: false, below: false };
   if (!days || days.length < atrPeriod + 1 || !(atrPeriod >= 1) || !(factor > 0)) return none;
   const last = supertrendSeries(days, atrPeriod, factor)[days.length - 1];
@@ -436,7 +461,8 @@ function runScreener() {
   const f46Len = Math.max(1, parseInt(document.getElementById('scrF46Len').value) || 10);
   const f46Factor = parseFloat(document.getElementById('scrF46Factor').value) > 0 ? parseFloat(document.getElementById('scrF46Factor').value) : 3;
   const f46Pos = document.getElementById('scrF46Pos').value === 'below' ? 'below' : 'above';
-  const f46Label = `Supertrend(${f46Len}, ${f46Factor})`;
+  const f46Tf = document.getElementById('scrF46Tf').value === 'w' ? 'w' : 'd';
+  const f46Label = `${f46Tf === 'w' ? 'Weekly ' : ''}Supertrend(${f46Len}, ${f46Factor})`;
 
   const f9On = document.getElementById('scrF9On').checked;
   const f9Val = parseFloat(document.getElementById('scrF9Val').value) || 0;
@@ -683,9 +709,9 @@ function runScreener() {
       }
     }
 
-    // F46: Supertrend - strict daily history, "Partial history" does not apply (the line needs the ATR length + 1 bars)
+    // F46: Supertrend - strict history, "Partial history" does not apply (the line needs the ATR length + 1 candles of the chosen timeframe)
     if (f46On) {
-      const m = computeSupertrend(days, f46Len, f46Factor);
+      const m = computeSupertrend(days, f46Len, f46Factor, f46Tf);
       s._f46Line = m.line;
       s._f46Dir = m.dir;
       s._f46Pct = m.pct;
@@ -1001,7 +1027,8 @@ function renderScreenerTable() {
   if (document.getElementById('scrF46On').checked) {
     const L = Math.max(1, parseInt(document.getElementById('scrF46Len').value) || 10);
     const Fc = parseFloat(document.getElementById('scrF46Factor').value) > 0 ? parseFloat(document.getElementById('scrF46Factor').value) : 3;
-    cols.push({ key: '_f46Line', label: `Supertrend (${L}, ${Fc})`, fmt: v => fmt2(v) });
+    const W = document.getElementById('scrF46Tf').value === 'w' ? 'W ' : '';
+    cols.push({ key: '_f46Line', label: `${W}Supertrend (${L}, ${Fc})`, fmt: v => fmt2(v) });
     cols.push({ key: '_f46Pct', label: 'Close vs Supertrend', fmt: v => fmtPct(v), cls: v => v >= 0 ? 'positive' : 'negative' });
   }
   if (f10On) {
@@ -1229,6 +1256,7 @@ function resetScreener() {
   document.getElementById('scrF46Len').value = '10';
   document.getElementById('scrF46Factor').value = '3';
   document.getElementById('scrF46Pos').value = 'above';
+  document.getElementById('scrF46Tf').value = 'd';
   document.getElementById('scrF9Val').value = '60';
   document.getElementById('scrF9MinStk').value = '3';
   document.getElementById('scrF9MinMcap').value = '0';
