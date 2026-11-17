@@ -339,6 +339,26 @@
               </div>
             </div>
 
+            <!-- F46: Supertrend (TradingView ta.supertrend(factor, atrPeriod)) on the daily candles - the latest close above (uptrend) or below (downtrend) the line. One row in a card of its own below the F41 card, spanning both columns (CSS: #scrPaneTechnicals .scr-filter-pair) -->
+            <div class="scr-filter-pair">
+              <div class="scr-filter-row scr-highlight">
+                <input type="checkbox" id="scrF46On">
+                <div class="scr-inputs" title="TradingView's Supertrend on the daily or weekly candles: ATR (Wilder's RMA of the true range) times the factor either side of (high + low) / 2, ratcheted so the lower band only rises in an uptrend and the upper band only falls in a downtrend. Price above the line = uptrend, price below it = downtrend. A stock with fewer candles (of the chosen timeframe) than the ATR length + 1 is rejected (the Partial history option does not apply). Untick the filter for no Supertrend condition.">
+                  <span class="scr-inline-label">Supertrend:</span>
+                  <select id="scrF46Tf" style="min-width:75px;" title="The candles the Supertrend is calculated on: Daily, or Weekly candles built from the daily bars (the latest week is the week so far, like TradingView's 1W chart)">
+                    <option value="d" selected>Daily</option>
+                    <option value="w">Weekly</option>
+                  </select>
+                  <input type="number" id="scrF46Len" value="10" min="1" step="1"> <span class="scr-unit">ATR length &times;</span>
+                  <input type="number" id="scrF46Factor" value="3" min="0.1" step="0.1"> <span class="scr-unit">factor &middot; price</span>
+                  <select id="scrF46Pos" style="min-width:90px;">
+                    <option value="above" selected>&gt; Supertrend (uptrend)</option>
+                    <option value="below">&lt; Supertrend (downtrend)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
           </div>
         </div>
 
@@ -1498,7 +1518,7 @@
 <script src="js/utils.js?v=5"></script>
 <script src="js/cache.js?v=2"></script>
 <script src="js/data-processor.js?v=2"></script>
-<script src="js/screener.js?v=30"></script>
+<script src="js/screener.js?v=31"></script>
 <script src="js/scanner-overview.js?v=8"></script>
 <script src="js/quarterly-results.js?v=13"></script>
 <script src="js/relative-strength.js?v=3"></script>
@@ -1519,7 +1539,7 @@
 <script src="js/dq-pipeline.js?v=1"></script>
 <script src="js/quarterly-results-fetch.js?v=1"></script>
 <script src="js/checklist.js?v=1"></script>
-<script src="js/presets.js?v=26"></script>
+<script src="js/presets.js?v=27"></script>
 <script src="js/asof-scan.js?v=3"></script>
 <script src="js/ui.js?v=17"></script>
 <script src="js/nse-download.js?v=8"></script>

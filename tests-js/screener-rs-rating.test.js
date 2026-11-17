@@ -124,8 +124,8 @@ test('F45 is saved in presets, has a default for old presets, is reset by Reset 
   const scr = read('js/screener.js'), pre = read('js/presets.js');
   assert.match(pre, /scrF45On: false, scrF45Period: '3m', scrF45Val: '80'/);
   assert.match(scr, /getElementById\('scrF45On'\)\.checked = false;[\s\S]{0,200}scrF45Period'\)\.value = '3m';[\s\S]{0,120}scrF45Val'\)\.value = '80'/);
-  assert.match(scr, /'scrF19On','scrF42On','scrF45On'\]/);
-  assert.match(scr, /f42On, f45On\]\.filter\(Boolean\)/);
+  assert.match(scr, /'scrF19On','scrF42On','scrF45On','scrF46On'\]/);
+  assert.match(scr, /f42On, f45On, f46On]\.filter\(Boolean\)/);
 });
 
 test('the F45 row sits in the Technicals tab right below Listed Date, with a period drop-down and a rating box', () => {

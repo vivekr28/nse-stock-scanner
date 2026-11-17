@@ -35,7 +35,7 @@ function gridChildren() {
 
 test('the Technicals grid holds two columns and then the F4 and F41 cards, as direct children of the grid', () => {
   const kids = gridChildren();
-  assert.deepEqual(kids.map(k => k.cls), ['scr-tech-col', 'scr-tech-col', 'scr-filter-pair', 'scr-filter-pair']);
+  assert.deepEqual(kids.map(k => k.cls), ['scr-tech-col', 'scr-tech-col', 'scr-filter-pair', 'scr-filter-pair', 'scr-filter-pair']);
   const [left, right, pair] = kids;
   for (const id of ['scrF4On', 'scrF4Val', 'scrF4Mult', 'scrF4SmaLen', 'scrF4MinTimes', 'scrF4Lookback']) {
     assert.ok(pair.html.includes(`id="${id}"`), `${id} is in the F4 card`);
@@ -70,6 +70,18 @@ test('the F41 Consolidating card is one row, like F4, in a card of its own below
   assert.ok(/Consolidating:/.test(f41) && /Days depth/.test(f41) && /spike\(s\)/.test(f41));
   for (const col of [kids[0], kids[1]]) assert.ok(!col.html.includes('scrF41'), 'F41 is in neither column');
   assert.ok(!/id="scrF41Spikes"[^>]*style=/.test(f41), 'the Spikes box has the standard input width, not a narrow inline one');
+});
+
+test('the F46 Supertrend card is one row, like F4 / F41, in a card of its own below the F41 card and spanning both columns', () => {
+  const kids = gridChildren();
+  const f46 = kids[4].html;
+  assert.ok(kids[3].html.includes('id="scrF41On"') && !kids[3].html.includes('scrF46'), 'the F41 card is above and does not hold F46');
+  assert.equal((f46.match(/class="scr-filter-row[ "]/g) || []).length, 1, 'one filter row');
+  assert.ok(!/scr-sub/.test(f46), 'no second (sub) row');
+  assert.ok(/class="scr-filter-row scr-highlight"/.test(f46), 'the same highlighted row as the F4 / F41 cards');
+  for (const id of ['scrF46On', 'scrF46Len', 'scrF46Factor', 'scrF46Pos']) assert.ok(f46.includes(`id="${id}"`), `${id} is in the F46 card`);
+  assert.ok(/Supertrend:/.test(f46) && /ATR length/.test(f46));
+  for (const col of [kids[0], kids[1]]) assert.ok(!col.html.includes('scrF46'), 'F46 is in neither column');
 });
 
 test('the stylesheet makes the F4 card span every column of the Technicals grid', () => {
