@@ -555,6 +555,10 @@ A single full-screen modal (`#industryChartsModal`, deliberately a **top-level s
 - "Copy Selected" (`copySelectedStocksWatchlist()`) reuses the Stock Scanner's existing TV Watchlist modal/clipboard code (`_tvWatchlistText`/`#tvModal`/`copyTvWatchlist()` in `screener.js`) to produce the identical `###Industry(N),NSE:SYM,...` format, but sourced only from the picks and grouped/sorted by selected-count per industry. "Clear Selected" empties the set and un-checks any visible checkboxes. Both buttons + a live count label appear in both tabs' toolbars (`updateSelectedUI()` keeps them in sync).
 - Because the single persistent `#icIndustryChartContainer` (used by both single-stock mode and the Industry Chart tab) is reused across renders rather than recreated, `icCreateChart()` clears it (`container.innerHTML = ''`) before building a new chart — otherwise the legend/measure overlay `<div>`s from a previous visit would silently accumulate on every re-render.
 
+### 5c. Checklist (`panel-checklist`) — `js/checklist.js`
+
+The trader's own 7-point qualification checklist ("Every Stock Must Clear These To Qualify"), a read-only reference page (tab sits just before Data Quality). Content lives in the `CHECKLIST_RULES` array (each rule: `title` + `details` lines), `CHECKLIST_TITLE` and `CHECKLIST_VERDICT` at the top of `js/checklist.js`; the page redraws itself from them (`checklistRender()`, run at load into `#checklistRoot`, two columns, verdict under the right-hand one). To refine the checklist, edit those constants only. Styles are the `.cl-*` rules at the end of `css/styles.css`. Pinned by `tests-js/checklist.test.js`.
+
 ### 6. Data Quality (`panel-dataquality`) — `js/data-quality.js`
 
 Cross-file matching report:
