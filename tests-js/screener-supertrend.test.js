@@ -1,0 +1,316 @@
+'use strict';
+// The Stock Scanner's Technicals filter F46 "Supertrend": TradingView's ta.supertrend(factor, atrPeriod) on the daily candles, keeping a stock
+// whose latest close is above the line (uptrend) or below it (downtrend). Covers the maths (supertrendSeries against a hand-computed series and
+// an independent Pine-literal transcription, the direction flips, the ratcheting bands), computeSupertrend (short history, strict comparison),
+// the filter through runScreener() (pass / fail / insufficient-data wording, stored values, blank inputs), presets, Reset, the badge counts and the markup.
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const { loadScripts } = require('./load');
+const { installFakeDom } = require('./fakedom');
+
+const root = path.dirname(__dirname);
+const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+const screenerSrc = fs.readFileSync(path.join(root, 'js', 'screener.js'), 'utf8');
+const sb = loadScripts(['js/utils.js', 'js/money-flow.js', 'js/breadth.js', 'js/screener.js', 'js/presets.js']);
+const { supertrendSeries, computeSupertrend, capturePresetState, applyPresetState } = sb;
+
+const bar = (high, low, close) => ({ date: 'D', open: close, high, low, close, turnover: 10 });
+// daily bars around a list of closes, each with a +/- half range
+const around = (closes, half = 0.5) => closes.map((c, i) => ({ date: 'D' + i, open: c, high: c + half, low: c - half, close: c, turnover: 10 }));
+const rising = (n, start = 100, step = 1) => Array.from({ length: n }, (_, i) => start + i * step);
+const falling = (n, start = 200, step = 1) => Array.from({ length: n }, (_, i) => start - i * step);
+
+// ─── the maths ─────────────────────────────────────────────────────────────────
+
+// A short series worked out by hand with ATR length 2 and factor 1 (all values are exact in binary):
+//   bar   H    L    C    TR    ATR(RMA 2)   hl2    upper  lower  final upper  final lower  direction   Supertrend
+//    0   10    8    9    2     -            9      -      -      -            -            -           -
+//    1   11    9   10.5  2     2   (seed)   10     12     8      12           8            down (first)  12
+//    2   12   10   11.5  2     2            11     13     9      12 (13 > 12)  9           down (11.5 <= 12)  12
+//    3  11.5   9    9.5  2.5   2.25         10.25  12.5   8      12           9            down          12
+//    4   10    8    8.5  2     2.125        9      11.125 6.875  11.125 (falls) 9          down          11.125
+//    5   12  9.5   11.5  3.5   2.8125       10.75  13.5625 7.9375 11.125       7.9375 (prior close 8.5 < 9 resets it)  UP (11.5 > 11.125)  7.9375
+//    6   13   11   12.5  2     2.40625      12     14.40625 9.59375 14.40625 (prior close 11.5 > 11.125 resets it)  9.59375  up (12.5 >= 9.59375)  9.59375
+//    7   12    7    7.5  5.5   3.953125     9.5    13.453125 5.546875 13.453125 9.59375 (ratchets, 5.5 < 9.59)   DOWN (7.5 < 9.59375)  13.453125
+const HAND = [bar(10, 8, 9), bar(11, 9, 10.5), bar(12, 10, 11.5), bar(11.5, 9, 9.5), bar(10, 8, 8.5), bar(12, 9.5, 11.5), bar(13, 11, 12.5), bar(12, 7, 7.5)];
+const HAND_ST = [null, 12, 12, 12, 11.125, 7.9375, 9.59375, 13.453125];
+const HAND_DIR = [null, 'down', 'down', 'down', 'down', 'up', 'up', 'down'];
+
+test('supertrendSeries matches a hand-computed series (ATR length 2, factor 1): values, ratcheting bands and both direction flips', () => {
+  const out = supertrendSeries(HAND, 2, 1);
+  assert.equal(out.length, HAND.length);
+  assert.equal(out[0], null);                                   // no ATR yet on the first atrPeriod - 1 bars
+  for (let i = 1; i < HAND.length; i++) {
+    assert.equal(out[i].st, HAND_ST[i], `Supertrend on bar ${i}`);
+    assert.equal(out[i].dir, HAND_DIR[i], `direction on bar ${i}`);
+  }
+});
+
+test('the first bar with an ATR starts as a downtrend on the upper band (TradingView: na(atr[1]) -> direction 1), whatever the price does', () => {
+  const out = supertrendSeries(around(rising(5)), 3, 2);
+  assert.deepEqual(Array.from(out, o => o && o.dir).slice(0, 3), [null, null, 'down']);
+  // true ranges 1, 1.5, 1.5 -> the seed ATR is their average 4/3; hl2 is 102, so the line is 102 + 2 * 4/3 on the upper band, above the close of 102
+  assert.ok(Math.abs(out[2].st - (102 + 2 * 4 / 3)) < 1e-12);
+});
+
+// The same formula written the way the Pine source reads (na / nz, ta.rma, [1] history), as an independent oracle on a long, wandering series
+function pineSupertrend(high, low, close, factor, len) {
+  const n = close.length, nz = v => (v == null || Number.isNaN(v) ? 0 : v);
+  const tr = close.map((c, i) => i === 0 ? high[0] - low[0] : Math.max(high[i] - low[i], Math.abs(high[i] - close[i - 1]), Math.abs(low[i] - close[i - 1])));
+  const atr = Array(n).fill(null);
+  for (let i = 0; i < n; i++) {
+    if (i === len - 1) atr[i] = tr.slice(0, len).reduce((a, b) => a + b, 0) / len;          // ta.rma seeds with the sma
+    else if (i >= len) atr[i] = (atr[i - 1] * (len - 1) + tr[i]) / len;
+  }
+  const upperB = Array(n).fill(null), lowerB = Array(n).fill(null), dirs = Array(n).fill(null), st = Array(n).fill(null);
+  for (let i = 0; i < n; i++) {
+    if (atr[i] == null) continue;
+    const hl2 = (high[i] + low[i]) / 2;
+    let up = hl2 + factor * atr[i], lo = hl2 - factor * atr[i];
+    const pLo = nz(lowerB[i - 1]), pUp = nz(upperB[i - 1]);
+    lo = (lo > pLo || close[i - 1] < pLo) ? lo : pLo;
+    up = (up < pUp || close[i - 1] > pUp) ? up : pUp;
+    lowerB[i] = lo; upperB[i] = up;
+    if (atr[i - 1] == null || i === 0) dirs[i] = 1;
+    else if (st[i - 1] === pUp) dirs[i] = close[i] > up ? -1 : 1;
+    else dirs[i] = close[i] < lo ? 1 : -1;
+    st[i] = dirs[i] === -1 ? lo : up;
+  }
+  return { st, dirs };
+}
+
+test('supertrendSeries equals an independent Pine-literal transcription on 600 pseudo-random bars, for several lengths and factors', () => {
+  let seed = 12345;
+  const rnd = () => (seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296;
+  const closes = []; let p = 100;
+  for (let i = 0; i < 600; i++) { p = Math.max(5, p * (1 + (rnd() - 0.48) * 0.06)); closes.push(p); }
+  const days = closes.map((c, i) => { const h = c * (1 + rnd() * 0.02), l = c * (1 - rnd() * 0.02); return { date: 'D' + i, open: c, high: h, low: l, close: c, turnover: 1 }; });
+  for (const [len, factor] of [[10, 3], [7, 2], [14, 1.5], [1, 3], [20, 4.5]]) {
+    const mine = supertrendSeries(days, len, factor);
+    const ref = pineSupertrend(days.map(d => d.high), days.map(d => d.low), days.map(d => d.close), factor, len);
+    let flips = 0;
+    for (let i = 0; i < days.length; i++) {
+      if (ref.st[i] == null) { assert.equal(mine[i], null, `bar ${i} (${len}, ${factor})`); continue; }
+      assert.ok(Math.abs(mine[i].st - ref.st[i]) < 1e-9, `Supertrend, bar ${i} (${len}, ${factor})`);
+      assert.equal(mine[i].dir, ref.dirs[i] === -1 ? 'up' : 'down', `direction, bar ${i} (${len}, ${factor})`);
+      if (i > 0 && mine[i - 1] && mine[i].dir !== mine[i - 1].dir) flips++;
+    }
+    assert.ok(flips >= 3, `the random walk flips the trend a few times (${len}, ${factor}): ${flips}`);
+  }
+});
+
+test('in an uptrend the line is the lower band and only ever rises; in a downtrend it is the upper band and only ever falls', () => {
+  const up = supertrendSeries(around([...falling(20, 100, 1), ...rising(60, 80, 1.5)]), 10, 3);
+  let lastUp = null;
+  for (let i = 1; i < up.length; i++) {
+    if (!up[i]) continue;
+    if (up[i].dir === 'up' && up[i - 1] && up[i - 1].dir === 'up') assert.ok(up[i].st >= up[i - 1].st, `uptrend line never falls (bar ${i})`);
+    if (up[i].dir === 'down' && up[i - 1] && up[i - 1].dir === 'down') assert.ok(up[i].st <= up[i - 1].st, `downtrend line never rises (bar ${i})`);
+    lastUp = up[i];
+  }
+  assert.equal(lastUp.dir, 'up');
+});
+
+test('a bigger factor keeps the line farther from the price and so flips later; a smaller ATR length reacts sooner', () => {
+  const days = around([...rising(40, 100, 1), ...falling(30, 140, 2.5)]);
+  const firstDown = (len, f) => supertrendSeries(days, len, f).findIndex((o, i) => i > 30 && o && o.dir === 'down');
+  assert.ok(firstDown(10, 1) < firstDown(10, 3), 'factor 1 flips before factor 3');
+  assert.ok(firstDown(10, 3) > 0, 'factor 3 does flip eventually');
+});
+
+// ─── computeSupertrend ─────────────────────────────────────────────────────────
+
+test('computeSupertrend reads the latest bar: line, direction, close, distance in % and the strict above / below flags', () => {
+  const m = computeSupertrend(HAND, 2, 1);
+  assert.equal(m.valid, true);
+  assert.equal(m.line, 13.453125);
+  assert.equal(m.dir, 'down');
+  assert.equal(m.close, 7.5);
+  assert.ok(Math.abs(m.pct - (7.5 / 13.453125 - 1) * 100) < 1e-12 && m.pct < 0);
+  assert.deepEqual([m.above, m.below], [false, true]);
+  const up = computeSupertrend(HAND.slice(0, 7), 2, 1);        // the day before the crash: uptrend on the lower band
+  assert.deepEqual([up.line, up.dir, up.above, up.below], [9.59375, 'up', true, false]);
+});
+
+test('the latest close equal to the line is neither above nor below it', () => {
+  // a flat stock: ATR 0, both bands sit on the price, the line is the upper band (downtrend) and the close is exactly on it
+  const m = computeSupertrend(Array.from({ length: 30 }, () => bar(100, 100, 100)), 10, 3);
+  assert.equal(m.valid, true);
+  assert.equal(m.line, 100);
+  assert.deepEqual([m.above, m.below, m.pct], [false, false, 0]);
+});
+
+test('too little history is not valid: fewer than ATR length + 1 daily bars, an empty history, or a bad length / factor', () => {
+  assert.equal(computeSupertrend(around(rising(10)), 10, 3).valid, false);                  // exactly 10 bars: the ATR only seeds
+  assert.equal(computeSupertrend(around(rising(11)), 10, 3).valid, true);                   // 11 bars: the first real Supertrend
+  assert.equal(computeSupertrend([], 10, 3).valid, false);
+  assert.equal(computeSupertrend(null, 10, 3).valid, false);
+  assert.equal(computeSupertrend(around(rising(50)), 0, 3).valid, false);
+  assert.equal(computeSupertrend(around(rising(50)), 10, 0).valid, false);
+  const bad = computeSupertrend(around(rising(5)), 10, 3);
+  assert.ok(isNaN(bad.line) && isNaN(bad.pct) && !bad.above && !bad.below);
+});
+
+// ─── through runScreener() ─────────────────────────────────────────────────────
+
+function runWith(over, stocks, partial = false) {
+  const dom = installFakeDom(sb, {
+    scrSearch: '', scrF17Period: '3m', scrF17Lag: '3m', scrF15Period: '1m',
+    scrF16FromField: 'close', scrF16ToField: 'close', scrF12Period: '6m', scrF11Sector: '',
+  });
+  dom.el('scrAllowPartial').checked = partial;
+  for (const [id, v] of Object.entries(over)) {
+    if (typeof v === 'boolean') dom.el(id).checked = v; else dom.el(id).value = String(v);
+  }
+  sb.renderScreenerTable = () => {};
+  sb.updateToggleButton = () => {};
+  sb.updateFilterBadge = () => {};
+  const latest = {}, daily = {};
+  for (const k in stocks) {
+    const days = stocks[k];
+    latest[k] = { symbol: k, isin: k, turnover: 10, changePct: 0, industry: 'X', sector: 'Y', ...days[days.length - 1] };
+    daily[k] = days;
+  }
+  sb.Store.latestBySymbol = latest;
+  sb.Store.dailyBySymbol = daily;
+  sb.runScreener();
+  const passed = Array.from(vm.runInContext('screenerPassed', sb)), failed = Array.from(vm.runInContext('screenerFailed', sb));
+  return { passed: passed.map(s => s.symbol).sort(), failed, byName: Object.fromEntries(passed.concat(failed).map(s => [s.symbol, s])) };
+}
+
+const F46 = (len, factor, pos = 'above') => ({ scrF46On: true, scrF46Len: len, scrF46Factor: factor, scrF46Pos: pos });
+const FIXTURE = {
+  UP: around(rising(80)),                                                   // steady climb: uptrend
+  DOWN: around(falling(80)),                                                // steady fall: downtrend
+  CRASH: around([...rising(60), ...falling(20, 160, 6)]),                   // rallied, then broke down hard: flipped to a downtrend
+  RECOVER: around([...falling(60, 200, 1), ...rising(20, 140, 6)]),         // fell, then rallied hard: flipped to an uptrend
+  NEW: around(rising(8)),                                                   // 8 bars: no Supertrend(10)
+};
+
+test('the fixture stocks sit where the tests below assume', () => {
+  const dir = k => computeSupertrend(FIXTURE[k], 10, 3).dir;
+  assert.deepEqual(['UP', 'DOWN', 'CRASH', 'RECOVER'].map(dir), ['up', 'down', 'down', 'up']);
+});
+
+test('F46 "above" keeps the stocks trading above their Supertrend (uptrend) and fails the rest with the line in the reason', () => {
+  const r = runWith(F46(10, 3, 'above'), FIXTURE);
+  assert.deepEqual(r.passed, ['RECOVER', 'UP']);
+  const reasons = Object.fromEntries(r.failed.map(s => [s.symbol, s._failReasons.join(' | ')]));
+  assert.match(reasons.DOWN, /F46: Close \d+\.\d\d not above Supertrend\(10, 3\) \d+\.\d\d \(downtrend\)/);
+  assert.match(reasons.CRASH, /F46: Close .* not above Supertrend\(10, 3\) .* \(downtrend\)/);
+  assert.match(reasons.NEW, /F46: Insufficient data for Supertrend\(10, 3\)/);
+});
+
+test('F46 "below" keeps the stocks trading below their Supertrend (downtrend)', () => {
+  const r = runWith(F46(10, 3, 'below'), FIXTURE);
+  assert.deepEqual(r.passed, ['CRASH', 'DOWN']);
+  assert.match(r.byName.UP._failReasons.join(' | '), /F46: Close \d+\.\d\d not below Supertrend\(10, 3\) \d+\.\d\d \(uptrend\)/);
+  assert.match(r.byName.NEW._failReasons.join(' | '), /F46: Insufficient data for Supertrend\(10, 3\)/);   // too little history fails either way
+});
+
+test('the ATR length and the factor reach the maths: the reason names them and the stored line is that Supertrend', () => {
+  const r = runWith(F46(7, 2.5, 'above'), FIXTURE);
+  assert.match(r.byName.DOWN._failReasons.join(' | '), /Supertrend\(7, 2\.5\)/);
+  const expected = computeSupertrend(FIXTURE.UP, 7, 2.5);
+  assert.equal(r.byName.UP._f46Line, expected.line);
+  assert.notEqual(expected.line, computeSupertrend(FIXTURE.UP, 10, 3).line);
+});
+
+test('a stock needs ATR length + 1 bars: 8 bars are judged with a length of 5 and rejected with a length of 10, and "Partial history" does not change that', () => {
+  const NEWDOWN = { NEWDOWN: around(falling(8)) };
+  assert.deepEqual(runWith(F46(5, 3, 'below'), NEWDOWN).passed, ['NEWDOWN']);
+  const strict = runWith(F46(10, 3, 'below'), NEWDOWN);
+  assert.deepEqual(strict.passed, []);
+  assert.match(strict.byName.NEWDOWN._failReasons.join(' | '), /F46: Insufficient data for Supertrend\(10, 3\)/);
+  assert.deepEqual(runWith(F46(10, 3, 'below'), NEWDOWN, true).passed, []);
+});
+
+test('F46 stores the line, the direction and the close-vs-line % on each stock for the result columns', () => {
+  const r = runWith(F46(10, 3), FIXTURE);
+  const m = computeSupertrend(FIXTURE.UP, 10, 3);
+  assert.equal(r.byName.UP._f46Line, m.line);
+  assert.equal(r.byName.UP._f46Dir, 'up');
+  assert.equal(r.byName.UP._f46Pct, m.pct);
+  assert.ok(r.byName.UP._f46Pct > 0 && r.byName.DOWN._f46Pct < 0);
+  assert.equal(r.byName.DOWN._f46Dir, 'down');
+  assert.ok(isNaN(r.byName.NEW._f46Line));
+});
+
+test('blank or invalid length / factor / position fall back to 10, 3 and "above"', () => {
+  const r = runWith({ scrF46On: true, scrF46Len: '', scrF46Factor: 'abc', scrF46Pos: '' }, FIXTURE);
+  assert.deepEqual(r.passed, ['RECOVER', 'UP']);
+  assert.match(r.byName.DOWN._failReasons.join(' | '), /Supertrend\(10, 3\)/);
+  assert.deepEqual(runWith({ scrF46On: true, scrF46Len: '10', scrF46Factor: '-2' }, FIXTURE).passed, ['RECOVER', 'UP']);   // a factor of 0 or less is not a factor
+  assert.deepEqual(runWith({ scrF46On: true, scrF46Pos: 'sideways' }, FIXTURE).passed, ['RECOVER', 'UP']);
+});
+
+test('F46 off: nothing is filtered and no F46 reason appears', () => {
+  const off = runWith({}, FIXTURE);
+  assert.deepEqual(off.passed, ['CRASH', 'DOWN', 'NEW', 'RECOVER', 'UP']);
+  assert.ok(!off.failed.some(s => (s._failReasons || []).some(x => /F46/.test(x))));
+  assert.ok(isNaN(off.byName.UP._f46Line) || off.byName.UP._f46Line === undefined);
+});
+
+test('F46 combines with another filter: both must pass', () => {
+  // BIGUP and UP are both in an uptrend, but only BIGUP trades 100 lakh (F3 wants 0.5 Cr = 50 lakh); DOWN has the turnover but is in a downtrend
+  const BIGUP = FIXTURE.UP.map(d => ({ ...d, turnover: 100 })), BIGDOWN = FIXTURE.DOWN.map(d => ({ ...d, turnover: 100 }));
+  const stocks = { BIGUP, UP: FIXTURE.UP, BIGDOWN };
+  assert.deepEqual(runWith(F46(10, 3), stocks).passed, ['BIGUP', 'UP']);
+  const both = runWith({ ...F46(10, 3), scrF3On: true, scrF3Val: '0.5' }, stocks);
+  assert.deepEqual(both.passed, ['BIGUP']);
+  assert.ok(both.byName.UP._failReasons.some(x => /F3/.test(x)) && !both.byName.UP._failReasons.some(x => /F46/.test(x)), 'UP passes F46 and fails only F3');
+  assert.ok(both.byName.BIGDOWN._failReasons.some(x => /F46/.test(x)) && !both.byName.BIGDOWN._failReasons.some(x => /F3/.test(x)), 'BIGDOWN passes F3 and fails only F46');
+});
+
+// ─── badge counts, presets, reset, markup ──────────────────────────────────────
+
+test('F46 is counted as an active filter and in the Technicals tab badge', () => {
+  assert.ok(/f42On, f45On, f46On\]\.filter\(Boolean\)/.test(screenerSrc), 'in the active-filter count');
+  assert.ok(/'scrF42On','scrF45On','scrF46On'\]/.test(screenerSrc), 'in the Technicals badge list');
+});
+
+test('presets capture and restore F46 (on, length, factor, position); "— Select preset —" resets it', () => {
+  const dom = installFakeDom(sb, {});
+  const el = dom.el;
+  el('scrF46On').checked = true; el('scrF46Len').value = '14'; el('scrF46Factor').value = '2.5'; el('scrF46Pos').value = 'below';
+  const state = capturePresetState();
+  assert.deepEqual([state.scrF46On, state.scrF46Len, state.scrF46Factor, state.scrF46Pos], [true, '14', '2.5', 'below']);
+  el('scrF46On').checked = false; el('scrF46Len').value = '10'; el('scrF46Factor').value = '3'; el('scrF46Pos').value = 'above';
+  applyPresetState(state);
+  assert.deepEqual([el('scrF46On').checked, el('scrF46Len').value, el('scrF46Factor').value, el('scrF46Pos').value], [true, '14', '2.5', 'below']);
+  applyPresetState(vm.runInContext('DEFAULT_FILTER_STATE', sb));
+  assert.deepEqual([el('scrF46On').checked, el('scrF46Len').value, el('scrF46Factor').value, el('scrF46Pos').value], [false, '10', '3', 'above']);
+});
+
+test('presets saved before F46 existed load fine and leave its controls alone', () => {
+  const dom = installFakeDom(sb, {});
+  dom.el('scrF46On').checked = true; dom.el('scrF46Len').value = '9';
+  applyPresetState({ scrF18On: true });
+  assert.deepEqual([dom.el('scrF46On').checked, dom.el('scrF46Len').value], [true, '9']);
+});
+
+test('Reset puts F46 back to off, 10, 3 and "above"', () => {
+  const dom = installFakeDom(sb, {});
+  const el = dom.el;
+  el('scrF46On').checked = true; el('scrF46Len').value = '5'; el('scrF46Factor').value = '1.2'; el('scrF46Pos').value = 'below';
+  sb.runScreener = () => {}; sb.updateFilterBadge = () => {};
+  sb.resetScreener();
+  assert.deepEqual([el('scrF46On').checked, el('scrF46Len').value, el('scrF46Factor').value, el('scrF46Pos').value], [false, '10', '3', 'above']);
+});
+
+test('the As of Date tab keeps its own filter set: it has no Supertrend control and js/asof-scan.js does not touch scrF46', () => {
+  const asof = fs.readFileSync(path.join(root, 'js', 'asof-scan.js'), 'utf8');
+  assert.ok(!/scrF46|supertrend/i.test(asof));
+  assert.ok(![...html.matchAll(/\bid="(asof[^"]*)"/g)].some(m => /supertrend/i.test(m[1])));
+});
+
+test('index.html: the F46 row sits in the Technicals left column under Fast MA > Slow MA, ATR length 10, factor 3, "above" by default', () => {
+  const pane = html.slice(html.indexOf('id="scrPaneTechnicals"'));
+  assert.ok(pane.indexOf('id="scrF42On"') < pane.indexOf('id="scrF46On"') && pane.indexOf('id="scrF46On"') < pane.indexOf('id="scrF1On"'), 'after F42, before the right column starts (F1)');
+  assert.match(html, /id="scrF46Len" value="10"/);
+  assert.match(html, /id="scrF46Factor" value="3"/);
+  assert.match(html, /<select id="scrF46Pos"[^>]*>\s*<option value="above" selected>[^<]*<\/option>\s*<option value="below">/);
+});

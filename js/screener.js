@@ -69,6 +69,53 @@ function computeMaCross(days, type, fastLen, slowLen, allowPartial) {
   return { fast, slow, valid, ok: valid && fast > slow, gapPct: valid && slow > 0 ? (fast / slow - 1) * 100 : NaN };
 }
 
+// F46 "Supertrend": TradingView's ta.supertrend(factor, atrPeriod) over the whole daily history (the line is path dependent, so every bar
+// there is feeds it, exactly like the chart does). Returns one entry per bar: { st, dir } where dir is 'up' (uptrend: the line is the final
+// lower band, under the price) or 'down' (downtrend: the final upper band, over the price), and null before the ATR exists (the first
+// atrPeriod - 1 bars). ATR is Wilder's RMA of the true range (seeded with the SMA of the first atrPeriod true ranges, the first bar's TR being high - low).
+function supertrendSeries(days, atrPeriod, factor) {
+  const out = new Array(days.length).fill(null);
+  let atr = NaN, prevClose = NaN, trSum = 0;
+  let prevUpper = 0, prevLower = 0, prevSt = NaN, prevAtrValid = false;   // nz(): the band before the first ATR counts as 0
+  for (let i = 0; i < days.length; i++) {
+    const d = days[i];
+    const hi = d.high, lo = d.low, cl = d.close;
+    const tr = isNaN(prevClose) ? hi - lo : Math.max(hi - lo, Math.abs(hi - prevClose), Math.abs(lo - prevClose));
+    if (i < atrPeriod) {
+      trSum += tr;
+      if (i === atrPeriod - 1) atr = trSum / atrPeriod;
+    } else {
+      atr = (atr * (atrPeriod - 1) + tr) / atrPeriod;
+    }
+    const closePrev = prevClose;
+    prevClose = cl;
+    if (isNaN(atr)) continue;
+    const hl2 = (hi + lo) / 2;
+    let upper = hl2 + factor * atr, lower = hl2 - factor * atr;
+    lower = (lower > prevLower || closePrev < prevLower) ? lower : prevLower;
+    upper = (upper < prevUpper || closePrev > prevUpper) ? upper : prevUpper;
+    let dir;   // TradingView's numbers: 1 = downtrend, -1 = uptrend
+    if (!prevAtrValid) dir = 1;
+    else if (prevSt === prevUpper) dir = cl > upper ? -1 : 1;
+    else dir = cl < lower ? 1 : -1;
+    const st = dir === -1 ? lower : upper;
+    out[i] = { st, dir: dir === -1 ? 'up' : 'down' };
+    prevUpper = upper; prevLower = lower; prevSt = st; prevAtrValid = true;
+  }
+  return out;
+}
+
+// F46: where does the latest close sit against the Supertrend line? `valid` needs atrPeriod + 1 daily bars (the first bar with an ATR only
+// seeds the line); 'above' = close strictly over the line, 'below' = strictly under it. `pct` is the close's distance from the line, in % of the line.
+function computeSupertrend(days, atrPeriod, factor) {
+  const none = { valid: false, line: NaN, dir: '', close: NaN, pct: NaN, above: false, below: false };
+  if (!days || days.length < atrPeriod + 1 || !(atrPeriod >= 1) || !(factor > 0)) return none;
+  const last = supertrendSeries(days, atrPeriod, factor)[days.length - 1];
+  const close = days[days.length - 1].close;
+  if (!last || !(last.st > 0) || isNaN(close)) return none;
+  return { valid: true, line: last.st, dir: last.dir, close, pct: (close / last.st - 1) * 100, above: close > last.st, below: close < last.st };
+}
+
 function computeDynADR(days, length) {
   if (days.length < length) return NaN;
   const slice = days.slice(-length);
@@ -384,6 +431,13 @@ function runScreener() {
   const f42Fast = parseInt(document.getElementById('scrF42Fast').value) || 20;
   const f42Slow = parseInt(document.getElementById('scrF42Slow').value) || 50;
 
+  // F46: Supertrend (ATR length, factor) - the latest close above (uptrend) or below (downtrend) the line
+  const f46On = document.getElementById('scrF46On').checked;
+  const f46Len = Math.max(1, parseInt(document.getElementById('scrF46Len').value) || 10);
+  const f46Factor = parseFloat(document.getElementById('scrF46Factor').value) > 0 ? parseFloat(document.getElementById('scrF46Factor').value) : 3;
+  const f46Pos = document.getElementById('scrF46Pos').value === 'below' ? 'below' : 'above';
+  const f46Label = `Supertrend(${f46Len}, ${f46Factor})`;
+
   const f9On = document.getElementById('scrF9On').checked;
   const f9Val = parseFloat(document.getElementById('scrF9Val').value) || 0;
   const f9MinStk = parseInt(document.getElementById('scrF9MinStk').value) || 1;
@@ -629,6 +683,21 @@ function runScreener() {
       }
     }
 
+    // F46: Supertrend - strict daily history, "Partial history" does not apply (the line needs the ATR length + 1 bars)
+    if (f46On) {
+      const m = computeSupertrend(days, f46Len, f46Factor);
+      s._f46Line = m.line;
+      s._f46Dir = m.dir;
+      s._f46Pct = m.pct;
+      if (!m.valid) {
+        failReasons.push(`F46: Insufficient data for ${f46Label}`);
+      } else if (f46Pos === 'above' && !m.above) {
+        failReasons.push(`F46: Close ${fmt2(m.close)} not above ${f46Label} ${m.line.toFixed(2)} (${m.dir === 'up' ? 'uptrend' : 'downtrend'})`);
+      } else if (f46Pos === 'below' && !m.below) {
+        failReasons.push(`F46: Close ${fmt2(m.close)} not below ${f46Label} ${m.line.toFixed(2)} (${m.dir === 'up' ? 'uptrend' : 'downtrend'})`);
+      }
+    }
+
     // F9: Industry RS filter
     if (f9On) {
       const rs = indRSMap[s.industry];
@@ -838,7 +907,7 @@ function runScreener() {
   scrSortCol = null;
 
   // Count active filters
-  const activeCount = [f1On, f2On, f3On, f4On, f5On, f6On, f7On, f8On, f9On, f10On, f12On, f13On, f14On, f15On, f16On, f17On, f18On, f41On, f42On, f45On].filter(Boolean).length + (typeof qrActiveCount === 'function' ? qrActiveCount() : 0) + (typeof gbActiveCount === 'function' ? gbActiveCount() : 0) + (typeof gtActiveCount === 'function' ? gtActiveCount() : 0) + (typeof gsActiveCount === 'function' ? gsActiveCount() : 0);
+  const activeCount = [f1On, f2On, f3On, f4On, f5On, f6On, f7On, f8On, f9On, f10On, f12On, f13On, f14On, f15On, f16On, f17On, f18On, f41On, f42On, f45On, f46On].filter(Boolean).length + (typeof qrActiveCount === 'function' ? qrActiveCount() : 0) + (typeof gbActiveCount === 'function' ? gbActiveCount() : 0) + (typeof gtActiveCount === 'function' ? gtActiveCount() : 0) + (typeof gsActiveCount === 'function' ? gsActiveCount() : 0);
 
   // Stats
   const advancing = passed.filter(s => s.changePct > 0).length;
@@ -928,6 +997,12 @@ function renderScreenerTable() {
     cols.push({ key: '_f42Fast', label: `${parseInt(document.getElementById('scrF42Fast').value) || 20} ${T}`, fmt: v => fmt2(v) });
     cols.push({ key: '_f42Slow', label: `${parseInt(document.getElementById('scrF42Slow').value) || 50} ${T}`, fmt: v => fmt2(v) });
     cols.push({ key: '_f42Gap', label: 'Fast vs Slow', fmt: v => fmtPct(v), cls: v => v >= 0 ? 'positive' : 'negative' });
+  }
+  if (document.getElementById('scrF46On').checked) {
+    const L = Math.max(1, parseInt(document.getElementById('scrF46Len').value) || 10);
+    const Fc = parseFloat(document.getElementById('scrF46Factor').value) > 0 ? parseFloat(document.getElementById('scrF46Factor').value) : 3;
+    cols.push({ key: '_f46Line', label: `Supertrend (${L}, ${Fc})`, fmt: v => fmt2(v) });
+    cols.push({ key: '_f46Pct', label: 'Close vs Supertrend', fmt: v => fmtPct(v), cls: v => v >= 0 ? 'positive' : 'negative' });
   }
   if (f10On) {
     cols.push({ key: '_f10MAs', label: 'MA Status', fmt: (v) => {
@@ -1150,6 +1225,10 @@ function resetScreener() {
   document.getElementById('scrF42Type').value = 'sma';
   document.getElementById('scrF42Fast').value = '20';
   document.getElementById('scrF42Slow').value = '50';
+  document.getElementById('scrF46On').checked = false;
+  document.getElementById('scrF46Len').value = '10';
+  document.getElementById('scrF46Factor').value = '3';
+  document.getElementById('scrF46Pos').value = 'above';
   document.getElementById('scrF9Val').value = '60';
   document.getElementById('scrF9MinStk').value = '3';
   document.getElementById('scrF9MinMcap').value = '0';
@@ -1164,10 +1243,10 @@ function exportScreenerCSV() {
   if (screenerResults.length === 0) return;
   const keys = ['symbol','series','sector','industry','close','changePct','vol','turnover',
     'adr','_dynADR','_dynTurnoverSMA_f1','_dynTurnoverSMA_f2','_turnoverToSMA','_f4Hits','_dynCloseSMA','_dynPriceRatio',
-    'high52w','low52w','distFrom52H','distFrom52L','bandPct','marketCap','_indRS','_indMF','_indMFRoc','_perf','_dateChg','_f10MAs','_f42Fast','_f42Slow','_f42Gap'];
+    'high52w','low52w','distFrom52H','distFrom52L','bandPct','marketCap','_indRS','_indMF','_indMFRoc','_perf','_dateChg','_f10MAs','_f42Fast','_f42Slow','_f42Gap','_f46Line','_f46Dir','_f46Pct'];
   const labels = ['Symbol','Series','Sector','Industry','Close','Change%','Volume','Turnover',
     'ADR%','DynADR%','F1_SMA_Turnover','F2_SMA_Turnover','Turnover_x_SMA','CoOccur_Hits','SMA_Close','Price_SMA_Ratio',
-    '52W_High','52W_Low','From_52H%','From_52L%','Band','MarketCap_Cr','Industry_RS','Ind_MoneyFlow%','Ind_MoneyFlow_RoC_pp','Performance%','DateRange_Chg%','MA_Status','MA_Fast','MA_Slow','MA_Fast_vs_Slow%'];
+    '52W_High','52W_Low','From_52H%','From_52L%','Band','MarketCap_Cr','Industry_RS','Ind_MoneyFlow%','Ind_MoneyFlow_RoC_pp','Performance%','DateRange_Chg%','MA_Status','MA_Fast','MA_Slow','MA_Fast_vs_Slow%','Supertrend','Supertrend_Trend','Close_vs_Supertrend%'];
   let csv = labels.join(',') + '\n';
   screenerResults.forEach(r => {
     csv += keys.map(k => {
@@ -1375,7 +1454,7 @@ function updateApplyBtn() {
 }
 
 function updateFilterBadge() {
-  const techIds = ['scrF1On','scrF2On','scrF3On','scrF4On','scrF5On','scrF6On','scrF7On','scrF8On','scrF41On','scrF10On','scrF18On','scrF19On','scrF42On','scrF45On'];   // F15 (Performance) and F16 (% Change) live on the Relative Strength tab now
+  const techIds = ['scrF1On','scrF2On','scrF3On','scrF4On','scrF5On','scrF6On','scrF7On','scrF8On','scrF41On','scrF10On','scrF18On','scrF19On','scrF42On','scrF45On','scrF46On'];   // F15 (Performance) and F16 (% Change) live on the Relative Strength tab now
   const indIds  = ['scrF9On','scrF12On','scrF13On','scrF14On','scrF17On'];
   const countChecked = ids => ids.filter(id => { const el = document.getElementById(id); return el && el.checked; }).length;
 
