@@ -355,6 +355,9 @@
                     <option value="above" selected>&gt; Supertrend (uptrend)</option>
                     <option value="below">&lt; Supertrend (downtrend)</option>
                   </select>
+                  <span class="scr-unit">&middot; flipped within last</span>
+                  <input type="number" id="scrF46Flip" value="0" min="0" step="1" title="0 = any: the stock only has to be above / below the line. A number N keeps only the stocks whose trend flipped to its current direction within the last N candles of the chosen timeframe (1 = it flipped on the latest candle).">
+                  <span class="scr-unit">candle(s) (0 = any)</span>
                 </div>
               </div>
             </div>
@@ -1518,7 +1521,7 @@
 <script src="js/utils.js?v=5"></script>
 <script src="js/cache.js?v=2"></script>
 <script src="js/data-processor.js?v=2"></script>
-<script src="js/screener.js?v=31"></script>
+<script src="js/screener.js?v=32"></script>
 <script src="js/scanner-overview.js?v=8"></script>
 <script src="js/quarterly-results.js?v=13"></script>
 <script src="js/relative-strength.js?v=3"></script>
@@ -1539,7 +1542,7 @@
 <script src="js/dq-pipeline.js?v=1"></script>
 <script src="js/quarterly-results-fetch.js?v=1"></script>
 <script src="js/checklist.js?v=1"></script>
-<script src="js/presets.js?v=27"></script>
+<script src="js/presets.js?v=28"></script>
 <script src="js/asof-scan.js?v=3"></script>
 <script src="js/ui.js?v=17"></script>
 <script src="js/nse-download.js?v=8"></script>
