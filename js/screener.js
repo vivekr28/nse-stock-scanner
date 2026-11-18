@@ -130,15 +130,21 @@ function weeklyBarsFromDaily(days) {
 
 // F46: where does the latest close sit against the Supertrend line? `timeframe` is 'd' (daily, default) or 'w' (weekly candles built from the
 // dailies, the latest one being the week so far). `valid` needs atrPeriod + 1 candles of that timeframe (the first bar with an ATR only
-// seeds the line); 'above' = close strictly over the line, 'below' = strictly under it. `pct` is the close's distance from the line, in % of the line.
+// seeds the line); 'above' = close strictly over the line, 'below' = strictly under it; `flipAge` = candles since the last trend flip (0 = on the latest candle). `pct` is the close's distance from the line, in % of the line.
 function computeSupertrend(days, atrPeriod, factor, timeframe) {
   if (timeframe === 'w') days = weeklyBarsFromDaily(days);
-  const none = { valid: false, line: NaN, dir: '', close: NaN, pct: NaN, above: false, below: false };
+  const none = { valid: false, line: NaN, dir: '', close: NaN, pct: NaN, above: false, below: false, flipAge: NaN };
   if (!days || days.length < atrPeriod + 1 || !(atrPeriod >= 1) || !(factor > 0)) return none;
-  const last = supertrendSeries(days, atrPeriod, factor)[days.length - 1];
+  const series = supertrendSeries(days, atrPeriod, factor);
+  const last = series[days.length - 1];
   const close = days[days.length - 1].close;
   if (!last || !(last.st > 0) || isNaN(close)) return none;
-  return { valid: true, line: last.st, dir: last.dir, close, pct: (close / last.st - 1) * 100, above: close > last.st, below: close < last.st };
+  // flipAge: candles since the trend last flipped to its current direction (0 = it flipped on the latest candle), NaN when it never has - the
+  // very first candle with an ATR starts as a downtrend by definition, which is not a flip
+  let i = days.length - 1;
+  while (i > 0 && series[i - 1] && series[i - 1].dir === last.dir) i--;
+  const flipAge = i > 0 && series[i - 1] ? days.length - 1 - i : NaN;
+  return { valid: true, line: last.st, dir: last.dir, close, pct: (close / last.st - 1) * 100, above: close > last.st, below: close < last.st, flipAge };
 }
 
 function computeDynADR(days, length) {
@@ -462,6 +468,7 @@ function runScreener() {
   const f46Factor = parseFloat(document.getElementById('scrF46Factor').value) > 0 ? parseFloat(document.getElementById('scrF46Factor').value) : 3;
   const f46Pos = document.getElementById('scrF46Pos').value === 'below' ? 'below' : 'above';
   const f46Tf = document.getElementById('scrF46Tf').value === 'w' ? 'w' : 'd';
+  const f46Flip = Math.max(0, parseInt(document.getElementById('scrF46Flip').value) || 0);   // 0 = any trend age; N = the trend flipped within the last N candles (1 = on the latest candle)
   const f46Label = `${f46Tf === 'w' ? 'Weekly ' : ''}Supertrend(${f46Len}, ${f46Factor})`;
 
   const f9On = document.getElementById('scrF9On').checked;
@@ -715,12 +722,16 @@ function runScreener() {
       s._f46Line = m.line;
       s._f46Dir = m.dir;
       s._f46Pct = m.pct;
+      s._f46Age = m.flipAge;
       if (!m.valid) {
         failReasons.push(`F46: Insufficient data for ${f46Label}`);
       } else if (f46Pos === 'above' && !m.above) {
         failReasons.push(`F46: Close ${fmt2(m.close)} not above ${f46Label} ${m.line.toFixed(2)} (${m.dir === 'up' ? 'uptrend' : 'downtrend'})`);
       } else if (f46Pos === 'below' && !m.below) {
         failReasons.push(`F46: Close ${fmt2(m.close)} not below ${f46Label} ${m.line.toFixed(2)} (${m.dir === 'up' ? 'uptrend' : 'downtrend'})`);
+      } else if (f46Flip > 0 && !(m.flipAge < f46Flip)) {
+        const unit = f46Tf === 'w' ? 'week' : 'day';
+        failReasons.push(`F46: ${f46Label} ${isNaN(m.flipAge) ? `has not flipped ${m.dir === 'up' ? 'up' : 'down'} in the history there is` : `flipped ${m.dir === 'up' ? 'up' : 'down'} ${m.flipAge} ${unit}${m.flipAge === 1 ? '' : 's'} ago`}, not within the last ${f46Flip}`);
       }
     }
 
@@ -1030,6 +1041,7 @@ function renderScreenerTable() {
     const W = document.getElementById('scrF46Tf').value === 'w' ? 'W ' : '';
     cols.push({ key: '_f46Line', label: `${W}Supertrend (${L}, ${Fc})`, fmt: v => fmt2(v) });
     cols.push({ key: '_f46Pct', label: 'Close vs Supertrend', fmt: v => fmtPct(v), cls: v => v >= 0 ? 'positive' : 'negative' });
+    cols.push({ key: '_f46Age', label: `Since flip (${document.getElementById('scrF46Tf').value === 'w' ? 'wks' : 'days'})`, fmt: v => isNaN(v) ? '-' : v });
   }
   if (f10On) {
     cols.push({ key: '_f10MAs', label: 'MA Status', fmt: (v) => {
@@ -1257,6 +1269,7 @@ function resetScreener() {
   document.getElementById('scrF46Factor').value = '3';
   document.getElementById('scrF46Pos').value = 'above';
   document.getElementById('scrF46Tf').value = 'd';
+  document.getElementById('scrF46Flip').value = '0';
   document.getElementById('scrF9Val').value = '60';
   document.getElementById('scrF9MinStk').value = '3';
   document.getElementById('scrF9MinMcap').value = '0';
@@ -1271,10 +1284,10 @@ function exportScreenerCSV() {
   if (screenerResults.length === 0) return;
   const keys = ['symbol','series','sector','industry','close','changePct','vol','turnover',
     'adr','_dynADR','_dynTurnoverSMA_f1','_dynTurnoverSMA_f2','_turnoverToSMA','_f4Hits','_dynCloseSMA','_dynPriceRatio',
-    'high52w','low52w','distFrom52H','distFrom52L','bandPct','marketCap','_indRS','_indMF','_indMFRoc','_perf','_dateChg','_f10MAs','_f42Fast','_f42Slow','_f42Gap','_f46Line','_f46Dir','_f46Pct'];
+    'high52w','low52w','distFrom52H','distFrom52L','bandPct','marketCap','_indRS','_indMF','_indMFRoc','_perf','_dateChg','_f10MAs','_f42Fast','_f42Slow','_f42Gap','_f46Line','_f46Dir','_f46Pct','_f46Age'];
   const labels = ['Symbol','Series','Sector','Industry','Close','Change%','Volume','Turnover',
     'ADR%','DynADR%','F1_SMA_Turnover','F2_SMA_Turnover','Turnover_x_SMA','CoOccur_Hits','SMA_Close','Price_SMA_Ratio',
-    '52W_High','52W_Low','From_52H%','From_52L%','Band','MarketCap_Cr','Industry_RS','Ind_MoneyFlow%','Ind_MoneyFlow_RoC_pp','Performance%','DateRange_Chg%','MA_Status','MA_Fast','MA_Slow','MA_Fast_vs_Slow%','Supertrend','Supertrend_Trend','Close_vs_Supertrend%'];
+    '52W_High','52W_Low','From_52H%','From_52L%','Band','MarketCap_Cr','Industry_RS','Ind_MoneyFlow%','Ind_MoneyFlow_RoC_pp','Performance%','DateRange_Chg%','MA_Status','MA_Fast','MA_Slow','MA_Fast_vs_Slow%','Supertrend','Supertrend_Trend','Close_vs_Supertrend%','Supertrend_Since_Flip'];
   let csv = labels.join(',') + '\n';
   screenerResults.forEach(r => {
     csv += keys.map(k => {

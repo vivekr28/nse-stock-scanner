@@ -135,6 +135,14 @@ test('computeSupertrend reads the latest bar: line, direction, close, distance i
   assert.deepEqual([up.line, up.dir, up.above, up.below], [9.59375, 'up', true, false]);
 });
 
+test('flipAge counts the candles since the trend last flipped to its current direction: 0 = on the latest candle, NaN = it never has', () => {
+  assert.equal(computeSupertrend(HAND, 2, 1).flipAge, 0);                  // flipped down on the last bar (bar 7)
+  assert.equal(computeSupertrend(HAND.slice(0, 7), 2, 1).flipAge, 1);      // flipped up on bar 5, the latest is bar 6
+  assert.equal(computeSupertrend(HAND.slice(0, 6), 2, 1).flipAge, 0);      // bar 5 itself: the flip up
+  assert.ok(isNaN(computeSupertrend(HAND.slice(0, 5), 2, 1).flipAge));     // down since the first bar with an ATR - that start is not a flip
+  assert.ok(isNaN(computeSupertrend(around(rising(5)), 10, 3).flipAge));   // not valid at all
+});
+
 test('the latest close equal to the line is neither above nor below it', () => {
   // a flat stock: ATR 0, both bands sit on the price, the line is the upper band (downtrend) and the close is exactly on it
   const m = computeSupertrend(Array.from({ length: 30 }, () => bar(100, 100, 100)), 10, 3);
@@ -244,7 +252,7 @@ function runWith(over, stocks, partial = false) {
   return { passed: passed.map(s => s.symbol).sort(), failed, byName: Object.fromEntries(passed.concat(failed).map(s => [s.symbol, s])) };
 }
 
-const F46 = (len, factor, pos = 'above', tf = 'd') => ({ scrF46On: true, scrF46Len: len, scrF46Factor: factor, scrF46Pos: pos, scrF46Tf: tf });
+const F46 = (len, factor, pos = 'above', tf = 'd', flip = 0) => ({ scrF46On: true, scrF46Len: len, scrF46Factor: factor, scrF46Pos: pos, scrF46Tf: tf, scrF46Flip: flip });
 const FIXTURE = {
   UP: around(rising(80)),                                                   // steady climb: uptrend
   DOWN: around(falling(80)),                                                // steady fall: downtrend
@@ -324,6 +332,64 @@ test('F46 on the Weekly timeframe judges the weekly candles: the reason says Wee
   assert.deepEqual(runWith({ ...F46(10, 3, 'above'), scrF46Tf: 'monthly' }, stocks).passed, ['TURNING', 'WUP']);   // anything but "w" is Daily
 });
 
+// ─── "just flipped": the trend turned within the last N candles ────────────────
+
+test('flipped within the last N candles keeps only the stocks that turned lately; N = 0 puts no limit on the age', () => {
+  const ageUp = computeSupertrend(FIXTURE.RECOVER, 10, 3).flipAge, ageDown = computeSupertrend(FIXTURE.CRASH, 10, 3).flipAge;
+  assert.ok(ageUp >= 1 && ageUp < 20 && ageDown >= 1 && ageDown < 20, `both turned inside their last 20 bars (${ageUp}, ${ageDown})`);
+  assert.ok(computeSupertrend(FIXTURE.UP, 10, 3).flipAge > 20, 'UP turned up long ago (right after the first bars)');
+  // above + N: RECOVER flipped up ageUp candles ago, so it is in from N = ageUp + 1 and out for N = ageUp
+  assert.deepEqual(runWith(F46(10, 3, 'above', 'd', 0), FIXTURE).passed, ['RECOVER', 'UP']);
+  assert.deepEqual(runWith(F46(10, 3, 'above', 'd', ageUp + 1), FIXTURE).passed, ['RECOVER']);
+  assert.deepEqual(runWith(F46(10, 3, 'above', 'd', ageUp), FIXTURE).passed, []);
+  // below + N: the same for the stock that broke down
+  assert.deepEqual(runWith(F46(10, 3, 'below', 'd', ageDown + 1), FIXTURE).passed, ['CRASH']);
+  assert.deepEqual(runWith(F46(10, 3, 'below', 'd', ageDown), FIXTURE).passed, []);
+  assert.deepEqual(runWith(F46(10, 3, 'below', 'd', 0), FIXTURE).passed, ['CRASH', 'DOWN']);
+});
+
+test('the flip reason says how long ago the trend turned, or that it never has; the age is stored for the column', () => {
+  const ageUp = computeSupertrend(FIXTURE.RECOVER, 10, 3).flipAge;
+  const r = runWith(F46(10, 3, 'above', 'd', 1), FIXTURE);
+  assert.deepEqual(r.passed, ageUp === 0 ? ['RECOVER'] : []);
+  assert.match(r.byName.UP._failReasons.join(' | '), new RegExp(`F46: Supertrend\\(10, 3\\) flipped up ${computeSupertrend(FIXTURE.UP, 10, 3).flipAge} days ago, not within the last 1`));
+  assert.equal(r.byName.UP._f46Age, computeSupertrend(FIXTURE.UP, 10, 3).flipAge);
+  // a stock that has been down since the first bar with an ATR never flipped
+  const never = runWith(F46(10, 3, 'below', 'd', 5), { DOWN: FIXTURE.DOWN });
+  assert.deepEqual(never.passed, []);
+  assert.match(never.byName.DOWN._failReasons.join(' | '), /F46: Supertrend\(10, 3\) has not flipped down in the history there is, not within the last 5/);
+  assert.ok(isNaN(never.byName.DOWN._f46Age));
+});
+
+test('a flip on the very latest candle passes with N = 1; a flip one candle earlier needs N = 2 (singular "1 day ago" in the reason)', () => {
+  const full = [...rising(30, 100, 1), ...falling(15, 129, 4)];            // a climb, then a sharp fall: the trend flips down on one particular bar
+  const flipBar = supertrendSeries(around(full), 10, 3).findIndex((o, i, a) => o && a[i - 1] && a[i - 1].dir === 'up' && o.dir === 'down');
+  assert.ok(flipBar > 30);
+  const upTo = n => ({ S: around(full.slice(0, n)) });
+  assert.deepEqual(runWith(F46(10, 3, 'below', 'd', 1), upTo(flipBar + 1)).passed, ['S']);           // the flip bar is the latest one
+  const one = runWith(F46(10, 3, 'below', 'd', 1), upTo(flipBar + 2));                               // one bar later
+  assert.deepEqual(one.passed, []);
+  assert.match(one.byName.S._failReasons.join(' | '), /flipped down 1 day ago, not within the last 1/);
+  assert.deepEqual(runWith(F46(10, 3, 'below', 'd', 2), upTo(flipBar + 2)).passed, ['S']);
+});
+
+test('on the Weekly timeframe the flip age counts weekly candles', () => {
+  const days = dated(around([...falling(150, 300, 1), ...rising(60, 152, 3)]));                       // 30 weeks down, then 12 weeks up
+  const m = computeSupertrend(days, 10, 3, 'w');
+  assert.equal(m.dir, 'up');
+  assert.ok(m.flipAge >= 1 && m.flipAge < 12, `flipped up within the 12 weekly candles of the rally (${m.flipAge})`);
+  assert.deepEqual(runWith(F46(10, 3, 'above', 'w', m.flipAge + 1), { S: days }).passed, ['S']);
+  const out = runWith(F46(10, 3, 'above', 'w', m.flipAge), { S: days });
+  assert.deepEqual(out.passed, []);
+  assert.match(out.byName.S._failReasons.join(' | '), new RegExp(`F46: Weekly Supertrend\\(10, 3\\) flipped up ${m.flipAge} weeks? ago`));
+  assert.equal(out.byName.S._f46Age, m.flipAge);
+  assert.ok(computeSupertrend(days, 10, 3, 'd').flipAge > m.flipAge * 3, 'the daily flip is older in candles than the weekly one');
+});
+
+test('blank, negative or invalid "flipped within" falls back to 0 (no limit)', () => {
+  for (const flip of ['', 'abc', '-3']) assert.deepEqual(runWith(F46(10, 3, 'above', 'd', flip), FIXTURE).passed, ['RECOVER', 'UP'], `"${flip}"`);
+});
+
 test('F46 off: nothing is filtered and no F46 reason appears', () => {
   const off = runWith({}, FIXTURE);
   assert.deepEqual(off.passed, ['CRASH', 'DOWN', 'NEW', 'RECOVER', 'UP']);
@@ -352,14 +418,14 @@ test('F46 is counted as an active filter and in the Technicals tab badge', () =>
 test('presets capture and restore F46 (on, length, factor, position); "— Select preset —" resets it', () => {
   const dom = installFakeDom(sb, {});
   const el = dom.el;
-  el('scrF46On').checked = true; el('scrF46Len').value = '14'; el('scrF46Factor').value = '2.5'; el('scrF46Pos').value = 'below'; el('scrF46Tf').value = 'w';
+  el('scrF46On').checked = true; el('scrF46Len').value = '14'; el('scrF46Factor').value = '2.5'; el('scrF46Pos').value = 'below'; el('scrF46Tf').value = 'w'; el('scrF46Flip').value = '3';
   const state = capturePresetState();
-  assert.deepEqual([state.scrF46On, state.scrF46Len, state.scrF46Factor, state.scrF46Pos, state.scrF46Tf], [true, '14', '2.5', 'below', 'w']);
-  el('scrF46On').checked = false; el('scrF46Len').value = '10'; el('scrF46Factor').value = '3'; el('scrF46Pos').value = 'above'; el('scrF46Tf').value = 'd';
+  assert.deepEqual([state.scrF46On, state.scrF46Len, state.scrF46Factor, state.scrF46Pos, state.scrF46Tf, state.scrF46Flip], [true, '14', '2.5', 'below', 'w', '3']);
+  el('scrF46On').checked = false; el('scrF46Len').value = '10'; el('scrF46Factor').value = '3'; el('scrF46Pos').value = 'above'; el('scrF46Tf').value = 'd'; el('scrF46Flip').value = '0';
   applyPresetState(state);
-  assert.deepEqual([el('scrF46On').checked, el('scrF46Len').value, el('scrF46Factor').value, el('scrF46Pos').value, el('scrF46Tf').value], [true, '14', '2.5', 'below', 'w']);
+  assert.deepEqual([el('scrF46On').checked, el('scrF46Len').value, el('scrF46Factor').value, el('scrF46Pos').value, el('scrF46Tf').value, el('scrF46Flip').value], [true, '14', '2.5', 'below', 'w', '3']);
   applyPresetState(vm.runInContext('DEFAULT_FILTER_STATE', sb));
-  assert.deepEqual([el('scrF46On').checked, el('scrF46Len').value, el('scrF46Factor').value, el('scrF46Pos').value, el('scrF46Tf').value], [false, '10', '3', 'above', 'd']);
+  assert.deepEqual([el('scrF46On').checked, el('scrF46Len').value, el('scrF46Factor').value, el('scrF46Pos').value, el('scrF46Tf').value, el('scrF46Flip').value], [false, '10', '3', 'above', 'd', '0']);
 });
 
 test('presets saved before F46 existed load fine and leave its controls alone', () => {
@@ -369,13 +435,13 @@ test('presets saved before F46 existed load fine and leave its controls alone', 
   assert.deepEqual([dom.el('scrF46On').checked, dom.el('scrF46Len').value], [true, '9']);
 });
 
-test('Reset puts F46 back to off, 10, 3, "above" and Daily', () => {
+test('Reset puts F46 back to off, 10, 3, "above", Daily and no flip limit', () => {
   const dom = installFakeDom(sb, {});
   const el = dom.el;
-  el('scrF46On').checked = true; el('scrF46Len').value = '5'; el('scrF46Factor').value = '1.2'; el('scrF46Pos').value = 'below'; el('scrF46Tf').value = 'w';
+  el('scrF46On').checked = true; el('scrF46Len').value = '5'; el('scrF46Factor').value = '1.2'; el('scrF46Pos').value = 'below'; el('scrF46Tf').value = 'w'; el('scrF46Flip').value = '4';
   sb.runScreener = () => {}; sb.updateFilterBadge = () => {};
   sb.resetScreener();
-  assert.deepEqual([el('scrF46On').checked, el('scrF46Len').value, el('scrF46Factor').value, el('scrF46Pos').value, el('scrF46Tf').value], [false, '10', '3', 'above', 'd']);
+  assert.deepEqual([el('scrF46On').checked, el('scrF46Len').value, el('scrF46Factor').value, el('scrF46Pos').value, el('scrF46Tf').value, el('scrF46Flip').value], [false, '10', '3', 'above', 'd', '0']);
 });
 
 test('the As of Date tab keeps its own filter set: it has no Supertrend control and js/asof-scan.js does not touch scrF46', () => {
@@ -389,6 +455,7 @@ test('index.html: the F46 card sits in the Technicals tab below the F41 card, AT
   assert.ok(pane.indexOf('id="scrF41On"') < pane.indexOf('id="scrF46On"'), 'after the F41 card');
   assert.match(html, /id="scrF46Len" value="10"/);
   assert.match(html, /id="scrF46Factor" value="3"/);
+  assert.match(html, /id="scrF46Flip" value="0" min="0"/);
   assert.match(html, /<select id="scrF46Tf"[^>]*>\s*<option value="d" selected>Daily<\/option>\s*<option value="w">Weekly<\/option>/);
   assert.match(html, /<select id="scrF46Pos"[^>]*>\s*<option value="above" selected>[^<]*<\/option>\s*<option value="below">/);
 });
